@@ -2,13 +2,13 @@
 
 # AgentBrook Helper
 
-**macOS 桌面 AI 智能体 —— 一个悬浮气泡，打开即是一个完整的智能体运行时。**
+**跨平台桌面 AI 智能体 —— 一个悬浮气泡，打开即是一个完整的智能体运行时。**
 
 <img src="assets/banner.webp" alt="AgentBrook Helper —— 基于 Microsoft Agent Framework 的桌面 AI 智能体" width="100%">
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4.svg)](https://dotnet.microsoft.com/download)
-[![Platform](https://img.shields.io/badge/platform-macOS-000000.svg)]()
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-000000.svg)]()
 
 [English](./README.md) · 简体中文
 
@@ -56,11 +56,11 @@ AgentBrook Helper 是一个真正跑在你机器上的 AI 智能体的桌面客�
 |---|---|
 | `AgentBrook.Agent.Core` | 智能体、工具、记忆、技能、MCP、团队编排 |
 | `AgentBrook.Agent` | 控制台宿主（REPL） |
-| `AgentBrook.Helper` | macOS 桌面宿主（Avalonia） |
+| `AgentBrook.Helper` | 桌面宿主（Avalonia）—— macOS 有打包脚本，Windows 可直接运行 |
 
 ## 快速开始
 
-前置条件：macOS + [.NET 10 SDK](https://dotnet.microsoft.com/download)。
+前置条件：[.NET 10 SDK](https://dotnet.microsoft.com/download)。在 macOS 上开发与测试；桌面客户端同样可在 Windows 上运行。
 
 ```bash
 git clone https://github.com/ChenGan666/AgentBrook-Helper.git
@@ -74,9 +74,21 @@ cd AgentBrook-Helper
 ```bash
 cd src
 dotnet build AgentBrook.slnx
+```
+
+**macOS** —— 打包并签名 `.app`：
+
+```bash
 cd AgentBrook.Helper
 ./build-mac-app.sh        # 生成并签名 macos/AgentBrook.Helper.app
 open macos/AgentBrook.Helper.app
+```
+
+**Windows** —— 直接运行桌面客户端（无需打包脚本）：
+
+```bat
+cd AgentBrook.Helper
+dotnet run
 ```
 
 **3. 屏幕右上角出现悬浮气泡。** 双击它，开始对话。
@@ -90,7 +102,7 @@ cd src/AgentBrook.Agent && dotnet run
 
 </details>
 
-> 桌面外壳面向 macOS（依赖 `build-mac-app.sh` 打包 .app 并签名）。核心类库与控制台宿主跨平台，Avalonia 原生支持 Windows / Linux——欢迎贡献。
+> 三个项目均通过 Avalonia 桌面包面向 `net10.0`，未涉及任何平台专属 API。macOS 附带打包脚本；Windows 上直接 `dotnet run` 即可运行。Linux 理论上同样可用但尚未验证——欢迎反馈与贡献。
 
 ## 配置说明
 
@@ -147,14 +159,14 @@ AgentBrook-Helper/
     │   ├── Infrastructure/          ← 工作区沙箱、AgentFactory、ProviderSettings
     │   ├── Memory/  Skills/  Tools/  Team/  Mcp/  Configuration/
     ├── AgentBrook.Agent/            ← 控制台宿主（REPL）
-    └── AgentBrook.Helper/           ← macOS 桌面宿主（Avalonia）
+    └── AgentBrook.Helper/           ← 桌面宿主（Avalonia）；macOS + Windows
         ├── BubbleWindow.axaml(.cs)  ← 悬浮气泡：状态动画、拖拽、位置记忆
         ├── MainWindow.axaml(.cs)    ← 对话窗：聊天流、状态条、审批卡片
         ├── ModelSettingsWindow      ← 设置窗口：常规 / 外观 / 模型设置
         ├── MarkdownView.cs          ← 自研 Markdown → Avalonia 渲染器
         ├── AssistantController.cs   ← 气泡与对话窗共享的控制器
         ├── UiPrefs.cs               ← UI 偏好持久化
-        └── build-mac-app.sh         ← .app 打包签名脚本
+        └── build-mac-app.sh         ← macOS .app 打包签名脚本
 ```
 
 ## 文档

@@ -2,13 +2,13 @@
 
 # AgentBrook Helper
 
-**A macOS desktop AI agent — a floating bubble that opens into a full agent runtime.**
+**A cross-platform desktop AI agent — a floating bubble that opens into a full agent runtime.**
 
 <img src="assets/banner.webp" alt="AgentBrook Helper — a desktop AI agent built on Microsoft Agent Framework" width="100%">
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4.svg)](https://dotnet.microsoft.com/download)
-[![Platform](https://img.shields.io/badge/platform-macOS-000000.svg)]()
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-000000.svg)]()
 
 </div>
 
@@ -54,11 +54,11 @@ Anything requiring a human is routed through the `IBrookInteraction` interface: 
 |---|---|
 | `AgentBrook.Agent.Core` | Agent, tools, memory, skills, MCP, team orchestration |
 | `AgentBrook.Agent` | Console host (REPL) |
-| `AgentBrook.Helper` | macOS desktop host (Avalonia) |
+| `AgentBrook.Helper` | Desktop host (Avalonia) — packaged on macOS, runs as-is on Windows |
 
 ## Quick start
 
-Requires macOS and the [.NET 10 SDK](https://dotnet.microsoft.com/download).
+Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download). Built and tested on macOS; the desktop client also runs on Windows.
 
 ```bash
 git clone https://github.com/ChenGan666/AgentBrook-Helper.git
@@ -72,9 +72,21 @@ cd AgentBrook-Helper
 ```bash
 cd src
 dotnet build AgentBrook.slnx
+```
+
+**macOS** — package and sign a `.app`:
+
+```bash
 cd AgentBrook.Helper
 ./build-mac-app.sh        # produces and signs macos/AgentBrook.Helper.app
 open macos/AgentBrook.Helper.app
+```
+
+**Windows** — run the desktop client directly (no packaging script involved):
+
+```bat
+cd AgentBrook.Helper
+dotnet run
 ```
 
 **3. A bubble appears in the top-right corner.** Double-click it and start talking.
@@ -88,7 +100,7 @@ cd src/AgentBrook.Agent && dotnet run
 
 </details>
 
-> The desktop shell targets macOS (it depends on `build-mac-app.sh` for `.app` packaging and signing). The core library and console host are cross-platform, and Avalonia supports Windows and Linux natively — contributions welcome.
+> Both hosts and the core target `net10.0` through Avalonia's desktop package, so no platform-specific APIs are involved. macOS ships a packaging script; on Windows the client runs straight from `dotnet run`. Linux should work too but is untested — reports and contributions welcome.
 
 ## Configuration
 
@@ -145,14 +157,14 @@ AgentBrook-Helper/
     │   ├── Infrastructure/          ← workspace sandbox, agent factory, provider settings
     │   ├── Memory/  Skills/  Tools/  Team/  Mcp/  Configuration/
     ├── AgentBrook.Agent/            ← console host (REPL)
-    └── AgentBrook.Helper/           ← macOS desktop host (Avalonia)
+    └── AgentBrook.Helper/           ← desktop host (Avalonia); macOS + Windows
         ├── BubbleWindow.axaml(.cs)  ← floating bubble: animation, drag, position memory
         ├── MainWindow.axaml(.cs)    ← chat window: stream, status bar, approval cards
         ├── ModelSettingsWindow      ← settings: general / appearance / models
         ├── MarkdownView.cs          ← hand-written Markdown → Avalonia renderer
         ├── AssistantController.cs   ← controller shared by bubble and window
         ├── UiPrefs.cs               ← UI preference persistence
-        └── build-mac-app.sh         ← .app packaging and signing
+        └── build-mac-app.sh         ← macOS .app packaging and signing
 ```
 
 ## Documentation
