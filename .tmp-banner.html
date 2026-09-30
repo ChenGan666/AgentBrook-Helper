@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920, height=1080">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root { --accent: #c8a15a; --paper: #050505; --ink: #f3efe7;
+    --muted: rgba(243,239,231,0.58); --line: rgba(243,239,231,0.14); }
+  body { width: 1920px; height: 1080px; overflow: hidden; background: var(--paper);
+    font-family: Georgia, "Times New Roman", serif; color: var(--ink); }
+  .page { width: 100%; height: 100%; padding: 92px 120px 78px;
+    display: grid; grid-template-columns: 1fr 540px; gap: 96px; position: relative; }
+  .page::before { content: ""; position: absolute; inset: 42px; border: 1px solid var(--line);
+    background-image: linear-gradient(115deg, rgba(255,255,255,0.035), transparent 34%, rgba(200,161,90,0.04));
+    pointer-events: none; }
+  .page::after { content: ""; position: absolute; right: 0; top: 0; width: 42%; height: 100%;
+    background: linear-gradient(180deg, #050505 0%, #090806 100%); z-index: 0; }
+  .hero, .side { position: relative; z-index: 1; }
+  .kicker { display: flex; align-items: center; gap: 24px; margin-bottom: 82px;
+    font-family: "Avenir Next", "Helvetica Neue", Arial, sans-serif;
+    font-size: 24px; font-weight: 700; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--accent); }
+  .kicker::before { content: ""; width: 96px; height: 3px; background: var(--accent); }
+  h1 { max-width: 940px; font-size: 100px; line-height: 0.98;
+    letter-spacing: -0.035em; font-weight: 700; }
+  h1 em { font-style: normal; color: var(--accent); }
+  .statement { max-width: 880px; margin-top: 52px;
+    font-family: "Avenir Next", "Helvetica Neue", Arial, sans-serif;
+    font-size: 30px; line-height: 1.42; color: var(--muted); font-weight: 600; }
+  .meta { display: flex; gap: 18px; margin-top: 70px; font-family: "Avenir Next", Arial, sans-serif; }
+  .pill { min-width: 132px; border: 1px solid rgba(243,239,231,0.16); padding: 18px 22px;
+    font-size: 22px; font-weight: 700; color: rgba(243,239,231,0.62);
+    background: rgba(255,255,255,0.02); text-align: center; }
+  .side { height: 100%; padding: 86px 0 58px; display: flex; flex-direction: column;
+    justify-content: space-between; color: #f2efe8; }
+  .side-title { font-family: "Avenir Next", "Helvetica Neue", Arial, sans-serif;
+    font-size: 24px; line-height: 1.35; color: rgba(242,239,232,0.62); max-width: 440px; }
+  .side-title strong { color: #fffaf0; font-weight: 800; }
+  .tech-list { display: grid; gap: 18px; }
+  .tech-card { border-top: 1px solid rgba(242,239,232,0.18); padding-top: 22px;
+    display: grid; grid-template-columns: 78px 1fr; gap: 22px; align-items: start; }
+  .tech-icon { font-family: Georgia, serif; font-size: 34px; line-height: 1; color: var(--accent); }
+  .tech-name { font-family: "Avenir Next", Arial, sans-serif; font-size: 25px;
+    font-weight: 800; color: #fffaf0; }
+  .tech-desc { margin-top: 8px; font-family: "Avenir Next", Arial, sans-serif;
+    font-size: 20px; line-height: 1.35; color: rgba(242,239,232,0.62); }
+  .version-tag { font-family: "Avenir Next", Arial, sans-serif; font-size: 22px;
+    font-weight: 700; color: rgba(242,239,232,0.48); }
+</style>
+</head>
+<body>
+<main class="page">
+  <section class="hero">
+    <div class="kicker">Desktop AI Agent · Cross-platform</div>
+    <h1>AgentBrook<br><em>Helper</em></h1>
+    <p class="statement">A floating bubble that opens into a full agent runtime — memory, skills, tools, and approvals, always one double-click away.</p>
+    <div class="meta">
+      <div class="pill">MIT</div>
+      <div class="pill">macOS</div>
+      <div class="pill">Windows</div>
+    </div>
+  </section>
+  <aside class="side">
+    <div class="side-title"><strong>Not a chat wrapper.</strong><br>An agent runtime that happens to live on your desktop.</div>
+    <div class="tech-list">
+      <div class="tech-card"><div class="tech-icon">01</div><div>
+        <div class="tech-name">Microsoft Agent Framework</div>
+        <div class="tech-desc">ChatClientAgent + AIContextProvider + AIFunction tooling</div></div></div>
+      <div class="tech-card"><div class="tech-icon">02</div><div>
+        <div class="tech-name">Avalonia 12 · .NET 10</div>
+        <div class="tech-desc">One desktop shell, cross-platform by construction</div></div></div>
+      <div class="tech-card"><div class="tech-icon">03</div><div>
+        <div class="tech-name">55 built-in tools</div>
+        <div class="tech-desc">Files, shell, memory, skills, MCP, team orchestration</div></div></div>
+    </div>
+    <div class="version-tag">Three hosts · One agent core</div>
+  </aside>
+</main>
+</body>
+</html>
