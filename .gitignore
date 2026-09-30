@@ -1,0 +1,57 @@
+# ───────── .NET ─────────
+bin/
+obj/
+artifacts/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.binlog
+doc/
+scr/README.md
+
+# ───────── IDE / 编辑器 ─────────
+.vs/
+.idea/
+.vscode/
+*.swp
+*.swo
+.zcode/
+
+# ───────── OS ─────────
+.DS_Store
+Thumbs.db
+
+# ───────── 桌面客户端构建产物（.app 包由 build-mac-app.sh 生成）─────────
+src/AgentBrook.Helper/macos/
+
+# ───────── 运行期工作区数据（首次运行自动生成；含个人数据不入库）─────────
+src/AgentBrook.Agent/workspace/
+src/AgentBrook.Helper/workspace/
+
+# 若需保留 workspace 目录骨架，可改用精确排除：
+# **/workspace/session.json
+# **/workspace/models.json
+# **/workspace/settings.json
+# **/workspace/bubble-pos.json
+# **/workspace/mcp-user.json
+# **/workspace/memory/
+# **/workspace/skills/
+# **/workspace/attachments/
+# **/workspace/projects/
+# **/workspace/scripts/
+# **/workspace/reports/
+# **/workspace/shared/
+# **/workspace/discussion/
+# **/workspace/notes/
+# **/workspace/travel/
+# **/workspace/workers/
+
+# ───────── 日志 / 临时 ─────────
+*.log
+/tmp/
+
+# ───────── 敏感信息兜底 ─────────
+appsettings.*.Local.json
+*.env
+!*.env.example

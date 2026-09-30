@@ -1,0 +1,69 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="AgentBrook.Helper.BubbleWindow"
+        Title="Brook"
+        Width="120" Height="120"
+        WindowDecorations="None"
+        TransparencyLevelHint="Transparent"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        ShowActivated="False"
+        Topmost="True"
+        CanResize="False">
+
+    <!-- 全部子元素显式尺寸 + 居中：所有圆形严格同心于 (60,60)，光晕不越界 -->
+    <Panel>
+        <Panel x:Name="Root" Width="120" Height="120">
+            <!-- 外圈光晕（呼吸动画；104x104，比主体大 8px，留在窗口内不裁剪） -->
+            <Ellipse x:Name="GlowOuter" Width="104" Height="104"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"
+                     Fill="#4a9eff" Opacity="0.22">
+                <Ellipse.Styles>
+                    <Style Selector="Ellipse">
+                        <Style.Animations>
+                            <Animation Duration="0:0:1.8" IterationCount="Infinite" PlaybackDirection="Alternate"
+                                       Easing="SineEaseInOut">
+                                <KeyFrame Cue="0%"><Setter Property="Opacity" Value="0.12"/></KeyFrame>
+                                <KeyFrame Cue="100%"><Setter Property="Opacity" Value="0.38"/></KeyFrame>
+                            </Animation>
+                        </Style.Animations>
+                    </Style>
+                </Ellipse.Styles>
+            </Ellipse>
+
+            <!-- 主体圆 88x88，同心 -->
+            <Ellipse x:Name="Body" Width="88" Height="88"
+                     HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Ellipse.Fill>
+                    <LinearGradientBrush StartPoint="0%,0%" EndPoint="60%,100%">
+                        <GradientStop Color="#6bb9ff" Offset="0"/>
+                        <GradientStop Color="#2f7bff" Offset="1"/>
+                    </LinearGradientBrush>
+                </Ellipse.Fill>
+            </Ellipse>
+
+
+            <!-- 工作呼吸层：半透明白膜随思考起伏（Thinking/CallingTool 时可见） -->
+            <Ellipse x:Name="WorkOverlay" Width="88" Height="88"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"
+                     Fill="#40ffffff" IsVisible="False">
+                <Ellipse.Styles>
+                    <Style Selector="Ellipse">
+                        <Style.Animations>
+                            <Animation Duration="0:0:1.4" IterationCount="Infinite" PlaybackDirection="Alternate"
+                                       Easing="SineEaseInOut">
+                                <KeyFrame Cue="0%"><Setter Property="Opacity" Value="0.10"/></KeyFrame>
+                                <KeyFrame Cue="100%"><Setter Property="Opacity" Value="0.55"/></KeyFrame>
+                            </Animation>
+                        </Style.Animations>
+                    </Style>
+                </Ellipse.Styles>
+            </Ellipse>
+
+            <!-- 中心图标（状态切换） -->
+            <PathIcon x:Name="BubbleIcon" Width="34" Height="34"
+                      HorizontalAlignment="Center" VerticalAlignment="Center"
+                      Foreground="#ffffff"/>
+        </Panel>
+    </Panel>
+</Window>

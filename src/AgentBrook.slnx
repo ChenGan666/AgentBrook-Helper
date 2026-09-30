@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="AgentBrook.Agent.Core/AgentBrook.Agent.Core.csproj" />
+  <Project Path="AgentBrook.Agent/AgentBrook.Agent.csproj" />
+  <Project Path="AgentBrook.Helper/AgentBrook.Helper.csproj" />
+</Solution>

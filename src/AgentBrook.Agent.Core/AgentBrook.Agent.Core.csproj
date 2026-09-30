@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>AgentBrook.Agent</RootNamespace>
+    <Description>AgentBrook 通用智能体核心：MAF ChatClientAgent + Markdown 记忆 + 技能 + 文件/命令行工具 + MCP + HITL 交互抽象。</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Agents.AI" Version="1.22.0" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="*" />
+    <PackageReference Include="ModelContextProtocol" Version="*" />
+  </ItemGroup>
+
+</Project>

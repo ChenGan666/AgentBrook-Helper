@@ -1,0 +1,269 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="AgentBrook.Helper.MainWindow"
+        RequestedThemeVariant="Dark"
+        Title="Brook 助手"
+        Width="520" Height="800"
+        MinWidth="420" MinHeight="560"
+        Background="#1f1f1f"
+        FontFamily="PingFang SC, Hiragino Sans GB, Microsoft YaHei"
+        TransparencyLevelHint="AcrylicBlur">
+
+    <Window.Styles>
+        <!-- 图标按钮 -->
+        <Style Selector="Button.iconBtn">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Padding" Value="8"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="Button.iconBtn:pointerover">
+            <Setter Property="Background" Value="#333333"/>
+        </Style>
+
+        <!-- 用户消息（右对齐胶囊） -->
+        <Style Selector="Border.userBubble">
+            <Setter Property="Background" Value="#393939"/>
+            <Setter Property="CornerRadius" Value="16,16,4,16"/>
+            <Setter Property="Padding" Value="13,9"/>
+            <Setter Property="Margin" Value="64,0,0,0"/>
+            <Setter Property="HorizontalAlignment" Value="Right"/>
+            <Setter Property="MaxWidth" Value="400"/>
+        </Style>
+        <Style Selector="Border.userBubble > TextBlock">
+            <Setter Property="Foreground" Value="#f0f0f0"/>
+            <Setter Property="FontSize" Value="15"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+
+        <!-- 助手内容（左，直接排在暗底上） -->
+        <Style Selector="Border.assistantBlock">
+            <Setter Property="Background" Value="#2b2b2b"/>
+            <Setter Property="CornerRadius" Value="4,14,14,14"/>
+            <Setter Property="Padding" Value="14,10"/>
+            <Setter Property="Margin" Value="0,0,48,0"/>
+            <Setter Property="HorizontalAlignment" Value="Left"/>
+            <Setter Property="MaxWidth" Value="420"/>
+        </Style>
+
+        <!-- 过程行（思考/工具/结果，弱化灰） -->
+        <Style Selector="TextBlock.procLine">
+            <Setter Property="Foreground" Value="#8a8a8a"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Margin" Value="2,0"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+
+        <!-- 错误 -->
+        <Style Selector="Border.errorBox">
+            <Setter Property="Background" Value="#33231f"/>
+            <Setter Property="CornerRadius" Value="12"/>
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="Border.errorBox > TextBlock">
+            <Setter Property="Foreground" Value="#ff8a80"/>
+            <Setter Property="FontSize" Value="13"/>
+        </Style>
+
+        <!-- HITL 卡片 -->
+        <Style Selector="Border.card">
+            <Setter Property="Background" Value="#262626"/>
+            <Setter Property="BorderBrush" Value="#5a5a5a"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="12"/>
+            <Setter Property="Padding" Value="14"/>
+            <Setter Property="Margin" Value="0,0,24,0"/>
+        </Style>
+        <Style Selector="Border.card.ask">
+            <Setter Property="BorderBrush" Value="#8a6d1d"/>
+        </Style>
+        <Style Selector="Border.card.resolved">
+            <Setter Property="Opacity" Value="0.55"/>
+            <Setter Property="BorderThickness" Value="1"/>
+        </Style>
+        <!-- 审批卡按钮：主行动=主蓝；高级授权=琥珀描边；拒绝=中性次级 -->
+        <Style Selector="Button.actionOk">
+            <Setter Property="Background" Value="#2f7bff"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Padding" Value="18,8"/>
+            <Setter Property="CornerRadius" Value="9"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+        <Style Selector="Button.actionOk:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#4a8cff"/>
+        </Style>
+        <Style Selector="Button.actionOk:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="#1f66e0"/>
+        </Style>
+        <Style Selector="Button.actionFull">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#d29922"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Padding" Value="18,8"/>
+            <Setter Property="CornerRadius" Value="9"/>
+            <Setter Property="BorderBrush" Value="#8a6d1d"/>
+            <Setter Property="BorderThickness" Value="1"/>
+        </Style>
+        <Style Selector="Button.actionFull:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#3a3220"/>
+        </Style>
+        <Style Selector="Button.actionNo">
+            <Setter Property="Background" Value="#2b2b2b"/>
+            <Setter Property="Foreground" Value="#e6e6e6"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Padding" Value="18,8"/>
+            <Setter Property="CornerRadius" Value="9"/>
+            <Setter Property="BorderBrush" Value="#4a4a4a"/>
+            <Setter Property="BorderThickness" Value="1"/>
+        </Style>
+        <Style Selector="Button.actionNo:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#383838"/>
+        </Style>
+        <Style Selector="Button.choiceChip">
+            <Setter Property="Background" Value="#2b2b2b"/>
+            <Setter Property="Foreground" Value="#d5d5d5"/>
+            <Setter Property="BorderBrush" Value="#4a4a4a"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="14"/>
+            <Setter Property="Padding" Value="14,7"/>
+            <Setter Property="FontSize" Value="13.5"/>
+        </Style>
+        <Style Selector="Button.choiceChip:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#383838"/>
+            <Setter Property="BorderBrush" Value="#8a6d1d"/>
+            <Setter Property="Foreground" Value="#f0f0f0"/>
+        </Style>
+        <!-- 输入框：任何状态（聚焦/悬停）都保持透明无边框 -->
+        <Style Selector="TextBox.plainInput">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="CaretBrush" Value="#2f7bff"/>
+        </Style>
+        <Style Selector="TextBox.plainInput:focus /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="BoxShadow" Value="0 0 0 0 Transparent"/>
+        </Style>
+        <Style Selector="TextBox.plainInput:pointerover /template/ Border#PART_BorderElement">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+        <!-- 输入区工具行：附加/开关类小按钮 -->
+        <Style Selector="Button.toolChip">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#9a9a9a"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Padding" Value="9,6"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+        <Style Selector="Button.toolChip:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#333333"/>
+        </Style>
+        <!-- 下拉菜单项 -->
+        <Style Selector="Button.menuItem">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#e6e6e6"/>
+            <Setter Property="FontSize" Value="13.5"/>
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="CornerRadius" Value="7"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+        </Style>
+        <Style Selector="Button.menuItem:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#383838"/>
+        </Style>
+        <!-- 附件 chip -->
+        <Style Selector="Border.attachChip">
+            <Setter Property="Background" Value="#333333"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="6,4"/>
+        </Style>
+        <!-- 发送按钮：白底黑箭头方块 -->
+        <Style Selector="Button.sendBtn">
+            <Setter Property="Background" Value="#f0f0f0"/>
+            <Setter Property="CornerRadius" Value="10"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="Button.sendBtn:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#ffffff"/>
+        </Style>
+        <Style Selector="Button.sendBtn:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="#d8d8d8"/>
+        </Style>
+    </Window.Styles>
+
+    <Grid RowDefinitions="Auto,*,Auto">
+
+        <!-- 顶栏 -->
+        <Border Grid.Row="0" Background="#252525" Padding="14,10"
+                BorderBrush="#333333" BorderThickness="0,0,0,1">
+            <DockPanel>
+                <StackPanel Orientation="Horizontal" Spacing="4" DockPanel.Dock="Right" VerticalAlignment="Center">
+                    <Button x:Name="NewBtn" Classes="iconBtn" ToolTip.Tip="开启新对话">
+                        <PathIcon Data="{StaticResource Icon.Compose}" Width="16" Height="16"/>
+                    </Button>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                    <Border x:Name="StatusPill" CornerRadius="6" Padding="8,3" Background="#2b2b2b">
+                        <TextBlock x:Name="StatusText" Text="启动中…" FontSize="12.5" Foreground="#9a9a9a"/>
+                    </Border>
+                    <TextBlock x:Name="TokenText" Text="" FontSize="12" Foreground="#8a8a8a"
+                               VerticalAlignment="Center" IsVisible="False"/>
+                    <TextBlock x:Name="AgentNameText" Text="Brook" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"
+                               Foreground="#e6e6e6"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- 聊天流 -->
+        <ScrollViewer Grid.Row="1" x:Name="ChatScroll" Padding="16,14,16,8">
+            <StackPanel x:Name="ChatPanel" Spacing="10"/>
+        </ScrollViewer>
+
+        <!-- 输入区：大圆角容器，上输入下工具行 -->
+        <Border Grid.Row="2" Background="#252525" Padding="12,8,12,12">
+            <Border CornerRadius="16" Background="#292929" BorderBrush="#3a3a3a"
+                    BorderThickness="1" Padding="14,8,10,8">
+                <Grid RowDefinitions="Auto,*,Auto" RowSpacing="4">
+                    <StackPanel Grid.Row="0" x:Name="AttachmentBar" Orientation="Horizontal"
+                                Spacing="6" IsVisible="False"/>
+                    <TextBox Grid.Row="1" x:Name="InputBox" Classes="plainInput" Watermark="输入消息，回车发送"
+                             FontSize="14.5" Foreground="#e6e6e6" Background="Transparent"
+                             BorderThickness="0" MinHeight="40" Padding="4,6"
+                             TextWrapping="Wrap" AcceptsReturn="False" KeyDown="OnInputKeyDown"/>
+                    <Grid Grid.Row="2" ColumnDefinitions="Auto,Auto,*,Auto,Auto" ColumnSpacing="4">
+                        <Button Grid.Column="0" x:Name="PlusBtn" Classes="toolChip" ToolTip.Tip="添加附件（或直接粘贴图片）">
+                            <PathIcon Data="{StaticResource Icon.Plus}" Width="16" Height="16"/>
+                        </Button>
+                        <Button Grid.Column="1" x:Name="FullAccessBtn" Classes="toolChip" ToolTip.Tip="开启后操作自动批准，重启复位">
+                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                <PathIcon x:Name="FullAccessIcon" Data="{StaticResource Icon.Shield}" Width="14" Height="14"/>
+                                <TextBlock x:Name="FullAccessText" Text="完全访问"/>
+                                <PathIcon Data="{StaticResource Icon.ChevronDown}" Width="10" Height="10"/>
+                            </StackPanel>
+                        </Button>
+                        <Button Grid.Column="3" x:Name="ModelChip" Classes="toolChip" ToolTip.Tip="切换模型">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <TextBlock x:Name="ModelChipText" Text="模型"/>
+                                <PathIcon Data="{StaticResource Icon.ChevronDown}" Width="10" Height="10"/>
+                            </StackPanel>
+                        </Button>
+                        <Button Grid.Column="4" x:Name="SendBtn" Classes="sendBtn"
+                                Width="34" Height="34" Margin="6,0,0,0" ToolTip.Tip="发送">
+                            <PathIcon Data="{StaticResource Icon.Send}" Width="16" Height="16" Foreground="#111111"/>
+                        </Button>
+                    </Grid>
+                </Grid>
+            </Border>
+        </Border>
+
+    </Grid>
+</Window>
