@@ -60,6 +60,19 @@ public sealed class AgentOptions
 
     /// <summary>技能市场索引 URL（JSON：{"skills":[{"name","description","url"}]}）。留空表示未启用。</summary>
     public string? SkillMarketUrl { get; set; }
+
+    /// <summary>
+    /// 子 Agent（delegate_task 委派）使用的模型名；留空取模型清单首个（约定为轻量模型）。
+    /// </summary>
+    public string? SubAgentModel { get; set; }
+
+    /// <summary>
+    /// 会话摘要压缩使用的模型名；留空取模型清单首个（约定为轻量模型）。
+    /// </summary>
+    public string? SummarizeModel { get; set; }
+
+    /// <summary>历史字符总量超过该预算时触发自动压缩（摘要+裁剪）。</summary>
+    public long ContextBudgetChars { get; set; } = 220_000;
 }
 
 /// <summary>MCP 服务器接入配置（stdio 传输）。</summary>

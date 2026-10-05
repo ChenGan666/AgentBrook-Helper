@@ -112,24 +112,24 @@
         <Border Grid.Column="0" Background="#232323" BorderBrush="#333333" BorderThickness="0,0,1,0">
             <ScrollViewer>
                 <StackPanel Margin="10,18,10,10">
-                    <TextBlock Text="基础设置" Classes="navGroup"/>
+                    <TextBlock x:Name="NavGroupBasic" Text="基础设置" Classes="navGroup"/>
                     <RadioButton x:Name="NavGeneral" Classes="navItem" GroupName="nav" IsChecked="True">
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <PathIcon Data="{StaticResource Icon.Settings}" Width="15" Height="15"/>
-                            <TextBlock Text="常规"/>
+                            <TextBlock x:Name="NavGeneralText" Text="常规"/>
                         </StackPanel>
                     </RadioButton>
                     <RadioButton x:Name="NavAppearance" Classes="navItem" GroupName="nav" Margin="0,2,0,0">
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <PathIcon Data="{StaticResource Icon.Sparkle}" Width="15" Height="15"/>
-                            <TextBlock Text="外观"/>
+                            <TextBlock x:Name="NavAppearanceText" Text="外观"/>
                         </StackPanel>
                     </RadioButton>
-                    <TextBlock Text="模型" Classes="navGroup"/>
+                    <TextBlock x:Name="NavGroupModels" Text="模型" Classes="navGroup"/>
                     <RadioButton x:Name="NavModels" Classes="navItem" GroupName="nav">
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <PathIcon Data="{StaticResource Icon.Swap}" Width="15" Height="15"/>
-                            <TextBlock Text="模型设置"/>
+                            <TextBlock x:Name="NavModelsText" Text="模型设置"/>
                         </StackPanel>
                     </RadioButton>
                 </StackPanel>
@@ -141,18 +141,24 @@
 
             <!-- 常规 -->
             <StackPanel x:Name="PageGeneral" IsVisible="False" Spacing="6">
-                <TextBlock Text="常规" Classes="pageTitle"/>
-                <TextBlock Text="助手身份与交流偏好。" Classes="pageDesc" Margin="0,2,0,14"/>
+                <TextBlock x:Name="GeneralTitle" Text="常规" Classes="pageTitle"/>
+                <TextBlock x:Name="GeneralDesc" Text="助手身份与交流偏好。" Classes="pageDesc" Margin="0,2,0,14"/>
 
-                <TextBlock Text="助手名字" Classes="formLabel"/>
+                <TextBlock x:Name="LabelAssistantName" Text="助手名字" Classes="formLabel"/>
                 <TextBox x:Name="PersonalNameBox" Watermark="Brook" FontSize="14" MaxWidth="380"
                          HorizontalAlignment="Left"/>
-                <TextBlock Text="交流语言（影响模型回复语言）" Classes="formLabel"/>
+                <TextBlock x:Name="LabelReplyLang" Text="交流语言（影响模型回复语言）" Classes="formLabel"/>
                 <ComboBox x:Name="LanguageBox" FontSize="13.5" Width="160" HorizontalAlignment="Left" SelectedIndex="0">
                     <ComboBoxItem Content="中文"/>
                     <ComboBoxItem Content="English"/>
                 </ComboBox>
-                <TextBlock Text="默认提示词（附加到系统指令，每轮生效）" Classes="formLabel"/>
+                <TextBlock x:Name="LabelUiLang" Text="界面语言（UI 显示；切换后重启应用完全生效）" Classes="formLabel"/>
+                <ComboBox x:Name="UiLanguageBox" FontSize="13.5" Width="160" HorizontalAlignment="Left" SelectedIndex="0">
+                    <ComboBoxItem Content="跟随系统" Tag="auto"/>
+                    <ComboBoxItem Content="中文" Tag="zh"/>
+                    <ComboBoxItem Content="English" Tag="en"/>
+                </ComboBox>
+                <TextBlock x:Name="LabelCustomPrompt" Text="默认提示词（附加到系统指令，每轮生效）" Classes="formLabel"/>
                 <TextBox x:Name="CustomPromptBox" Watermark="例如：回答尽量简短；优先用表格展示数据…" FontSize="13.5"
                          Height="72" TextWrapping="Wrap" AcceptsReturn="True"/>
                 <Button x:Name="SavePersonalBtn" Classes="primaryBtn" Content="保存常规设置"
@@ -163,22 +169,22 @@
 
             <!-- 外观 -->
             <StackPanel x:Name="PageAppearance" IsVisible="False" Spacing="6">
-                <TextBlock Text="外观" Classes="pageTitle"/>
-                <TextBlock Text="悬浮气泡的个性化显示。" Classes="pageDesc" Margin="0,2,0,14"/>
+                <TextBlock x:Name="AppearanceTitle" Text="外观" Classes="pageTitle"/>
+                <TextBlock x:Name="AppearanceDesc" Text="悬浮气泡的个性化显示。" Classes="pageDesc" Margin="0,2,0,14"/>
 
-                <TextBlock Text="气泡图标" Classes="formLabel"/>
+                <TextBlock x:Name="LabelBubbleIcon" Text="气泡图标" Classes="formLabel"/>
                 <WrapPanel x:Name="IconPicker" MaxWidth="300" HorizontalAlignment="Left"/>
                 <Separator Margin="0,14,0,6" Background="#333333"/>
-                <TextBlock Text="气泡位置" Classes="formLabel"/>
+                <TextBlock x:Name="LabelBubblePos" Text="气泡位置" Classes="formLabel"/>
                 <Button x:Name="ResetPosBtn" Classes="ghostBtn" Content="重置到默认位置（右上角）"
                         HorizontalAlignment="Left"/>
             </StackPanel>
 
             <!-- 模型设置 -->
             <StackPanel x:Name="PageModels" Spacing="6">
-                <TextBlock Text="模型设置" Classes="pageTitle"/>
+                <TextBlock x:Name="ModelsTitle" Text="模型设置" Classes="pageTitle"/>
                 <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,2,0,12">
-                    <TextBlock Grid.Column="0" Text="管理模型供应商，配置后即可在底部切换使用。" Classes="pageDesc"
+                    <TextBlock Grid.Column="0" x:Name="ModelsDesc" Text="管理模型供应商，配置后即可在底部切换使用。" Classes="pageDesc"
                                VerticalAlignment="Center"/>
                     <Button Grid.Column="1" x:Name="SaveApplyBtn" Classes="primaryBtn" Content="保存并应用" Margin="0,0,8,0"/>
                     <Button Grid.Column="2" x:Name="CloseBtn" Classes="ghostBtn" Content="关闭"/>
@@ -196,13 +202,13 @@
                             BorderBrush="#333333" BorderThickness="1">
                         <ScrollViewer>
                             <StackPanel x:Name="FormPanel" Spacing="2" IsEnabled="False">
-                                <TextBlock Text="供应商名称" Classes="formLabel"/>
+                                <TextBlock x:Name="LabelProviderName" Text="供应商名称" Classes="formLabel"/>
                                 <TextBox x:Name="NameBox" FontSize="14"/>
-                                <TextBlock Text="API 地址（OpenAI 兼容端点）" Classes="formLabel"/>
+                                <TextBlock x:Name="LabelApiEndpoint" Text="API 地址（OpenAI 兼容端点）" Classes="formLabel"/>
                                 <TextBox x:Name="BaseUrlBox" Watermark="https://api.deepseek.com/v1" FontSize="14"/>
-                                <TextBlock Text="API Key" Classes="formLabel"/>
+                                <TextBlock x:Name="LabelApiKey" Text="API Key" Classes="formLabel"/>
                                 <TextBox x:Name="ApiKeyBox" Watermark="sk-..." FontSize="14"/>
-                                <TextBlock Text="模型清单（逗号分隔，第一个为默认）" Classes="formLabel"/>
+                                <TextBlock x:Name="LabelModelsCsv" Text="模型清单（逗号分隔，第一个为默认）" Classes="formLabel"/>
                                 <TextBox x:Name="ModelsBox" Watermark="model-a, model-b" FontSize="14" Height="64"
                                          TextWrapping="Wrap" AcceptsReturn="True"/>
                                 <Button x:Name="DeleteBtn" Classes="dangerBtn" Content="删除此供应商" Margin="0,18,0,0"
@@ -214,7 +220,7 @@
                             BorderBrush="#333333" BorderThickness="1">
                         <ScrollViewer>
                             <StackPanel x:Name="PresetPanel" Spacing="6">
-                                <TextBlock Text="快速添加（点选模板）" FontSize="12" Foreground="#8a8a8a" Margin="4,2,0,6"/>
+                                <TextBlock x:Name="PresetHeader" Text="快速添加（点选模板）" FontSize="12" Foreground="#8a8a8a" Margin="4,2,0,6"/>
                             </StackPanel>
                         </ScrollViewer>
                     </Border>

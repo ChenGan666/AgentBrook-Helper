@@ -102,7 +102,8 @@ public static class SkillRegistry
 
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("## 可用技能（Skills）");
-        sb.AppendLine("以下是已安装技能的清单。当任务与某技能相关时，先调用 load_skill 工具加载其完整指令再执行：");
+        sb.AppendLine("以下是已安装技能的清单。当任务与某技能相关时，先调用 load_skill 工具加载其完整指令再执行。" +
+            "session- 前缀的是历史会话的成果沉淀（结论/产出/上下文），需要复用以往工作时加载对应技能：");
         sb.AppendLine();
         foreach (var s in skills)
         {

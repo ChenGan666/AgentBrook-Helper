@@ -45,6 +45,49 @@ public sealed class AssistantController : IBrookInteraction
 
     public MainWindow Conversation => _conversation ?? throw new InvalidOperationException("对话窗未创建");
 
+    /// <summary>启动过程状态（连接 MCP / 恢复会话 / 就绪）：由顶栏状态胶囊展示，不进对话流。</summary>
+    public event Action<string>? StartupStatus;
+
+    /// <summary>会话列表/标题变化（切换、新建、删除、自动命名）后触发，UI 刷新会话下拉。</summary>
+    public event Action? SessionsChanged;
+
+    public string CurrentSessionTitle => Ready ? Agent!.CurrentSessionTitle : "新对话";
+    public IReadOnlyList<(string Role, string Text)> GetTranscript() => Ready ? Agent!.GetTranscript() : [];
+    public IReadOnlyList<SessionMeta> Sessions => Ready ? Agent!.Sessions : [];
+
+    /// <summary>切换会话；忙碌/未就绪时返回 false。</summary>
+    public async Task<bool> SwitchSessionAsync(string id)
+    {
+        if (Busy || !Ready) return false;
+        var ok = await Agent!.SwitchSessionAsync(id);
+        if (ok) RaiseState(BrookRunState.Idle, null);
+        SessionsChanged?.Invoke();
+        return ok;
+    }
+
+    public void RenameSession(string id, string title)
+    {
+        if (!Ready) return;
+        Agent!.RenameSession(id, title);
+        SessionsChanged?.Invoke();
+    }
+
+    public async Task DeleteSessionAsync(string id)
+    {
+        if (Busy || !Ready) return;
+        await Agent!.DeleteSessionAsync(id);
+        SessionsChanged?.Invoke();
+    }
+
+    /// <summary>把当前会话成果沉淀为技能（零 token：直接用滚动摘要+末次回答拼装）。</summary>
+    public (string Name, string? Error) DistillSessionToSkill()
+    {
+        if (!Ready) return ("", "尚未就绪");
+        var (name, error) = Agent!.DistillSessionToSkill();
+        if (error is null) SessionsChanged?.Invoke();
+        return (name, error);
+    }
+
     public async Task InitializeAsync()
     {
         var configuration = new ConfigurationBuilder()
@@ -60,8 +103,15 @@ public sealed class AssistantController : IBrookInteraction
             log: line =>
             {
                 Console.Error.WriteLine($"[init-log] {DateTime.Now:HH:mm:ss.fff} {line}");
-                EventRaised?.Invoke(new BrookEvent.ToolStarted("log:" + line, null));
+                StartupStatus?.Invoke(line);
+                if (line.Contains('✖') || line.Contains("失败"))
+                {
+                    // 失败必须在对话区可见（用户需要知道哪里坏了）；成功路径保持安静
+                    EventRaised?.Invoke(new BrookEvent.ToolStarted("log:" + line, null));
+                }
             });
+
+        Agent.SessionTitleChanged += _ => SessionsChanged?.Invoke();   // 自动命名等标题变化 → UI 刷新
 
         ReadyChanged?.Invoke();
         Console.Error.WriteLine($"[init] {DateTime.Now:HH:mm:ss.fff} ready");
@@ -114,6 +164,14 @@ public sealed class AssistantController : IBrookInteraction
                 EventRaised?.Invoke(e);
             }
         }
+        catch (OperationCanceledException) when (Agent?.TurnCancelRequested == true)
+        {
+            // 用户主动停止：不是错误。已完成部分保留，追加一条灰色日志行说明。
+            EventRaised?.Invoke(new BrookEvent.ToolStarted("log:" +
+                AgentBrook.Agent.Infrastructure.CoreStrings.L(
+                    "⏹ 已按你的要求停止当前任务。",
+                    "⏹ Stopped the current task at your request."), null));
+        }
         catch (Exception ex)
         {
             EventRaised?.Invoke(new BrookEvent.Failed(ex.Message));
@@ -127,6 +185,17 @@ public sealed class AssistantController : IBrookInteraction
                 EventRaised?.Invoke(new BrookEvent.TurnCompleted());   // 异常终止时保底
             }
         }
+        DequeueAndSend();
+    }
+
+    private async void DequeueAndSend()
+    {
+        while (_queuedInput.Count > 0)
+        {
+            var next = _queuedInput.Dequeue();
+            QueueChanged?.Invoke(_queuedInput.Count);
+            await SendAsync(next);
+        }
     }
 
     public async Task NewSessionAsync()
@@ -137,6 +206,7 @@ public sealed class AssistantController : IBrookInteraction
         }
         await Agent!.NewSessionAsync();
         EventRaised?.Invoke(new BrookEvent.ToolStarted("__clear__", null));
+        SessionsChanged?.Invoke();
     }
 
     public void CycleModel()
@@ -173,6 +243,19 @@ public sealed class AssistantController : IBrookInteraction
     /// <summary>完全访问模式：所有需审批的操作自动通过（会话内有效，重启后复位）。</summary>
     public bool FullAccess { get; set; }
 
+    private readonly Queue<string> _queuedInput = new();
+    public event Action<int>? QueueChanged;   // 队列深度变化（UI 显示排队数）
+
+    /// <summary>打断当前回合（停止模型流，已完成部分保留）。</summary>
+    public void CancelTurn() => Agent?.CancelTurn();
+
+    /// <summary>排队一条输入：当前回合结束后自动发送（用户在模型工作中补充信息）。</summary>
+    public void EnqueueInput(string text)
+    {
+        _queuedInput.Enqueue(text);
+        QueueChanged?.Invoke(_queuedInput.Count);
+    }
+
     public string CurrentProvider => Ready ? Agent!.CurrentProvider : "";
     public IReadOnlyList<AgentBrook.Agent.Infrastructure.ProviderConfig> Providers => Ready ? Agent!.Providers : [];
 
@@ -200,6 +283,7 @@ public sealed class AssistantController : IBrookInteraction
         }
         var tcs = new TaskCompletionSource<ApprovalDecision>(TaskCreationOptions.RunContinuationsAsynchronously);
         _approvalTcs = tcs;
+        LinkCancel(tcs, cancellationToken, () => { if (_approvalTcs == tcs) _approvalTcs = null; });
         RaiseState(BrookRunState.AwaitingApproval, toolName);
         Dispatcher.UIThread.Post(() =>
         {
@@ -213,6 +297,7 @@ public sealed class AssistantController : IBrookInteraction
     {
         var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         _askTcs = tcs;
+        LinkCancel(tcs, cancellationToken, () => { if (_askTcs == tcs) _askTcs = null; });
         RaiseState(BrookRunState.AwaitingUserAnswer, null);
         Dispatcher.UIThread.Post(() =>
         {
@@ -220,5 +305,20 @@ public sealed class AssistantController : IBrookInteraction
             Conversation.AddAskCard(question, choices, tcs);
         });
         return tcs.Task;
+    }
+
+    /// <summary>打断支持：停止令牌触发时令等待任务进入 Canceled 状态（回合随即以取消收尾）。</summary>
+    private static void LinkCancel<T>(TaskCompletionSource<T> tcs, CancellationToken ct, Action? onCanceled = null)
+    {
+        if (!ct.CanBeCanceled)
+        {
+            return;
+        }
+        var reg = ct.Register(() =>
+        {
+            tcs.TrySetCanceled(ct);
+            onCanceled?.Invoke();
+        });
+        tcs.Task.ContinueWith(_ => reg.Dispose(), TaskScheduler.Default);
     }
 }

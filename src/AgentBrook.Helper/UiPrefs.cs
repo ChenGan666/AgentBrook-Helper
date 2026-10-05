@@ -75,7 +75,8 @@ internal static class UiPrefs
 internal sealed record BubblePos(int X, int Y);
 
 /// <summary>个性化设置：助手名字与气泡图标。</summary>
-internal sealed record AssistantSettings(string AssistantName, string BubbleIcon, string Language, string CustomPrompt);
+internal sealed record AssistantSettings(
+    string AssistantName, string BubbleIcon, string Language, string CustomPrompt, string UiLanguage);
 
 
 /// <summary>助手个性化的运行时状态（启动加载、设置窗口保存后更新）。</summary>
@@ -83,7 +84,8 @@ internal static class AssistantIdentity
 {
     public static string Current { get; private set; } = "Brook";
     public static string BubbleIcon { get; private set; } = "Icon.Sparkle";
-    public static string Language { get; private set; } = "zh";
+    public static string Language { get; private set; } = "zh";        // 模型回复语言
+    public static string UiLanguage { get; private set; } = "auto";    // 界面语言（auto/zh/en）
     public static string CustomPrompt { get; private set; } = "";
 
     public static void Load()
@@ -94,16 +96,20 @@ internal static class AssistantIdentity
             if (!string.IsNullOrWhiteSpace(s.AssistantName)) Current = s.AssistantName.Trim();
             if (!string.IsNullOrWhiteSpace(s.BubbleIcon)) BubbleIcon = s.BubbleIcon;
             if (!string.IsNullOrWhiteSpace(s.Language)) Language = s.Language;
+            if (!string.IsNullOrWhiteSpace(s.UiLanguage)) UiLanguage = s.UiLanguage;
             CustomPrompt = s.CustomPrompt ?? "";
         }
+        I18n.SetLanguage(UiLanguage);
     }
 
-    public static void Apply(string name, string bubbleIcon, string language, string customPrompt)
+    public static void Apply(string name, string bubbleIcon, string language, string customPrompt, string uiLanguage)
     {
         if (!string.IsNullOrWhiteSpace(name)) Current = name.Trim();
         if (!string.IsNullOrWhiteSpace(bubbleIcon)) BubbleIcon = bubbleIcon;
         if (!string.IsNullOrWhiteSpace(language)) Language = language;
+        if (!string.IsNullOrWhiteSpace(uiLanguage)) UiLanguage = uiLanguage;
         CustomPrompt = customPrompt ?? "";
-        UiPrefs.Save("settings.json", new AssistantSettings(Current, BubbleIcon, Language, CustomPrompt));
+        UiPrefs.Save("settings.json", new AssistantSettings(Current, BubbleIcon, Language, CustomPrompt, UiLanguage));
+        I18n.SetLanguage(UiLanguage);
     }
 }

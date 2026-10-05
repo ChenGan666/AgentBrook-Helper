@@ -1,4 +1,6 @@
 using System.Text;
+using Avalonia.Input;
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -80,13 +82,17 @@ public static class MarkdownView
                     : Path.Combine(App.Controller.Agent!.WorkspaceRoot, src.TrimStart('/'));
                 if (File.Exists(full))
                 {
-                    return new Image
+                    var preview = new Image
                     {
                         Source = new Bitmap(full),
                         MaxWidth = 380,
                         Margin = new Thickness(0, 4),
                         HorizontalAlignment = HorizontalAlignment.Left,
+                        Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
                     };
+                    preview.PointerReleased += (_, _) => OpenTarget(full);
+                    ToolTip.SetTip(preview, "点击打开原图");
+                    return preview;
                 }
                 return new TextBlock
                 {
@@ -120,25 +126,29 @@ public static class MarkdownView
                     target.Add(run);
                     break;
                 case CodeInline code:
-                    target.Add(new Run
-                    {
-                        Text = code.Content,
-                        FontFamily = MonoFont,
-                        Foreground = new SolidColorBrush(Color.Parse("#9cdcfe")),
-                    });
+                    AddContentInline(target, code.Content, MonoFont, "#9cdcfe");
                     break;
                 case LiteralInline lit:
-                    target.Add(new Run { Text = lit.Content.ToString() });
+                    AddLiteralWithPaths(target, lit.Content.ToString());
                     break;
                 case LinkInline link when link.IsImage:
                     target.Add(new Avalonia.Controls.Documents.Run { Text = "[图片]" });
                     break;
                 case LinkInline link:
-                    foreach (var sub in link)
+                    var linkText = CollectText(link);
+                    var linkUrl = link.Url ?? "";
+                    if (!string.IsNullOrEmpty(linkUrl))
                     {
-                        if (sub is LiteralInline lt)
+                        target.Add(MakeLinkChunk(linkText, linkUrl));
+                    }
+                    else
+                    {
+                        foreach (var sub in link)
                         {
-                            target.Add(new Run { Text = lt.Content.ToString(), Foreground = new SolidColorBrush(Color.Parse("#6cb6ff")) });
+                            if (sub is LiteralInline lt)
+                            {
+                                target.Add(new Run { Text = lt.Content.ToString(), Foreground = new SolidColorBrush(Color.Parse("#6cb6ff")) });
+                            }
                         }
                     }
                     break;
@@ -192,7 +202,10 @@ public static class MarkdownView
     private static Control RenderCodeBlock(CodeBlock code)
     {
         var lines = code.Lines.ToString();
-        return new Border
+
+        // 单行内容若是工作区内真实存在的文件路径 → 保留代码块样式，整块可点击打开
+        var trimmed = lines.Trim();
+        var border = new Border
         {
             Background = new SolidColorBrush(Color.Parse("#1a1a1a")),
             CornerRadius = new CornerRadius(8),
@@ -207,6 +220,31 @@ public static class MarkdownView
                 TextWrapping = TextWrapping.Wrap,
             },
         };
+
+        if (trimmed.Split('\n').Length == 1 && TryResolveWorkspaceFile(trimmed) is { } resolved)
+        {
+            border.Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand);
+            ToolTip.SetTip(border, resolved);
+            var pressed = default(Avalonia.Point?);
+            border.PointerPressed += (_, e) =>
+            {
+                pressed = e.GetCurrentPoint(border).Position;
+            };
+            border.PointerReleased += (_, e) =>
+            {
+                // 文本选择拖动不触发打开：仅无位移的单击才打开
+                if (pressed is { } p)
+                {
+                    var pos = e.GetCurrentPoint(border).Position;
+                    if (Math.Abs(pos.X - p.X) < 4 && Math.Abs(pos.Y - p.Y) < 4)
+                    {
+                        OpenTarget(resolved);
+                    }
+                }
+                pressed = null;
+            };
+        }
+        return border;
     }
 
     private static Control RenderList(ListBlock list)
@@ -336,4 +374,159 @@ public static class MarkdownView
 
     private static IBrush BrushLight { get; } = new SolidColorBrush(Color.Parse("#e6e6e6"));
     private static IBrush BrushDark { get; } = new SolidColorBrush(Color.Parse("#333333"));
+
+    // ───────────────────────── 可点击目标（链接/文件/图片）─────────────────────────
+
+    /// <summary>行内可点击元素：路径/URL 渲染为链接按钮，点击打开目标。</summary>
+    private static void AddContentInline(
+        Avalonia.Controls.Documents.InlineCollection target, string text,
+        FontFamily font, string color)
+    {
+        var resolved = TryResolveWorkspaceFile(text);
+        if (resolved is not null)
+        {
+            target.Add(new Avalonia.Controls.Documents.InlineUIContainer
+            {
+                Child = MakeLinkChunk(text, resolved, mono: true),
+            });
+            return;
+        }
+        target.Add(new Run
+        {
+            Text = text,
+            FontFamily = font,
+            Foreground = new SolidColorBrush(Color.Parse(color)),
+        });
+    }
+
+    /// <summary>
+    /// 纯文本中的裸路径识别：形如 dir/name.ext 且 workspace 内真实存在的路径
+    /// 拆分为「文本 + 可点击链接 + 文本」，使模型输出的报告文件位置可直接打开。
+    /// </summary>
+    private static void AddLiteralWithPaths(
+        Avalonia.Controls.Documents.InlineCollection target, string text)
+    {
+        // 路径模式：非空白字符组成、含 / 和扩展名
+        var pattern = new System.Text.RegularExpressions.Regex(
+            @"[\w\-./]+\.[A-Za-z0-9]{2,6}\b");
+        var last = 0;
+        foreach (System.Text.RegularExpressions.Match match in pattern.Matches(text))
+        {
+            var candidate = match.Value;
+            var resolved = TryResolveWorkspaceFile(candidate);
+            if (resolved is null)
+            {
+                continue;
+            }
+            if (match.Index > last)
+            {
+                target.Add(new Run { Text = text[last..match.Index] });
+            }
+            target.Add(MakeLinkChunk(candidate, resolved, mono: true));
+            last = match.Index + candidate.Length;
+        }
+        if (last == 0)
+        {
+            if (text.Length > 0)
+            {
+                target.Add(new Run { Text = text });
+            }
+            return;
+        }
+        if (last < text.Length)
+        {
+            target.Add(new Run { Text = text[last..] });
+        }
+    }
+
+    /// <summary>构造链接样式的行内按钮（蓝字、悬停下划线、无边框）。</summary>
+    private static Button MakeLinkChunk(string text, string target2, bool mono = false)
+    {
+        var btn = new Button
+        {
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0, 0, 0, 1),
+            BorderBrush = new SolidColorBrush(Color.Parse("#6cb6ff")),
+            Padding = new Thickness(2, 0),
+            HorizontalContentAlignment = HorizontalAlignment.Left,
+            Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+            Tag = target2,
+        };
+        var run = new Run
+        {
+            Text = text,
+            Foreground = new SolidColorBrush(Color.Parse("#6cb6ff")),
+        };
+        if (mono)
+        {
+            run.FontFamily = MonoFont;
+        }
+        var tb = new TextBlock { Inlines = { run } };
+        btn.Content = tb;
+        btn.Click += (_, _) => OpenTarget(target2);
+        btn.PointerEntered += (_, _) => run.Foreground = new SolidColorBrush(Color.Parse("#9cd2ff"));
+        btn.PointerExited += (_, _) => run.Foreground = new SolidColorBrush(Color.Parse("#6cb6ff"));
+        return btn;
+    }
+
+    /// <summary>路径解析：相对 workspace 或绝对路径，存在则返回绝对路径。</summary>
+    private static string? TryResolveWorkspaceFile(string text)
+    {
+        var t = text.Trim().Trim('"', '\'', '`');
+        if (string.IsNullOrEmpty(t) || t.Contains(' ') && !File.Exists(t))
+        {
+            // 含空格的先按原样尝试
+        }
+        if (t.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+            t.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;   // URL 由 LinkInline 分支处理
+        }
+        try
+        {
+            var wsRoot = App.Controller.Agent?.WorkspaceRoot;
+            if (!string.IsNullOrEmpty(wsRoot))
+            {
+                var inWs = Path.GetFullPath(Path.Combine(wsRoot, t));
+                var normRoot = wsRoot.EndsWith(Path.DirectorySeparatorChar) ? wsRoot : wsRoot + Path.DirectorySeparatorChar;
+                if (inWs.StartsWith(normRoot, StringComparison.OrdinalIgnoreCase) && File.Exists(inWs))
+                {
+                    return inWs;
+                }
+            }
+            if (File.Exists(t))
+            {
+                return t;
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    /// <summary>打开目标：URL 用系统浏览器，本地文件用系统默认程序。</summary>
+    public static void OpenTarget(string target)
+    {
+        try
+        {
+            if (target.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                target.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+            }
+            else if (File.Exists(target) || Directory.Exists(target))
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "open",
+                    Arguments = $"\"{target}\"",
+                    UseShellExecute = false,
+                });
+            }
+        }
+        catch
+        {
+            // 打开失败静默（目标可能已被移动/删除）
+        }
+    }
+
 }

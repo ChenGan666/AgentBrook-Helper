@@ -217,8 +217,16 @@
                     </Border>
                     <TextBlock x:Name="TokenText" Text="" FontSize="12" Foreground="#8a8a8a"
                                VerticalAlignment="Center" IsVisible="False"/>
-                    <TextBlock x:Name="AgentNameText" Text="Brook" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"
-                               Foreground="#e6e6e6"/>
+                    <!-- 会话切换器：助手名 + 当前会话标题，点击弹出会话列表 -->
+                    <Button x:Name="SessionBtn" Background="Transparent" Padding="6,3" CornerRadius="6"
+                            HorizontalContentAlignment="Left" ToolTip.Tip="切换会话">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock x:Name="AgentNameText" Text="Brook" FontSize="15" FontWeight="SemiBold"
+                                       VerticalAlignment="Center" Foreground="#e6e6e6"/>
+                            <TextBlock x:Name="SessionTitleText" Text="" FontSize="12.5" VerticalAlignment="Center"
+                                       Foreground="#8a8a8a"/>
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
             </DockPanel>
         </Border>
@@ -235,6 +243,10 @@
                 <Grid RowDefinitions="Auto,*,Auto" RowSpacing="4">
                     <StackPanel Grid.Row="0" x:Name="AttachmentBar" Orientation="Horizontal"
                                 Spacing="6" IsVisible="False"/>
+                    <Border Grid.Row="0" x:Name="QueueBar" Classes="attachChip" IsVisible="False"
+                            HorizontalAlignment="Left" Margin="0,0,0,4">
+                        <TextBlock x:Name="QueueText" FontSize="12" Foreground="#d29922"/>
+                    </Border>
                     <TextBox Grid.Row="1" x:Name="InputBox" Classes="plainInput" Watermark="输入消息，回车发送"
                              FontSize="14.5" Foreground="#e6e6e6" Background="Transparent"
                              BorderThickness="0" MinHeight="40" Padding="4,6"
@@ -258,7 +270,10 @@
                         </Button>
                         <Button Grid.Column="4" x:Name="SendBtn" Classes="sendBtn"
                                 Width="34" Height="34" Margin="6,0,0,0" ToolTip.Tip="发送">
-                            <PathIcon Data="{StaticResource Icon.Send}" Width="16" Height="16" Foreground="#111111"/>
+                            <Panel>
+                                <PathIcon x:Name="SendIcon" Data="{StaticResource Icon.Send}" Width="16" Height="16" Foreground="#111111"/>
+                                <PathIcon x:Name="StopIcon" Data="M6 6h12v12H6z" Width="14" Height="14" Foreground="#111111" IsVisible="False"/>
+                            </Panel>
                         </Button>
                     </Grid>
                 </Grid>

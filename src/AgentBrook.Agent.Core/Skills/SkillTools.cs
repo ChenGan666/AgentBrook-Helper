@@ -4,11 +4,17 @@ using Microsoft.Extensions.AI;
 
 namespace AgentBrook.Agent.Skills;
 
-/// <summary>模型可见的技能工具：实时清单、按需加载、自我扩展（创建/安装技能）、技能市场。</summary>
-public sealed class SkillTools(SkillStore store, string marketUrl = "")
+/// <summary>模型可见的技能工具：实时清单、按需加载、自我扩展（创建/安装技能）、技能市场、会话成果沉淀。</summary>
+public sealed class SkillTools(
+    SkillStore store,
+    string marketUrl = "",
+    Action<string>? onCapabilitiesChanged = null,
+    Func<(string Summary, string LastAnswer)>? sessionInfoProvider = null)
 {
     private readonly SkillStore _store = store;
     private readonly string _marketUrl = marketUrl;
+    private readonly Action<string>? _onCapabilitiesChanged = onCapabilitiesChanged;   // 能力变化（创建/安装技能）后通知宿主（重建主索引）
+    private readonly Func<(string Summary, string LastAnswer)>? _sessionInfo = sessionInfoProvider;
 
     [Description("列出所有已安装技能的名称与描述（实时清单，创建/修改后立即生效）。正文需用 load_skill 加载。")]
     public string list_skills()
@@ -94,6 +100,7 @@ public sealed class SkillTools(SkillStore store, string marketUrl = "")
             }
         }
 
+        _onCapabilitiesChanged?.Invoke($"create_skill:{created}");
         return $"✔ 技能「{created}」已创建并立即生效。现在起：list_skills 可见、load_skill 可加载、后续同类任务请直接使用该技能。";
     }
 
@@ -112,6 +119,7 @@ public sealed class SkillTools(SkillStore store, string marketUrl = "")
             return $"安装失败：{error}";
         }
         var desc = _store.Current.FirstOrDefault(s => s.Name == installed)?.Description ?? "";
+        _onCapabilitiesChanged?.Invoke($"install_skill:{installed}");
         return $"✔ 技能「{installed}」安装成功并立即生效（{desc}）。现在可以用 load_skill 加载它。";
     }
 
@@ -155,6 +163,49 @@ public sealed class SkillTools(SkillStore store, string marketUrl = "")
         {
             return $"市场索引解析失败：{ex.Message}";
         }
+    }
+
+    /// <summary>
+    /// 会话成果沉淀：把当前会话的关键成果整理为 session- 前缀技能，
+    /// 其他会话可 load_skill 调用（跨会话成果复用）。
+    /// </summary>
+    [Description("把当前会话的成果沉淀为技能（session- 前缀），供其他会话 load_skill 调用。" +
+        "当会话产生了可复用的结论、报告、方法或重要产出文件时使用。highlights 写清：核心结论、产出文件位置、后续可复用点。")]
+    public string save_session_skill(
+        [Description("技能短名（小写英文连字符，如 gold-weekly），最终保存为 session-gold-weekly")] string name,
+        [Description("一句话描述成果内容与复用场景")] string description,
+        [Description("成果要点（Markdown）：核心结论、关键数据、产出文件位置、可复用方法")] string highlights)
+    {
+        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(highlights))
+        {
+            return "保存失败：name 与 highlights 不能为空";
+        }
+        var slug = name.Trim().ToLowerInvariant();
+        var sb = new StringBuilder();
+        sb.AppendLine($"# 会话成果（沉淀于 {DateTime.Now:yyyy-MM-dd HH:mm}）");
+        sb.AppendLine();
+        sb.AppendLine("## 成果要点");
+        sb.AppendLine(highlights.Trim());
+        if (_sessionInfo is { } info)
+        {
+            var (summary, lastAnswer) = info();
+            if (!string.IsNullOrWhiteSpace(summary))
+            {
+                sb.AppendLine().AppendLine("## 会话脉络（滚动摘要）").AppendLine(summary);
+            }
+            if (!string.IsNullOrWhiteSpace(lastAnswer))
+            {
+                var tail = lastAnswer.Length > 3000 ? lastAnswer[^3000..] : lastAnswer;
+                sb.AppendLine().AppendLine("## 末次交付（结尾部分）").AppendLine(tail);
+            }
+        }
+        var error = _store.CreateSkill("session-" + slug, "会话成果：" + description.Trim(), sb.ToString(), out var created);
+        if (error is not null)
+        {
+            return $"保存失败：{error}";
+        }
+        _onCapabilitiesChanged?.Invoke($"save_session_skill:{created}");
+        return $"✔ 会话成果已沉淀为技能「session-{slug}」。其他会话中 load_skill(\"session-{slug}\") 即可调用这些成果。";
     }
 
     private SkillInfo? FindSkill(string name) =>

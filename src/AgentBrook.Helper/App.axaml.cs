@@ -46,6 +46,36 @@ public partial class App : Application
             {
                 conversation.ShowFromBubble();
             }
+            if (desktop.Args is not null && desktop.Args.Contains("--langtest"))
+            {
+                var lt = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+                lt.Tick += async (_, _) =>
+                {
+                    lt.Stop();
+                    if (!App.Controller.Ready)
+                    {
+                        lt.Start();
+                        return;
+                    }
+                    System.Console.Error.WriteLine("[langtest] ready, applying en settings");
+                    await App.Controller.ApplyAssistantSettingsAsync("HiBrook", "en", "");
+                    System.Console.Error.WriteLine("[langtest] applied, sending hello");
+                    await App.Controller.SendAsync("hello");
+                };
+                lt.Start();
+            }
+            if (desktop.Args is not null && desktop.Args.Contains("--uilang-en"))
+            {
+                var ul = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
+                ul.Tick += (_, _) =>
+                {
+                    ul.Stop();
+                    var win = new ModelSettingsWindow();
+                    win.Show();
+                    win.DebugSelectUiLanguage("en");
+                };
+                ul.Start();
+            }
             if (desktop.Args is not null && desktop.Args.Contains("--pastetest"))
             {
                 var pasteTimer = new Avalonia.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };

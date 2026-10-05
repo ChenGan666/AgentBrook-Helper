@@ -30,7 +30,9 @@ public static class McpToolSource
         {
             try
             {
-                log($"⟳ 连接 MCP 服务器 {server.Name}（{server.Command}）…");
+                log(Infrastructure.CoreStrings.L(
+                    $"⟳ 连接 MCP 服务器 {server.Name}（{server.Command}）…",
+                    $"⟳ Connecting MCP server {server.Name} ({server.Command})…"));
 
                 // 注意：transport 由 McpClient 管理生命周期，这里不能提前释放。
                 var transport = new StdioClientTransport(new StdioClientTransportOptions
@@ -54,11 +56,15 @@ public static class McpToolSource
                     Tools = tools.Select(t => (AIFunction)new PrefixedAIFunction(t, Prefix(server.Name))).ToList(),
                 });
 
-                log($"✔ MCP {server.Name} 已连接，{tools.Count} 个工具：{string.Join("、", tools.Select(t => t.Name))}");
+                log(Infrastructure.CoreStrings.L(
+                    $"✔ MCP {server.Name} 已连接，{tools.Count} 个工具：{string.Join("、", tools.Select(t => t.Name))}",
+                    $"✔ MCP {server.Name} connected, {tools.Count} tools: {string.Join(", ", tools.Select(t => t.Name))}"));
             }
             catch (Exception ex)
             {
-                log($"✖ MCP 服务器 {server.Name} 连接失败（已跳过）：{ex.Message}");
+                log(Infrastructure.CoreStrings.L(
+                    $"✖ MCP 服务器 {server.Name} 连接失败（已跳过）：{ex.Message}",
+                    $"✖ MCP server {server.Name} connection failed (skipped): {ex.Message}"));
             }
         }
 

@@ -52,17 +52,18 @@ public partial class BubbleWindow : Window
 
         root.ContextRequested += (_, e) =>
         {
-            var openItem = new MenuItem { Header = "打开对话窗体" };
-            var modelItem = new MenuItem { Header = "切换模型" };
-            var fullItem = new MenuItem { Header = _controller.FullAccess ? "关闭完全访问" : "开启完全访问（审批自动通过）" };
-            var exitItem = new MenuItem { Header = "退出 Brook" };
+            var openItem = new MenuItem { Header = I18n.T("打开对话窗体") };
+            var modelItem = new MenuItem { Header = I18n.T("切换模型") };
+            var fullItem = new MenuItem { Header = _controller.FullAccess ? I18n.T("关闭完全访问") : I18n.T("开启完全访问（审批自动通过）") };
+            var exitItem = new MenuItem { Header = I18n.T("退出 {0}", AssistantIdentity.Current) };
 
             openItem.Click += (_, _) => _controller.ShowConversation();
             modelItem.Click += (_, _) => _controller.CycleModel();
             fullItem.Click += (_, _) =>
             {
                 _controller.FullAccess = !_controller.FullAccess;
-                fullItem.Header = _controller.FullAccess ? "关闭完全访问" : "开启完全访问（审批自动通过）";
+                fullItem.Header = _controller.FullAccess ? I18n.T("关闭完全访问") : I18n.T("开启完全访问（审批自动通过）");
+                _controller.Conversation?.UpdateFullAccessVisual();   // 主窗芯片与 tooltip 同步
             };
             exitItem.Click += (_, _) => _controller.Shutdown();
 
@@ -212,7 +213,7 @@ public partial class BubbleWindow : Window
     /// <summary>把个性化设置（名字/图标）应用到气泡。</summary>
     public void ApplyIdentityUi()
     {
-        Title = AssistantIdentity.Current;
+        Title = AssistantIdentity.Current;   // 气泡标题=助手名
         if (this.TryFindResource(AssistantIdentity.BubbleIcon, out var geo) && geo is StreamGeometry g)
         {
             _bubbleIcon.Data = g;

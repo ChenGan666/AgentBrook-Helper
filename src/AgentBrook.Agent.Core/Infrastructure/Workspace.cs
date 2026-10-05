@@ -12,7 +12,9 @@ public sealed class Workspace
         Directory.CreateDirectory(Root);
         MemoryDir = EnsureDir(Path.Combine(Root, "memory"));
         SkillsDir = EnsureDir(Path.Combine(Root, "skills"));
+        SessionsDir = EnsureDir(Path.Combine(Root, "sessions"));
         SessionFile = Path.Combine(Root, "session.json");
+        SessionSummaryFile = Path.Combine(Root, "session-summary.txt");
         ProvidersFile = Path.Combine(Root, "models.json");
     }
 
@@ -25,8 +27,14 @@ public sealed class Workspace
     /// <summary>技能目录：skills/&lt;name&gt;/SKILL.md。</summary>
     public string SkillsDir { get; }
 
+    /// <summary>多会话存档目录：sessions/&lt;id&gt;/。</summary>
+    public string SessionsDir { get; }
+
     /// <summary>会话持久化文件。</summary>
     public string SessionFile { get; }
+
+    /// <summary>会话滚动摘要文件（与 SessionFile 配对，记录被压缩掉的早期对话）。</summary>
+    public string SessionSummaryFile { get; }
 
     /// <summary>模型供应商配置（用户可管理，独立于 appsettings）。</summary>
     public string ProvidersFile { get; }
