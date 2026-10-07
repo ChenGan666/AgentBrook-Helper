@@ -3,6 +3,7 @@
         x:Class="AgentBrook.Helper.ModelSettingsWindow"
         RequestedThemeVariant="Dark"
         Title="设置" Width="920" Height="680" MinWidth="760" MinHeight="560"
+        Icon="avares://AgentBrook.Helper/Assets/app-icon.png"
         Background="#1f1f1f"
         FontFamily="PingFang SC, Hiragino Sans GB, Microsoft YaHei"
         TransparencyLevelHint="AcrylicBlur">
@@ -136,8 +137,9 @@
             </ScrollViewer>
         </Border>
 
-        <!-- 右侧内容区 -->
-        <Panel Grid.Column="1" Margin="26,20,26,16">
+        <!-- 右侧内容区（内容超高时可纵向滚动，如常规页的自启动/提示音区块） -->
+        <ScrollViewer Grid.Column="1" Margin="26,20,26,16" HorizontalScrollBarVisibility="Disabled">
+        <Panel>
 
             <!-- 常规 -->
             <StackPanel x:Name="PageGeneral" IsVisible="False" Spacing="6">
@@ -165,6 +167,29 @@
                         HorizontalAlignment="Left" Margin="0,14,0,0"/>
                 <TextBlock x:Name="PersonalHint" Text="" FontSize="12.5" Foreground="#8a8a8a"
                            TextWrapping="Wrap" Margin="0,8,0,0"/>
+
+                <Separator Margin="0,16,0,8" Background="#333333"/>
+                <TextBlock x:Name="LabelAutoStart" Text="开机自启动" Classes="formLabel"/>
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <ToggleSwitch x:Name="AutoStartSwitch" MinWidth="0" OnContent="" OffContent=""/>
+                    <TextBlock x:Name="AutoStartDesc" Text="登录系统后自动启动，气泡常驻待命" FontSize="12.5"
+                               Foreground="#8a8a8a" VerticalAlignment="Center"/>
+                </StackPanel>
+                <TextBlock x:Name="AutoStartHint" Text="" FontSize="12" Foreground="#8a8a8a"
+                           TextWrapping="Wrap" Margin="0,4,0,0"/>
+
+                <Separator Margin="0,16,0,8" Background="#333333"/>
+                <TextBlock x:Name="LabelNotifySound" Text="提示音" Classes="formLabel"/>
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <ToggleSwitch x:Name="NotifySoundSwitch" MinWidth="0" OnContent="" OffContent=""/>
+                    <ComboBox x:Name="NotifySoundBox" FontSize="13" Width="120" VerticalAlignment="Center">
+                        <ComboBoxItem Content="叮" Tag="ding"/>
+                        <ComboBoxItem Content="玻璃" Tag="glass"/>
+                        <ComboBoxItem Content="和弦" Tag="hero"/>
+                    </ComboBox>
+                    <TextBlock x:Name="NotifySoundDesc" Text="任务完成且对话窗不在前台时播放" FontSize="12.5"
+                               Foreground="#8a8a8a" VerticalAlignment="Center"/>
+                </StackPanel>
             </StackPanel>
 
             <!-- 外观 -->
@@ -227,5 +252,6 @@
                 </Grid>
             </StackPanel>
         </Panel>
+        </ScrollViewer>
     </Grid>
 </Window>

@@ -229,6 +229,17 @@ public partial class MainWindow : Window
             SetStatus(_lastState, _lastDetail, _lastWithModel);
         });
 
+        // 窗口位置记忆：启动恢复上次位置/尺寸（带可见性校验），移动/缩放后防抖保存
+        RestoreWindowBounds();
+        PositionChanged += (_, _) => ScheduleSaveBounds();
+        PropertyChanged += (_, e) =>
+        {
+            if (e.Property == WidthProperty || e.Property == HeightProperty)
+            {
+                ScheduleSaveBounds();
+            }
+        };
+
         Opened += (_, _) =>
         {
             ApplyStaticTexts();
@@ -571,6 +582,51 @@ public partial class MainWindow : Window
         _inputBox?.Focus();
     }
 
+    private DispatcherTimer? _boundsSaveTimer;
+
+    /// <summary>恢复上次关闭时的窗口位置与尺寸；首启或保存的位置不可见时保持 XAML 默认。</summary>
+    private void RestoreWindowBounds()
+    {
+        var saved = UiPrefs.Load<ConvWinBounds>("conv-win.json");
+        if (saved is null || saved.Width < MinWidth || saved.Height < MinHeight)
+        {
+            return;
+        }
+        Width = saved.Width;
+        Height = saved.Height;
+        var target = new PixelPoint(saved.X, saved.Y);
+        // 可见性保护：标题栏区域必须落在任一显示器工作区内（如外接屏被拔掉时回落默认位置）
+        if (Screens.All.Any(s => s.WorkingArea.Intersects(new PixelRect(target, new PixelSize(80, 40)))))
+        {
+            Position = target;
+        }
+    }
+
+    /// <summary>移动/缩放后防抖保存（拖动过程中 PositionChanged 高频触发，避免每次写盘）。</summary>
+    private void ScheduleSaveBounds()
+    {
+        if (_boundsSaveTimer is null)
+        {
+            _boundsSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
+            _boundsSaveTimer.Tick += (_, _) =>
+            {
+                _boundsSaveTimer!.Stop();
+                SaveBoundsNow();
+            };
+        }
+        _boundsSaveTimer.Stop();
+        _boundsSaveTimer.Start();
+    }
+
+    /// <summary>把当前窗口位置/尺寸写入偏好（仅 Normal 状态；最大化时的坐标无记忆价值）。</summary>
+    private void SaveBoundsNow()
+    {
+        if (WindowState == WindowState.Normal)
+        {
+            UiPrefs.Save("conv-win.json", new ConvWinBounds(Position.X, Position.Y, Width, Height));
+        }
+    }
+
     // ───────────────────────── 控制器事件 → 渲染 ─────────────────────────
 
     private void OnControllerEvent(BrookEvent e)
@@ -706,7 +762,28 @@ public partial class MainWindow : Window
     }
 
     // ───────────────────────── HITL 卡片（由控制器在 UI 线程调用）─────────────────────────
+    /// <summary>审批提要的公开入口：气泡快捷卡复用同一套「人话翻译」规则。</summary>
+    public string SummarizeApprovalPublic(string tool, string? argsJson) => SummarizeApproval(tool, argsJson);
+
     /// <summary>把工具调用翻译成用户看得懂的一句话提要（本地规则，无需模型参与）。</summary>
+    /// <summary>spawn_worker 审批提要：带能力授予时展示所授能力（用户批准的关注点）。</summary>
+    private static string SpawnWorkerSummary(string? name, string? argsJson)
+    {
+        var baseText = string.IsNullOrEmpty(name) ? I18n.T("派出一个工作助手") : I18n.T("派出工作助手「{0}」", Cut(name));
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(argsJson ?? "{}");
+            if (doc.RootElement.TryGetProperty("capabilities", out var capsEl)
+                && capsEl.ValueKind == System.Text.Json.JsonValueKind.String
+                && capsEl.GetString() is { Length: > 0 } capsDesc)
+            {
+                baseText += I18n.T("（授予：{0}）", capsDesc);
+            }
+        }
+        catch { }
+        return baseText;
+    }
+
     private static string SummarizeApproval(string tool, string? argsJson)
     {
         var primary = FirstStringArg(argsJson);
@@ -724,7 +801,7 @@ public partial class MainWindow : Window
             "load_skill" or "list_skills" => I18n.T("加载/查看可用技能"),
             "mcp_add_server" => string.IsNullOrEmpty(primary) ? I18n.T("添加 MCP 插件") : I18n.T("添加 MCP 插件「{0}」", Cut(primary)),
             "mcp_list_servers" => I18n.T("查看已安装的 MCP 插件"),
-            "spawn_worker" => string.IsNullOrEmpty(primary) ? I18n.T("派出一个工作助手") : I18n.T("派出工作助手「{0}」", Cut(primary)),
+            "spawn_worker" => SpawnWorkerSummary(primary, argsJson),
             "assign_task" => I18n.T("给工作助手分派任务"),
             "send_message" or "send_to_worker" => I18n.T("给工作助手发消息"),
             "broadcast_to_workers" => I18n.T("给所有工作助手广播消息"),
@@ -944,6 +1021,20 @@ public partial class MainWindow : Window
                 hint.Text = I18n.T("⏹ 任务已停止，此操作未执行");
             });
         }, TaskScheduler.Default);
+        // 在气泡快捷卡上被决议（外部 TrySetResult）时：同步锁定并标注本卡状态
+        tcs.Task.ContinueWith(t =>
+        {
+            if (t.Status != TaskStatus.RanToCompletion) return;
+            var d = t.Result;
+            Dispatcher.UIThread.Post(() =>
+            {
+                LockButtons();
+                card.Classes.Add("resolved");
+                hint.Text = d.Approved
+                    ? I18n.T("✔ 已批准")
+                    : I18n.T("✘ 已拒绝：{0}", d.Reason ?? "");
+            });
+        }, TaskScheduler.Default);
 
         stack.Children.Add(reasonBox);
         stack.Children.Add(row);
@@ -1139,7 +1230,7 @@ public partial class MainWindow : Window
         }
         if (text.Length > 0)
         {
-            stack.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap });
+            stack.Children.Add(MarkdownView.Selectable(new SelectableTextBlock { Text = text, TextWrapping = TextWrapping.Wrap }));
         }
         var border = new Border { Classes = { "userBubble" }, Child = stack };
         _chatPanel!.Children.Add(border);
@@ -1149,12 +1240,12 @@ public partial class MainWindow : Window
     private Control AddAssistantBubble(string? initialText = null)
     {
         // 流式期间用纯文本（高频更新稳定），回合完成后替换为 Markdown 渲染
-        Control viewer = new SelectableTextBlock
+        Control viewer = MarkdownView.Selectable(new SelectableTextBlock
         {
             Text = initialText ?? "",
             TextWrapping = TextWrapping.Wrap,
             Foreground = new SolidColorBrush(Color.Parse("#e6e6e6")),
-        };
+        });
         var border = new Border
         {
             Classes = { "assistantBubble" },
@@ -1232,6 +1323,16 @@ public partial class MainWindow : Window
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = new SolidColorBrush(Color.Parse("#e6e6e6")),
             };
+        }
+        // 跨块多行复制：最终回答由多个文本块组成（选择无法跨块），每个块的右键菜单
+        // 追加"复制全文"——一键复制整条回答的纯文本（保留多行结构）
+        foreach (var block in render.GetVisualDescendants().OfType<SelectableTextBlock>())
+        {
+            MarkdownView.AppendMenuItem(block, "复制全文", () => MarkdownView.ToPlainText(answer));
+        }
+        if (render is SelectableTextBlock direct)
+        {
+            MarkdownView.AppendMenuItem(direct, "复制全文", () => MarkdownView.ToPlainText(answer));
         }
         _chatPanel!.Children.Add(render);
         ScrollToEnd();
@@ -1667,6 +1768,7 @@ public partial class MainWindow : Window
     protected override void OnClosing(WindowClosingEventArgs e)
     {
         // 点关闭 = 隐藏（气泡仍常驻；退出走气泡右键菜单）
+        SaveBoundsNow();
         e.Cancel = true;
         Hide();
         base.OnClosing(e);

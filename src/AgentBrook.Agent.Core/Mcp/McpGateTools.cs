@@ -20,9 +20,17 @@ public sealed class McpGateTools
     /// <summary>拒绝调用的工具（读取媒体为 base64 会把上下文撑爆，当前模型无视觉能力）。</summary>
     private static readonly HashSet<string> DenyList = new(StringComparer.OrdinalIgnoreCase) { "read_media_file" };
 
-    public McpGateTools(List<McpConnection> connections, int maxOutputChars)
+    /// <summary>
+    /// allowedServers 非空时为 worker 作用域门面：共享主连接，但只放行白名单服务器的工具
+    /// （连接由主 Agent 启动时建立并复用，不重复拉起服务器进程）。
+    /// </summary>
+    public McpGateTools(List<McpConnection> connections, int maxOutputChars, IReadOnlyList<string>? allowedServers = null)
     {
-        _connections = connections;
+        _connections = allowedServers is null
+            ? connections
+            : connections.Where(c => allowedServers.Any(a =>
+                    string.Equals(a, c.ServerName, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
         _maxOutputChars = maxOutputChars;
     }
 

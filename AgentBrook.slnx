@@ -1,5 +1,5 @@
 <Solution>
-  <Project Path="AgentBrook.Agent.Core/AgentBrook.Agent.Core.csproj" />
-  <Project Path="AgentBrook.Agent/AgentBrook.Agent.csproj" />
-  <Project Path="AgentBrook.Helper/AgentBrook.Helper.csproj" />
+  <Project Path="src/AgentBrook.Agent.Core/AgentBrook.Agent.Core.csproj" />
+  <Project Path="src/AgentBrook.Agent/AgentBrook.Agent.csproj" />
+  <Project Path="src/AgentBrook.Helper/AgentBrook.Helper.csproj" />
 </Solution>

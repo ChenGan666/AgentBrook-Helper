@@ -53,6 +53,26 @@ public partial class ModelSettingsWindow : Window
         this.FindControl<Button>("SavePersonalBtn")!.Click += async (_, _) => await SavePersonalAsync();
         this.FindControl<Button>("ResetPosBtn")!.Click += (_, _) => ResetBubblePosition();
 
+        // 开机自启动：状态回显读系统侧实际值（注册表/plist），切换即生效（不经过"保存"按钮）
+        var autoStartSwitch = this.FindControl<ToggleSwitch>("AutoStartSwitch");
+        if (autoStartSwitch is not null)
+        {
+            autoStartSwitch.IsEnabled = AutoStart.Supported;
+            autoStartSwitch.IsChecked = AutoStart.IsEnabled();   // 先赋初值再订阅，避免回显触发保存
+            autoStartSwitch.IsCheckedChanged += (_, _) =>
+            {
+                var on = autoStartSwitch.IsChecked == true;
+                var err = AutoStart.SetEnabled(on);
+                var hint = this.FindControl<TextBlock>("AutoStartHint");
+                if (hint is not null)
+                {
+                    hint.Text = err is null
+                        ? I18n.T(on ? "✔ 已开启：下次登录自动启动" : "已关闭开机自启动")
+                        : I18n.T("设置失败：{0}", err);
+                }
+            };
+        }
+
         // 只响应「选中」态：互斥切换时旧项的取消事件不参与页面决定
         NavGeneral.IsCheckedChanged += (_, _) =>
         {
@@ -224,6 +244,37 @@ public partial class ModelSettingsWindow : Window
         if (saveBtn is not null) saveBtn.Content = I18n.T("保存常规设置");
         var promptBox2 = this.FindControl<TextBox>("CustomPromptBox");
         if (promptBox2 is not null) promptBox2.Watermark = I18n.T("例如：回答尽量简短；优先用表格展示数据…");
+        // 提示音偏好：开关/音色切换即保存并试听（不经过"保存"按钮）
+        var notifySwitch = this.FindControl<ToggleSwitch>("NotifySoundSwitch");
+        var notifyBox = this.FindControl<ComboBox>("NotifySoundBox");
+        if (notifySwitch is not null && notifyBox is not null)
+        {
+            notifySwitch.IsChecked = AssistantIdentity.NotifySoundOn;
+            notifyBox.SelectedIndex = AssistantIdentity.NotifySoundId switch
+            {
+                "glass" => 1,
+                "hero" => 2,
+                _ => 0,
+            };
+            notifyBox.IsEnabled = AssistantIdentity.NotifySoundOn;
+            notifySwitch.IsCheckedChanged += (_, _) =>
+            {
+                var on = notifySwitch.IsChecked == true;
+                AssistantIdentity.SaveNotifyPrefs(on, AssistantIdentity.NotifySoundId);
+                notifyBox.IsEnabled = on;
+                if (on)
+                {
+                    NotifySound.Play(AssistantIdentity.NotifySoundId);   // 开启时试听
+                }
+            };
+            notifyBox.SelectionChanged += (_, _) =>
+            {
+                var id = (notifyBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "ding";
+                AssistantIdentity.SaveNotifyPrefs(AssistantIdentity.NotifySoundOn, id);
+                NotifySound.Play(id);   // 换音色即试听
+            };
+        }
+
         var saveApply = this.FindControl<Button>("SaveApplyBtn");
         if (saveApply is not null) saveApply.Content = I18n.T("保存并应用");
         var closeBtn = this.FindControl<Button>("CloseBtn");
@@ -244,6 +295,20 @@ public partial class ModelSettingsWindow : Window
         SetT("LabelReplyLang", "交流语言（影响模型回复语言）");
         SetT("LabelCustomPrompt", "默认提示词（附加到系统指令，每轮生效）");
         SetT("LabelUiLang", "界面语言（UI 显示；切换后重启应用完全生效）");
+        SetT("LabelAutoStart", "开机自启动");
+        SetT("AutoStartDesc", "登录系统后自动启动，气泡常驻待命");
+        SetT("LabelNotifySound", "提示音");
+        SetT("NotifySoundDesc", "任务完成且对话窗不在前台时播放");
+        var nsBox = this.FindControl<ComboBox>("NotifySoundBox");
+        if (nsBox is not null)
+        {
+            var items = nsBox.Items.OfType<ComboBoxItem>().ToList();
+            var names = new[] { I18n.T("叮"), I18n.T("玻璃"), I18n.T("和弦") };
+            for (var k = 0; k < items.Count && k < names.Length; k++)
+            {
+                items[k].Content = names[k];
+            }
+        }
         SetT("AppearanceTitle", "外观");
         SetT("AppearanceDesc", "悬浮气泡的个性化显示。");
         SetT("LabelBubbleIcon", "气泡图标");

@@ -6,8 +6,15 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>AgentBrook.Helper</RootNamespace>
-    <Description>AgentBrook.Helper —— macOS 桌面客户端（Avalonia）：语音优先，复用 AgentBrook.Agent.Core。</Description>
+    <Description>AgentBrook.Helper —— 跨平台桌面客户端（Avalonia，macOS/Windows）：语音优先，复用 AgentBrook.Agent.Core。</Description>
+    <!-- Windows 可执行文件图标（macOS 走 build-mac-app.sh 打包的 .icns） -->
+    <ApplicationIcon>Assets/app-icon.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 窗口图标（axaml 里以 avares:// 引用） -->
+    <AvaloniaResource Include="Assets/app-icon.png" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.1.2" />

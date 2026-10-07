@@ -2,19 +2,29 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="AgentBrook.Helper.BubbleWindow"
         Title="Brook"
-        Width="96" Height="96"
+        Icon="avares://AgentBrook.Helper/Assets/app-icon.png"
+        Width="240" Height="330"
         WindowDecorations="None"
         TransparencyLevelHint="Transparent"
-        Background="Transparent"
+        Background="{x:Null}"
         ShowInTaskbar="False"
         ShowActivated="False"
         Topmost="True"
         CanResize="False">
 
-    <!-- 全部子元素显式尺寸 + 居中：所有圆形严格同心于 (48,48)，光晕不越界 -->
+    <!-- 布局：气泡顶部居中下移 24px（给轨道环留出窗口内空间，避免图标被上边缘裁剪），
+         气泡圆心 = (120, 72)；轨道图标绕此圆心静态排布（按启动顺序均分圆）；
+         提示卡在气泡下方。加大的窗口区域透明且不参与命中，不挡桌面点击。 -->
     <Panel>
-        <Panel x:Name="Root" Width="96" Height="96">
-            <!-- 外圈光晕（呼吸动画；104x104，比主体大 8px，留在窗口内不裁剪） -->
+        <!-- 工具/子Agent 轨道层：与气泡同位（96x96，画布内圆心 48,48 即气泡圆心），无任何变换 -->
+        <Canvas x:Name="OrbitLayer" Width="96" Height="96"
+                HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,24,0,0"
+                IsHitTestVisible="False"/>
+
+        <!-- 气泡本体（原 96x96 结构不动，顶部居中下移 24px） -->
+        <Panel x:Name="Root" Width="96" Height="96"
+               HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,24,0,0">
+            <!-- 外圈光晕（呼吸动画；83x83，比主体大，留在气泡区内不裁剪） -->
             <Ellipse x:Name="GlowOuter" Width="83" Height="83"
                      HorizontalAlignment="Center" VerticalAlignment="Center"
                      Fill="#4a9eff" Opacity="0.22">
@@ -60,10 +70,15 @@
                 </Ellipse.Styles>
             </Ellipse>
 
-            <!-- 中心图标（状态切换） -->
-            <PathIcon x:Name="BubbleIcon" Width="27" Height="27"
-                      HorizontalAlignment="Center" VerticalAlignment="Center"
-                      Foreground="#ffffff"/>
+            <!-- 中心图标（状态切换）。用 Path 而非 PathIcon：Avalonia 12 的 PathIcon 会无视
+                 RenderTransform 的 CenterX/CenterY（等效绕 0,0 转），齿轮自转会偏轴 -->
+            <Path x:Name="BubbleIcon" Width="27" Height="27"
+                  HorizontalAlignment="Center" VerticalAlignment="Center"
+                  Fill="#ffffff" Stretch="Uniform"/>
         </Panel>
+
+        <!-- 提示卡堆（问候语 / 审批快捷操作 / 提问提醒），气泡下方 -->
+        <StackPanel x:Name="ToastPanel" Width="228" Spacing="8"
+                    HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,140,0,0"/>
     </Panel>
 </Window>

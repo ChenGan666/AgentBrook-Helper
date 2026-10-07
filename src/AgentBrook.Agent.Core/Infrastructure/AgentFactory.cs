@@ -1,4 +1,6 @@
 using AgentBrook.Agent.Configuration;
+using AgentBrook.Agent.Mcp;
+using AgentBrook.Agent.Team;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OpenAI;
@@ -36,7 +38,9 @@ public static class AgentFactory
         AIContextProvider memoryProvider)
     {
         // 技能清单拼进系统指令：模型随时知道有哪些技能可加载（渐进式披露的元数据层）。
-        var instructions = config.Agent.Instructions.Trim() + "\n\n" + skillSummary;
+        // 运行环境块按当前 OS 自动生成，让模型用对命令语法（Windows cmd/python、macOS zsh/python3）。
+        var instructions = config.Agent.Instructions.Trim() + "\n\n" + skillSummary
+            + "\n\n" + PlatformEnvironment.DescribeBlock().Trim();
 
         var chatOptions = new ChatOptions
         {
@@ -73,7 +77,9 @@ public static class AgentFactory
     }
 
     /// <summary>
-    /// 创建项目中的工作 Agent：轻量工具面（项目根文件工具 + 团队通讯），角色指令驱动。
+    /// 创建项目团队中的工作 Agent：文件工具 + 团队通讯，按 caps 追加 shell / 白名单 MCP。
+    /// shell 的工作目录与文件沙箱同为项目根；所有 shell 命令记入项目审计日志。
+    /// mcpConnections 为主 Agent 启动时建立的共享连接（worker 侧按白名单过滤放行）。
     /// </summary>
     public static Microsoft.Agents.AI.ChatClientAgent CreateWorkerAgent(
         AppConfig config,
@@ -81,9 +87,11 @@ public static class AgentFactory
         string projectRoot,
         string workerName,
         string role,
-        string instructions)
+        string instructions,
+        List<McpConnection>? mcpConnections = null,
+        WorkerCaps? caps = null)
     {
-        var projectWorkspace = new Workspace(Path.Combine(projectRoot));
+        var projectWorkspace = new Workspace(projectRoot);
         var fileTools = new Tools.FileTools(projectWorkspace, config.Agent.MaxToolOutputChars);
 
         var toolList = new List<AITool>
@@ -99,6 +107,32 @@ public static class AgentFactory
         toolList.Add(AIFunctionFactory.Create(bus.send_message));
         toolList.Add(AIFunctionFactory.Create(bus.check_messages));
 
+        var extra = "";
+        if (caps is { Shell: true })
+        {
+            var auditFile = Path.Combine(projectRoot, "messages", "audit.log");
+            var shell = new Tools.ShellTools(projectWorkspace, config.Agent.ShellTimeoutSeconds, config.Agent.MaxToolOutputChars,
+                cmd =>
+                {
+                    try
+                    {
+                        Directory.CreateDirectory(Path.GetDirectoryName(auditFile)!);
+                        File.AppendAllText(auditFile, $"{DateTime.Now:HH:mm:ss} [{workerName}] {cmd}\n");
+                    }
+                    catch { }
+                });
+            toolList.Add(AIFunctionFactory.Create(shell.run_command));
+            extra += "\n- 你拥有 shell 工具（run_command，工作目录 = 项目根）：可执行构建、查询、脚本等命令。所有命令会记入审计日志，破坏性操作务必谨慎。";
+        }
+        if (caps is { McpServers.Count: > 0 })
+        {
+            // worker 作用域 MCP：共享主连接，但只放行被授权的服务器
+            var mcp = new Mcp.McpGateTools(mcpConnections, config.Agent.MaxToolOutputChars, caps.McpServers);
+            toolList.Add(AIFunctionFactory.Create(mcp.mcp_call));
+            toolList.Add(AIFunctionFactory.Create(mcp.mcp_tool_help));
+            extra += "\n# 可用 MCP 工具（仅限被授权的服务器）\n" + mcp.BuildCatalogBlock();
+        }
+
         var chatOptions = new ChatOptions
         {
             Instructions = $"""
@@ -108,6 +142,7 @@ public static class AgentFactory
                 - 项目根：你的文件工具以此为沙箱。你的专属目录是 workers/{workerName}/（把产出写在这里）。
                 - shared/ 是团队共享交付区：需要与其他成员共享的产出写进去，并在留言中告知位置。
                 - 消息工具：send_message 给协调者（to 填 orchestrator）或其他成员留言；check_messages 取件。
+                {extra}
 
                 # 工作准则
                 1. 专注完成分派的任务，产出写入自己的工作目录或 shared/。

@@ -8,6 +8,8 @@ using Avalonia.Controls.Documents;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.Input.Platform;
+using Avalonia.VisualTree;
 using Markdig;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
@@ -49,7 +51,7 @@ public static class MarkdownView
 
     private static Control? RenderBlock(Block block) => block switch
     {
-        HeadingBlock h => new TextBlock
+        HeadingBlock h => Selectable(new SelectableTextBlock
         {
             Text = GetInlineText(h.Inline),
             FontSize = h.Level switch { 1 => 22, 2 => 19, 3 => 17, _ => 16 },
@@ -57,7 +59,7 @@ public static class MarkdownView
             Foreground = BrushLight,
             Margin = new Thickness(0, h.Level <= 2 ? 8 : 4, 0, 2),
             TextWrapping = TextWrapping.Wrap,
-        },
+        }),
         ParagraphBlock p => RenderParagraph(p),
         Markdig.Syntax.FencedCodeBlock fenced => RenderCodeBlock(fenced),
         Markdig.Syntax.CodeBlock code => RenderCodeBlock(code),
@@ -102,13 +104,53 @@ public static class MarkdownView
             }
         }
 
-        var tb = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = BrushLight, FontSize = 15 };
+        var tb = Selectable(new SelectableTextBlock { TextWrapping = TextWrapping.Wrap, Foreground = BrushLight, FontSize = 15 });
         if (p.Inline is not null)
         {
             FillInlines(p.Inline, tb.Inlines);
         }
         return tb;
     }
+
+    /// <summary>可选中可复制的文本块：附右键"复制"菜单（有选区复制选区，否则复制全文）。供对话区各文本块复用。</summary>
+    public static T Selectable<T>(T tb) where T : SelectableTextBlock
+    {
+        var item = new MenuItem { Header = I18n.T("复制") };
+        item.Click += async (_, _) =>
+        {
+            var text = string.IsNullOrEmpty(tb.SelectedText) ? tb.Text ?? "" : tb.SelectedText;
+            var clip = TopLevel.GetTopLevel(tb)?.Clipboard;
+            if (clip is not null && !string.IsNullOrEmpty(text))
+            {
+                await clip.SetTextAsync(text);
+            }
+        };
+        tb.ContextMenu = new ContextMenu { Items = { item } };
+        return tb;
+    }
+
+    /// <summary>向已挂右键菜单的可选文本块追加一个复制项（如"复制全文/复制表格"，解决跨块多行复制）。</summary>
+    public static void AppendMenuItem(SelectableTextBlock tb, string header, Func<string> textProvider)
+    {
+        if (tb.ContextMenu is not ContextMenu menu)
+        {
+            return;
+        }
+        var item = new MenuItem { Header = I18n.T(header) };
+        item.Click += async (_, _) =>
+        {
+            var text = textProvider();
+            var clip = TopLevel.GetTopLevel(tb)?.Clipboard;
+            if (clip is not null && !string.IsNullOrEmpty(text))
+            {
+                await clip.SetTextAsync(text);
+            }
+        };
+        menu.Items.Add(item);
+    }
+
+    /// <summary>把 Markdown 转为纯文本（复制全文用，保留换行结构、去除标记语法）。</summary>
+    public static string ToPlainText(string markdown) => Markdown.ToPlainText(markdown ?? "", Pipeline);
 
     private static void FillInlines(Markdig.Syntax.Inlines.ContainerInline container, Avalonia.Controls.Documents.InlineCollection target)
     {
@@ -255,13 +297,13 @@ public static class MarkdownView
         {
             var text = GetBlockText(item);
             var prefix = list.IsOrdered ? $"{index}. " : "•  ";
-            var tb = new TextBlock
+            var tb = Selectable(new SelectableTextBlock
             {
                 Text = prefix + text,
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = BrushLight,
                 FontSize = 15,
-            };
+            });
             panel.Children.Add(tb);
             index++;
         }
@@ -277,13 +319,13 @@ public static class MarkdownView
             BorderThickness = new Thickness(3, 0, 0, 0),
             Padding = new Thickness(10, 4, 0, 4),
             Margin = new Thickness(0, 2),
-            Child = new TextBlock
+            Child = Selectable(new SelectableTextBlock
             {
                 Text = text,
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = new SolidColorBrush(Color.Parse("#b0b8c4")),
                 FontSize = 14.5,
-            },
+            }),
         };
     }
 
@@ -291,6 +333,7 @@ public static class MarkdownView
     {
         var grid = new Grid { Margin = new Thickness(0, 4) };
         var rowCount = 0;
+        var allRows = new List<List<string>>();   // 供"复制表格"导出 TSV
         foreach (var row in table.OfType<Markdig.Extensions.Tables.TableRow>())
         {
             var cells = new List<string>();
@@ -298,6 +341,7 @@ public static class MarkdownView
             {
                 cells.Add(GetBlockText(cell).Trim());
             }
+            allRows.Add(cells);
             grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
             var col = 0;
             foreach (var cellText in cells)
@@ -312,7 +356,7 @@ public static class MarkdownView
                     BorderBrush = new SolidColorBrush(Color.Parse("#4a4a4a")),
                     BorderThickness = new Thickness(0.5),
                     Padding = new Thickness(8, 4),
-                    Child = new TextBlock
+                    Child = Selectable(new SelectableTextBlock
                     {
                         Text = cellText,
                         FontSize = 13.5,
@@ -321,7 +365,7 @@ public static class MarkdownView
                         Foreground = isHeader || rowCount == 1
                             ? new SolidColorBrush(Color.Parse("#cdd9e5"))
                             : BrushLight,
-                    },
+                    }),
                 };
                 Grid.SetRow(cellBorder, grid.RowDefinitions.Count - 1);
                 Grid.SetColumn(cellBorder, col);
@@ -329,6 +373,12 @@ public static class MarkdownView
                 col++;
             }
             rowCount++;
+        }
+        // "复制表格"：每个单元格的右键菜单都追加整表 TSV 导出（可直接粘贴进 Excel）
+        var tsv = string.Join("\n", allRows.Select(r => string.Join("\t", r)));
+        foreach (var cellTextBlock in grid.GetVisualDescendants().OfType<SelectableTextBlock>())
+        {
+            AppendMenuItem(cellTextBlock, "复制表格", () => tsv);
         }
         return new ScrollViewer
         {
@@ -341,7 +391,7 @@ public static class MarkdownView
     private static Control RenderPlainText(Block block)
     {
         var text = GetBlockText(block);
-        return new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, Foreground = BrushLight };
+        return Selectable(new SelectableTextBlock { Text = text, TextWrapping = TextWrapping.Wrap, Foreground = BrushLight });
     }
 
     private static string GetBlockText(Block block)
@@ -503,24 +553,18 @@ public static class MarkdownView
         return null;
     }
 
-    /// <summary>打开目标：URL 用系统浏览器，本地文件用系统默认程序。</summary>
+    /// <summary>打开目标：URL 用系统浏览器，本地文件用系统默认程序（跨平台，跟随系统关联）。</summary>
     public static void OpenTarget(string target)
     {
         try
         {
+            // UseShellExecute=true 三端通用：URL 走默认浏览器，本地路径走系统默认程序（Windows ShellExecute / macOS open / Linux xdg-open）。
+            // 不能用固定的 "open" 命令：Windows 上不存在，会静默失败导致链接无法打开。
             if (target.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-                target.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                target.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+                File.Exists(target) || Directory.Exists(target))
             {
                 Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
-            }
-            else if (File.Exists(target) || Directory.Exists(target))
-            {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = "open",
-                    Arguments = $"\"{target}\"",
-                    UseShellExecute = false,
-                });
             }
         }
         catch

@@ -58,6 +58,12 @@ public sealed class AgentOptions
     /// </summary>
     public List<string> RequireApprovalTools { get; set; } = [];
 
+    /// <summary>
+    /// 项目团队 worker 的能力天花板：none（仅文件工具）/ shell / mcp / all（默认）。
+    /// spawn_worker 请求超出天花板的能力时直接拒绝。
+    /// </summary>
+    public string WorkerCapabilityCeiling { get; set; } = "all";
+
     /// <summary>技能市场索引 URL（JSON：{"skills":[{"name","description","url"}]}）。留空表示未启用。</summary>
     public string? SkillMarketUrl { get; set; }
 

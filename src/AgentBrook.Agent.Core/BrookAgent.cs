@@ -169,9 +169,11 @@ public sealed class BrookAgent : IAsyncDisposable
         // 项目团队：主 Agent 具备派生/指挥工作 Agent 的能力
         var teamTools = new Team.TeamTools(
             workspace.Root,
-            (workerName, role, workerInstructions) => AgentFactory.CreateWorkerAgent(
-                config, chatClient, Path.Combine(workspace.Root, "projects"),
-                workerName, role, workerInstructions),
+            config,
+            interaction,
+            (projectRoot, workerName, role, workerInstructions, caps) => AgentFactory.CreateWorkerAgent(
+                config, chatClient, projectRoot, workerName, role, workerInstructions,
+                mcpConnections, caps),
             notify: msg => log($"🧵 {msg}"));
 
         var teamInstructions = """
@@ -747,6 +749,10 @@ public sealed class BrookAgent : IAsyncDisposable
             // 每轮 stream 重置：TurnAnswer 只保留最后一轮（最终回答），不累积中间轮的过渡文本
             TurnAnswer = "";
 
+            // callId → 工具名：ToolCompleted 事件需要真实工具名（FunctionResultContent 只带 CallId），
+            // 供宿主做"哪个工具完成"的精确匹配（如气泡轨道图标的成对显隐）。
+            var callNames = new Dictionary<string, string>();
+
             await foreach (var update in updates.WithCancellation(ct))
             {
                 roundUpdates.Add(update);
@@ -758,6 +764,7 @@ public sealed class BrookAgent : IAsyncDisposable
                 {
                     if (content is FunctionCallContent call)
                     {
+                        callNames[call.CallId] = call.Name;
                         var argsJson = call.Arguments is { Count: > 0 } args
                             ? JsonSerializer.Serialize(args)
                             : null;
@@ -773,7 +780,8 @@ public sealed class BrookAgent : IAsyncDisposable
                         var preview = result.Exception is not null
                             ? "错误：" + result.Exception.Message
                             : TruncateForPreview(result.Result?.ToString());
-                        yield return new BrookEvent.ToolCompleted(result.CallId, preview);
+                        var completedName = callNames.GetValueOrDefault(result.CallId, result.CallId);
+                        yield return new BrookEvent.ToolCompleted(completedName, preview);
                     }
                     if (content is ToolApprovalRequestContent approval)
                     {
@@ -841,6 +849,21 @@ public sealed class BrookAgent : IAsyncDisposable
         }
         text = text.Trim();
         return text.Length <= 300 ? text : text[..300] + "…";
+    }
+
+    /// <summary>
+    /// 轻量一次性补全（走摘要档模型，不进会话历史）：启动问候语等旁路生成用。
+    /// 失败由调用方兜底（问候语等场景静默降级）。
+    /// </summary>
+    public async Task<string> QuickCompleteAsync(string systemPrompt, string userPrompt, CancellationToken cancellationToken = default)
+    {
+        var (_, client) = _router.Resolve(ModelRouter.RoleSummarize, _chatClient);
+        var response = await client.GetResponseAsync(
+        [
+            new ChatMessage(ChatRole.System, systemPrompt),
+            new ChatMessage(ChatRole.User, userPrompt),
+        ], cancellationToken: cancellationToken);
+        return (response.Text ?? "").Trim();
     }
 
     private ChatClientAgentRunOptions BuildRunOptions() =>

@@ -3,6 +3,7 @@
         x:Class="AgentBrook.Helper.MainWindow"
         RequestedThemeVariant="Dark"
         Title="Brook 助手"
+        Icon="avares://AgentBrook.Helper/Assets/app-icon.png"
         Width="520" Height="800"
         MinWidth="420" MinHeight="560"
         Background="#1f1f1f"

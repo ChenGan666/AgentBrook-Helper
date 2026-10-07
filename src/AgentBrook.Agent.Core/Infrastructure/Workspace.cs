@@ -51,9 +51,23 @@ public sealed class Workspace
         return full;
     }
 
-    /// <summary>定位应用根目录：从程序目录向上找包含 csproj 的目录；找不到则回退到当前工作目录。</summary>
+    /// <summary>
+    /// 定位应用根目录（分层回退，保证打包发布到任何机器都能得到可写的应用数据目录）：
+    /// 1) 环境变量 AGENTBROOK_HOME（显式指定）；
+    /// 2) 开发布局：从程序目录向上找包含 csproj 的目录（源码运行）；
+    /// 3) 打包发布（.app / 安装目录，找不到 csproj）：使用用户数据目录
+    ///    （macOS ~/Library/Application Support/AgentBrook、Windows %APPDATA%\AgentBrook、Linux ~/.agentbrook）。
+    /// 旧实现回退到当前工作目录，Finder/LaunchServices 启动时 CWD 为 "/"，
+    /// 导致工作区创建失败、应用卡在"启动中"。
+    /// </summary>
     public static string LocateAppRoot()
     {
+        var home = Environment.GetEnvironmentVariable("AGENTBROOK_HOME");
+        if (!string.IsNullOrWhiteSpace(home))
+        {
+            return Path.GetFullPath(home);
+        }
+
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
         {
@@ -63,11 +77,39 @@ public sealed class Workspace
             }
             dir = dir.Parent;
         }
-        return Directory.GetCurrentDirectory();
+
+        if (OperatingSystem.IsMacOS())
+        {
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                "Library", "Application Support", "AgentBrook");
+        }
+        if (OperatingSystem.IsWindows())
+        {
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "AgentBrook");
+        }
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".agentbrook");
     }
 
     /// <summary>把配置值中的 {WORKSPACE} 占位符替换为工作区绝对路径。</summary>
     public string Expand(string value) => value.Replace("{WORKSPACE}", Root);
+
+    /// <summary>
+    /// 解析工作区目录（静态共享规则，UiPrefs 与宿主初始化必须用同一份逻辑）：
+    /// 配置的路径存在（开发布局）则用之；全新安装的打包发布下不存在，
+    /// 回退为应用数据目录内的 workspace 并自动创建。
+    /// 返回绝对路径。
+    /// </summary>
+    public static string ResolveWorkspaceDir(string appRoot, string configuredWorkspaceRoot)
+    {
+        var configured = Path.GetFullPath(Path.Combine(appRoot, configuredWorkspaceRoot));
+        if (Directory.Exists(configured))
+        {
+            return configured;
+        }
+        var fallback = Path.Combine(appRoot, "workspace");
+        Directory.CreateDirectory(fallback);
+        return fallback;
+    }
 
     private static string EnsureDir(string path)
     {

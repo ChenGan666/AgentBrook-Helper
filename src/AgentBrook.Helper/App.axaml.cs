@@ -39,8 +39,9 @@ public partial class App : Application
             var conversation = new MainWindow();
             Controller.AttachConversation(conversation);
             Controller.AttachLifetime(desktop);
-
-            desktop.MainWindow = new BubbleWindow();
+            var bubble = new BubbleWindow();
+            Controller.AttachBubble(bubble);
+            desktop.MainWindow = bubble;
             // --show：启动即打开对话窗（免找气泡，也便于自动化自测）
             if (desktop.Args is not null && desktop.Args.Contains("--show"))
             {
@@ -101,6 +102,27 @@ public partial class App : Application
                         new System.Threading.Tasks.TaskCompletionSource<string>());
                 };
                 timer.Start();
+            }
+            // --say "文本"：就绪后自动发送一条消息（端到端测试钩子，模拟用户输入）
+            if (desktop.Args is not null)
+            {
+                var sayIdx = Array.FindIndex(desktop.Args, a => a == "--say");
+                if (sayIdx >= 0 && sayIdx + 1 < desktop.Args.Length)
+                {
+                    var sayText = desktop.Args[sayIdx + 1];
+                    var sayTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+                    sayTimer.Tick += async (_, _) =>
+                    {
+                        if (!Controller.Ready)
+                        {
+                            return;   // 未就绪：定时器继续等待
+                        }
+                        sayTimer.Stop();
+                        Console.Error.WriteLine($"[say] 发送测试消息：{sayText}");
+                        await Controller.SendAsync(sayText);
+                    };
+                    sayTimer.Start();
+                }
             }
             _ = Controller.InitializeAsync();
         }

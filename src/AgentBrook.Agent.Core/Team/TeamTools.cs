@@ -1,5 +1,7 @@
 using System.Text;
 using System.ComponentModel;
+using System.Text.Json;
+using AgentBrook.Agent.Configuration;
 using Microsoft.Extensions.AI;
 
 namespace AgentBrook.Agent.Team;
@@ -7,19 +9,28 @@ namespace AgentBrook.Agent.Team;
 /// <summary>
 /// 主 Agent 的项目团队工具：分解目标 → 征询用户 → 派生工作 Agent → 分派任务 → 汇总交付。
 /// start_project 前其他团队工具不可用（未激活会给出引导）。
+/// spawn_worker 可按需授予 shell / MCP 能力：受配置天花板约束，且每次授予需用户批准。
 /// </summary>
 public sealed class TeamTools
 {
     private TeamManager? _team;
     private readonly string _projectsRoot;
-    private readonly Func<string, string, string, Microsoft.Agents.AI.AIAgent> _workerFactory;
+    private readonly string _capabilityCeiling;
+    private readonly List<string> _mcpServers;
+    private readonly IBrookInteraction _interaction;
+    private readonly Func<string, string, string, string, WorkerCaps?, Microsoft.Agents.AI.AIAgent> _workerFactory;
     private readonly Action<string> _notify;
 
     public TeamTools(string workspaceRoot,
-        Func<string, string, string, Microsoft.Agents.AI.AIAgent> workerFactory,
+        Configuration.AppConfig config,
+        IBrookInteraction interaction,
+        Func<string, string, string, string, WorkerCaps?, Microsoft.Agents.AI.AIAgent> workerFactory,
         Action<string> notify)
     {
         _projectsRoot = Path.Combine(workspaceRoot, "projects");
+        _capabilityCeiling = config.Agent.WorkerCapabilityCeiling;
+        _mcpServers = config.MCP.Servers.Select(s => s.Name).ToList();
+        _interaction = interaction;
         _workerFactory = workerFactory;
         _notify = notify;
     }
@@ -46,20 +57,46 @@ public sealed class TeamTools
         return $"✔ 项目已开启：{root}\n目标：{goal}\n现在可以用 spawn_worker 派生工作 Agent。";
     }
 
-    [Description("派生一个工作 Agent：为其分配专属工作区、角色与指令。派生前应已通过 ask_user 与用户确认派生方案。")]
-    public string spawn_worker(
+    [Description("派生一个工作 Agent：为其分配专属工作区、角色与指令。派生前应已通过 ask_user 与用户确认派生方案。" +
+        "capabilities 非空时（授予 shell/MCP）需要用户批准该次能力授予。")]
+    public async Task<string> spawn_worker(
         [Description("工作 Agent 名（小写英文连字符，如 researcher-a）")] string name,
         [Description("角色定位，如：市场调研员")] string role,
-        [Description("该 Agent 的详细工作指令：职责、产出要求、注意事项")] string instructions)
+        [Description("该 Agent 的详细工作指令：职责、产出要求、注意事项")] string instructions,
+        [Description("授予的额外能力列表，可含 \"shell\"（执行命令）、\"mcp\"（全部已配置 MCP 服务器）、\"mcp:服务器名\"（指定服务器，可多个）。留空 = 仅文件工具（无需批准）。")] string[]? capabilities = null,
+        CancellationToken cancellationToken = default)
     {
         if (_team is null)
         {
             return "尚未开启项目：请先 start_project。";
         }
+
+        var (caps, capsError) = WorkerCaps.Parse(capabilities, _capabilityCeiling, _mcpServers);
+        if (capsError is not null)
+        {
+            return $"派生被拒绝：{capsError}";
+        }
+
         try
         {
-            var worker = _team.SpawnWorker(name.Trim(), role.Trim(), instructions.Trim());
-            return $"✔ 已派生「{worker.Name}」（{worker.Role}），工作区 workers/{worker.Name}/。用 assign_task 分派任务。";
+            if (caps is { Any: true })
+            {
+                // 能力授予需用户批准（完全访问模式自动通过；后台场景弹气泡快捷卡并响提示音）
+                var grantJson = JsonSerializer.Serialize(new
+                {
+                    name = name.Trim(),
+                    capabilities = caps.Describe(),
+                });
+                var decision = await _interaction.GetApprovalAsync("spawn_worker", grantJson, cancellationToken);
+                if (!decision.Approved)
+                {
+                    return $"派生「{name.Trim()}」被拒绝：{decision.Reason ?? "用户未批准能力授予"}。可去掉 capabilities 重新派生（仅文件工具，无需批准）。";
+                }
+            }
+
+            var worker = _team.SpawnWorker(name.Trim(), role.Trim(), instructions.Trim(), caps);
+            var granted = caps is { Any: true } ? $"\n已授予能力：{caps!.Describe()}（已记录审计日志）" : "";
+            return $"✔ 已派生「{worker.Name}」（{worker.Role}），工作区 workers/{worker.Name}/。用 assign_task 分派任务。{granted}";
         }
         catch (Exception ex)
         {
@@ -155,6 +192,10 @@ public sealed class TeamTools
         {
             var w = _team.GetWorker(name)!;
             sb.Append($"\n- {name}（{w.Role}）已完成任务 {w.CompletedTasks.Count} 项");
+            if (w.Caps is { Any: true })
+            {
+                sb.Append($"｜能力：{w.Caps.Describe()}");
+            }
         }
         return sb.ToString();
     }

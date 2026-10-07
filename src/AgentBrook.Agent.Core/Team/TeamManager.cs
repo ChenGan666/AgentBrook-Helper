@@ -10,6 +10,8 @@ public sealed class WorkerHandle
     public required string WorkerDirectory { get; init; }
     public required Microsoft.Agents.AI.AIAgent Agent { get; init; }
     public required Microsoft.Agents.AI.AgentSession Session { get; init; }
+    /// <summary>授予的额外能力（null = 仅文件工具）。</summary>
+    public WorkerCaps? Caps { get; init; }
     public List<string> CompletedTasks { get; } = [];
 }
 
@@ -20,11 +22,11 @@ public sealed class WorkerHandle
 public sealed class TeamManager
 {
     private readonly Dictionary<string, WorkerHandle> _workers = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Func<string, string, string, Microsoft.Agents.AI.AIAgent> _workerFactory;
+    private readonly Func<string, string, string, string, WorkerCaps?, Microsoft.Agents.AI.AIAgent> _workerFactory;
     private readonly Action<string>? _notify;
 
     public TeamManager(string projectRoot, string goal,
-        Func<string, string, string, Microsoft.Agents.AI.AIAgent> workerFactory,
+        Func<string, string, string, string, WorkerCaps?, Microsoft.Agents.AI.AIAgent> workerFactory,
         Action<string>? notify = null)
     {
         ProjectRoot = projectRoot;
@@ -55,8 +57,8 @@ public sealed class TeamManager
     public WorkerHandle? GetWorker(string name) =>
         _workers.TryGetValue(name, out var w) ? w : null;
 
-    /// <summary>派生工作 Agent：创建专属工作区目录 + 轻量 Agent（角色指令 + 项目文件工具 + 通讯工具）。</summary>
-    public WorkerHandle SpawnWorker(string name, string role, string instructions)
+    /// <summary>派生工作 Agent：创建专属工作区目录 + Agent（角色指令 + 项目文件工具 + 通讯工具 + 按能力授予的 shell/MCP）。</summary>
+    public WorkerHandle SpawnWorker(string name, string role, string instructions, WorkerCaps? caps = null)
     {
         if (_workers.ContainsKey(name))
         {
@@ -65,7 +67,7 @@ public sealed class TeamManager
         var workerDir = Path.Combine(WorkersRoot, name);
         Directory.CreateDirectory(workerDir);
 
-        var agent = _workerFactory(name, role, instructions);
+        var agent = _workerFactory(ProjectRoot, name, role, instructions, caps);
         var handle = new WorkerHandle
         {
             Name = name,
@@ -73,9 +75,20 @@ public sealed class TeamManager
             WorkerDirectory = workerDir,
             Agent = agent,
             Session = agent.CreateSessionAsync().GetAwaiter().GetResult(),
+            Caps = caps,
         };
         _workers[name] = handle;
-        Notify($"🧵 已派生工作 Agent「{name}」（{role}），工作区：workers/{name}/");
+        if (caps is { Any: true })
+        {
+            try
+            {
+                // 能力授予审计：写入项目 messages/audit.log
+                File.AppendAllText(Path.Combine(MessagesDir, "audit.log"),
+                    $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} 授予「{name}」能力：{caps.Describe()}\n");
+            }
+            catch { }
+        }
+        Notify($"🧵 已派生工作 Agent「{name}」（{role}）{(caps is { Any: true } ? $"，已授予：{caps.Describe()}" : "")}，工作区：workers/{name}/");
         return handle;
     }
 
