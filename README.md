@@ -28,7 +28,7 @@ It is not a chat wrapper around an API. The desktop shell is a thin layer — ro
 |---|---|
 | <img src="assets/ui-bubble-greeting.png" width="300"> | <img src="assets/ui-approval.png" width="300"> |
 | **While working: spinning gear + tool orbit** | **Full conversation: Markdown table replies** |
-| <img src="assets/ui-bubble-gear.png" width="300"> | <img src="assets/ui-chat.png" width="480"> |
+| <img src="assets/ui-bubble-gear.png" > | <img src="assets/ui-chat.png" width="480"> |
 
 **Settings**: main workspace / assistant identity / notification sound / launch at login — all in one place.
 

@@ -30,7 +30,7 @@ AgentBrook Helper 是一个真正跑在你机器上的 AI 智能体的桌面客�
 |---|---|
 | <img src="assets/ui-bubble-greeting.png" width="300"> | <img src="assets/ui-approval.png" width="300"> |
 | **处理中：齿轮自转 + 工具轨道** | **完整对话：Markdown 表格回复** |
-| <img src="assets/ui-bubble-gear.png" width="300"> | <img src="assets/ui-chat.png" width="480"> |
+| <img src="assets/ui-bubble-gear.png" > | <img src="assets/ui-chat.png" width="480"> |
 
 **设置**：主工作空间 / 助手身份 / 提示音 / 开机自启动，一站式配置。
 
