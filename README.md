@@ -22,6 +22,19 @@ It is built on **.NET 10** and **Microsoft Agent Framework (MAF)**, and talks to
 
 It is not a chat wrapper around an API. The desktop shell is a thin layer — roughly 300 lines of glue — over a host-agnostic agent core that the console client shares.
 
+## Screenshots
+
+| Resident bubble · Startup greeting | Approve before it runs |
+|---|---|
+| <img src="assets/ui-bubble-greeting.png" width="300"> | <img src="assets/ui-approval.png" width="300"> |
+| **While working: spinning gear + tool orbit** | **Full conversation: Markdown table replies** |
+| <img src="assets/ui-bubble-gear.png" width="300"> | <img src="assets/ui-chat.png" width="480"> |
+
+**Settings**: main workspace / assistant identity / notification sound / launch at login — all in one place.
+
+<img src="assets/ui-settings.png" width="480">
+
+
 ## Why it exists
 
 Agent runtimes are genuinely capable, but they live in terminals. A terminal is a tool you *go to*; a desktop assistant is one that is *already there*.

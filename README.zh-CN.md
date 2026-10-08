@@ -24,6 +24,19 @@ AgentBrook Helper 是一个真正跑在你机器上的 AI 智能体的桌面客�
 
 它不是套在 API 外面的聊天壳子。桌面外壳只是一层薄胶水——大约 300 行——底下是与宿主无关的智能体核心，控制台客户端共用同一份。
 
+## 界面预览
+
+| 常驻气泡 · 启动问候 | 审批后才执行 |
+|---|---|
+| <img src="assets/ui-bubble-greeting.png" width="300"> | <img src="assets/ui-approval.png" width="300"> |
+| **处理中：齿轮自转 + 工具轨道** | **完整对话：Markdown 表格回复** |
+| <img src="assets/ui-bubble-gear.png" width="300"> | <img src="assets/ui-chat.png" width="480"> |
+
+**设置**：主工作空间 / 助手身份 / 提示音 / 开机自启动，一站式配置。
+
+<img src="assets/ui-settings.png" width="480">
+
+
 ## 为什么需要它
 
 智能体运行时本身能力很强，但它们住在终端里。终端是你会「走过去用」的工具，而桌面助手是「已经在那儿」的那一个。
