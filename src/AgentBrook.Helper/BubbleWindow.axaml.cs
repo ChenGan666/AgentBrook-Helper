@@ -72,24 +72,24 @@ public partial class BubbleWindow : Window
 
         root.ContextRequested += (_, e) =>
         {
-            var openItem = new MenuItem { Header = I18n.T("打开对话窗体") };
+            var openItem = new MenuItem { Header = I18n.T("打开对话") };
             var modelItem = new MenuItem { Header = I18n.T("切换模型") };
-            var fullItem = new MenuItem { Header = _controller.FullAccess ? I18n.T("关闭完全访问") : I18n.T("开启完全访问（审批自动通过）") };
+            var settingsItem = new MenuItem { Header = I18n.T("打开设置") };
             var exitItem = new MenuItem { Header = I18n.T("退出 {0}", AssistantIdentity.Current) };
 
             openItem.Click += (_, _) => _controller.ShowConversation();
             modelItem.Click += (_, _) => _controller.CycleModel();
-            fullItem.Click += (_, _) =>
+            settingsItem.Click += (_, _) =>
             {
-                _controller.FullAccess = !_controller.FullAccess;
-                fullItem.Header = _controller.FullAccess ? I18n.T("关闭完全访问") : I18n.T("开启完全访问（审批自动通过）");
-                _controller.Conversation?.UpdateFullAccessVisual();   // 主窗芯片与 tooltip 同步
+                var settings = new ModelSettingsWindow();
+                settings.Show();
+                settings.Activate();
             };
             exitItem.Click += (_, _) => _controller.Shutdown();
 
             var menu = new ContextMenu
             {
-                Items = { openItem, modelItem, fullItem, new Separator(), exitItem },
+                Items = { openItem, modelItem, settingsItem, new Separator(), exitItem },
             };
             menu.Open(this);
             e.Handled = true;
