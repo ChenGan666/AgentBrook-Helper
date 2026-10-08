@@ -53,8 +53,6 @@ public partial class ModelSettingsWindow : Window
         this.FindControl<Button>("SavePersonalBtn")!.Click += async (_, _) => await SavePersonalAsync();
         this.FindControl<Button>("ResetPosBtn")!.Click += (_, _) => ResetBubblePosition();
 
-        this.FindControl<Button>("ResetPosBtn")!.Click += (_, _) => ResetBubblePosition();
-
         // 主工作空间：回显当前生效目录；保存/恢复写覆盖配置（重启应用生效）
         var wsBox = this.FindControl<TextBox>("WorkspaceBox");
         var wsSave = this.FindControl<Button>("WorkspaceSaveBtn");

@@ -12,6 +12,7 @@ using Avalonia.Animation;
 using Avalonia.Animation.Easings;
 using Avalonia.Controls.Shapes;
 using Avalonia.Threading;
+using System.Runtime.InteropServices;
 
 namespace AgentBrook.Helper;
 
@@ -68,7 +69,11 @@ public partial class BubbleWindow : Window
         {
             PlaceBubble();
             ApplyIdentityUi();
+            Dispatcher.UIThread.Post(UpdateClickThroughRegion, DispatcherPriority.Background);
         };   // Opened 在 Show 后确定触发
+
+        ScalingChanged += (_, _) =>
+            Dispatcher.UIThread.Post(UpdateClickThroughRegion, DispatcherPriority.Background);
 
         root.ContextRequested += (_, e) =>
         {
@@ -342,9 +347,18 @@ public partial class BubbleWindow : Window
             };
             timer.Start();
         }
+        // 布局完成后再更新一次命中区域，确保新提示卡被纳入可点击范围
+        Dispatcher.UIThread.Post(UpdateClickThroughRegion, DispatcherPriority.Background);
     }
 
-    private void RemoveToast(Border card) => _toastPanel.Children.Remove(card);
+    private void RemoveToast(Border card)
+    {
+        _toastPanel.Children.Remove(card);
+        // 强制重新测量并收缩窗口，避免卡片移除后仍残留透明命中区
+        _toastPanel.InvalidateMeasure();
+        this.InvalidateMeasure();
+        Dispatcher.UIThread.Post(UpdateClickThroughRegion, DispatcherPriority.Background);
+    }
 
     /// <summary>审批快捷卡：不拉起对话窗，直接在气泡上批准/拒绝（对话流中的卡片状态会同步）。</summary>
     public void ShowApprovalToast(string toolName, string? argsJson, TaskCompletionSource<ApprovalDecision> tcs)
@@ -699,4 +713,73 @@ public partial class BubbleWindow : Window
             _bubbleIcon.Data = g;
         }
     }
+
+    // ───────────────────────── Windows 透明区域点击穿透 ─────────────────────────
+    /// <summary>
+    /// 将气泡窗口的命中区域限定为可见的气泡本体（含光晕/轨道）和提示卡区域，
+    /// 其余透明区域不再拦截鼠标，使气泡下方的桌面程序可被正常点击。
+    /// 仅在 Windows 生效；macOS 的透明窗口默认已可穿透。
+    /// </summary>
+    private void UpdateClickThroughRegion()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        var handle = TryGetPlatformHandle()?.Handle;
+        if (handle is not { } hwnd || hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+        try
+        {
+            var scale = RenderScaling;
+            // 气泡本体 + 光晕 + 轨道图标大致覆盖范围：中心 (120,72) 半径 70
+            var bubbleLeft = (int)Math.Round((120 - 70) * scale);
+            var bubbleTop = (int)Math.Round((72 - 70) * scale);
+            var bubbleRight = (int)Math.Round((120 + 70) * scale);
+            var bubbleBottom = (int)Math.Round((72 + 70) * scale);
+            var hRgn = CreateEllipticRgn(bubbleLeft, bubbleTop, bubbleRight, bubbleBottom);
+
+            // 提示卡区域：居中 228 宽，从 y=140 开始，高度取实际渲染高度
+            var toastHeight = _toastPanel.Bounds.Height;
+            if (toastHeight > 0)
+            {
+                const double toastWidth = 228;
+                const double toastTopDip = 140;
+                const double toastLeftDip = (240 - toastWidth) / 2.0;
+                var toastLeft = (int)Math.Round(toastLeftDip * scale);
+                var toastTop = (int)Math.Round(toastTopDip * scale);
+                var toastRight = (int)Math.Round((toastLeftDip + toastWidth) * scale);
+                var toastBottom = (int)Math.Round((toastTopDip + toastHeight) * scale);
+                var hRect = CreateRectRgn(toastLeft, toastTop, toastRight, toastBottom);
+                CombineRgn(hRgn, hRgn, hRect, RGN_OR);
+                DeleteObject(hRect);
+            }
+
+            SetWindowRgn(hwnd, hRgn, true);
+            // SetWindowRgn 接管 HRGN 所有权，此处不再 DeleteObject(hRgn)
+        }
+        catch
+        {
+            // 平台 API 失败时回退到原始矩形窗口，不阻断主流程
+        }
+    }
+
+    [DllImport("gdi32.dll")]
+    private static extern IntPtr CreateEllipticRgn(int nLeftRect, int nTopRect, int nRightRect, int nBottomRect);
+
+    [DllImport("gdi32.dll")]
+    private static extern IntPtr CreateRectRgn(int nLeftRect, int nTopRect, int nRightRect, int nBottomRect);
+
+    [DllImport("gdi32.dll")]
+    private static extern int CombineRgn(IntPtr hrgnDest, IntPtr hrgnSrc1, IntPtr hrgnSrc2, int fnCombineMode);
+
+    [DllImport("gdi32.dll")]
+    private static extern int DeleteObject(IntPtr hObject);
+
+    [DllImport("user32.dll")]
+    private static extern int SetWindowRgn(IntPtr hWnd, IntPtr hRgn, [MarshalAs(UnmanagedType.Bool)] bool bRedraw);
+
+    private const int RGN_OR = 2;
 }

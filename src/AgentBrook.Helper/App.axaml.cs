@@ -147,6 +147,20 @@ public partial class App : Application
                     sayTimer.Start();
                 }
             }
+            // --fakepaste：就绪后模拟一次 Ctrl/Cmd+V 按键路由事件（粘贴链路的端到端测试钩子）
+            if (desktop.Args is not null && desktop.Args.Contains("--fakepaste"))
+            {
+                var fpTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(6) };
+                fpTimer.Tick += (_, _) =>
+                {
+                    fpTimer.Stop();
+                    if (App.Controller.ConversationWindow is MainWindow mw)
+                    {
+                        mw.RaisePasteKeyEvent();
+                    }
+                };
+                fpTimer.Start();
+            }
             _ = Controller.InitializeAsync();
         }
         base.OnFrameworkInitializationCompleted();

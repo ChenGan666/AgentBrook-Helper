@@ -736,6 +736,19 @@ public sealed class BrookAgent : IAsyncDisposable
         string userText,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        await foreach (var e in RunAsync(new ChatMessage(ChatRole.User, userText), cancellationToken))
+        {
+            yield return e;
+        }
+    }
+
+    /// <summary>
+    /// 运行一个用户回合（多模态入口）：支持 TextContent / DataContent 等 MEAI 内容。
+    /// </summary>
+    public async IAsyncEnumerable<BrookEvent> RunAsync(
+        ChatMessage userMessage,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
         List<ChatMessage>? followUp = null;
         TurnAnswer = "";
         _turnCts?.Cancel();
@@ -744,9 +757,10 @@ public sealed class BrookAgent : IAsyncDisposable
         var ct = linked.Token;
 
         // 首条用户消息自动生成会话标题（一次性）
-        if (!_titleAutoSet && !string.IsNullOrWhiteSpace(userText))
+        var messageText = userMessage.Text ?? "";
+        if (!_titleAutoSet && !string.IsNullOrWhiteSpace(messageText))
         {
-            var title = userText.Trim().Replace("\n", " ");
+            var title = messageText.Trim().Replace("\n", " ");
             if (title.Length > 18) title = title[..18] + "…";
             _sessions.SetTitle(_sessionId, title);
             _titleAutoSet = true;
@@ -774,7 +788,7 @@ public sealed class BrookAgent : IAsyncDisposable
             var roundUpdates = new List<Microsoft.Agents.AI.AgentResponseUpdate>();
 
             var updates = followUp is null
-                ? _agent.RunStreamingAsync(userText, _session, BuildRunOptions())
+                ? _agent.RunStreamingAsync([userMessage], _session, BuildRunOptions())
                 : _agent.RunStreamingAsync(followUp, _session, BuildRunOptions());
 
             // 每轮 stream 重置：TurnAnswer 只保留最后一轮（最终回答），不累积中间轮的过渡文本

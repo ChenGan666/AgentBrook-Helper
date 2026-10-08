@@ -6,6 +6,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.AI;
 
 /// <summary>
 /// 气泡 + 对话窗双宿主共享的智能体控制器：
@@ -160,9 +161,11 @@ public sealed class AssistantController : IBrookInteraction
         }
     }
 
-    /// <summary>启动问候语：用默认（摘要档）模型按当前时间/节假日生成，展示在气泡上。失败完全静默。</summary>
+    /// <summary>启动问候语：用默认（摘要档）模型按当前时间/节假日生成，展示在气泡上。
+    /// 模型调用失败或返回空时使用本地兜底问候，确保气泡下方始终出现问候卡。</summary>
     private async Task GenerateGreetingAsync()
     {
+        string? text = null;
         try
         {
             await Task.Delay(1500);   // 等气泡与首帧稳定
@@ -183,18 +186,30 @@ public sealed class AssistantController : IBrookInteraction
             var prompt = $"现在是 {now:yyyy年M月d日 dddd HH:mm}（{period}）。" +
                 "请以助手的口吻用不超过 60 字的中文向用户打一句问候：结合时间段与（如有）临近或当天的重要节假日；" +
                 "再自然地带一句你能帮什么忙（如查行情、写报告、跑脚本、整理文件）。直接输出问候语本身，不要引号、不要解释。";
-            var text = await Agent.QuickCompleteAsync("你是桌面智能体 Brook 的问候语生成器。输出一条简短、自然、温暖、不油腻的中文问候。", prompt);
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                return;
-            }
-            Dispatcher.UIThread.Post(() =>
-                Bubble?.ShowToast(text, "#4a9eff", TimeSpan.FromSeconds(15), openConversationOnClick: true));
+            text = await Agent.QuickCompleteAsync("你是桌面智能体 Brook 的问候语生成器。输出一条简短、自然、温暖、不油腻的中文问候。", prompt);
         }
         catch
         {
-            // 无网络 / 无 API Key / 模型报错：问候语属锦上添花，静默跳过
+            // 无网络 / 无 API Key / 模型报错：走兜底问候
         }
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            var now = DateTime.Now;
+            var period = now.Hour switch
+            {
+                >= 5 and < 9 => "清晨",
+                < 12 => "上午",
+                < 14 => "中午",
+                < 18 => "下午",
+                < 23 => "晚上",
+                _ => "深夜",
+            };
+            text = $"{period}好！我是 {AssistantIdentity.Current}，可以帮你查行情、写报告、跑脚本或整理文件。";
+        }
+
+        Dispatcher.UIThread.Post(() =>
+            Bubble?.ShowToast(text, "#4a9eff", TimeSpan.FromSeconds(15), openConversationOnClick: true));
     }
 
     public void Shutdown()
@@ -203,9 +218,17 @@ public sealed class AssistantController : IBrookInteraction
     }
 
     /// <summary>发送一条用户指令并跑完整个回合（含 HITL 路由）。</summary>
-    public async Task SendAsync(string text)
+    public async Task SendAsync(string text) => await SendAsync(new ChatMessage(ChatRole.User, text));
+
+    /// <summary>发送一条用户消息（支持文本 + 图片 DataContent 的多模态输入）。</summary>
+    public async Task SendAsync(ChatMessage message)
     {
-        if (Busy || !Ready || string.IsNullOrWhiteSpace(text))
+        if (Busy || !Ready)
+        {
+            return;
+        }
+        var text = message.Text ?? "";
+        if (string.IsNullOrWhiteSpace(text) && message.Contents.Count == 0)
         {
             return;
         }
@@ -232,7 +255,7 @@ public sealed class AssistantController : IBrookInteraction
         var turnCancelled = false;
         try
         {
-            await foreach (var e in Agent!.RunAsync(text))
+            await foreach (var e in Agent!.RunAsync(message))
             {
                 switch (e)
                 {
@@ -301,6 +324,9 @@ public sealed class AssistantController : IBrookInteraction
         }
     }
 
+    /// <summary>排队纯文本输入（兼容性入口）。</summary>
+    public void EnqueueInput(string text) => EnqueueInput(new ChatMessage(ChatRole.User, text));
+
     public async Task NewSessionAsync()
     {
         if (Busy || !Ready)
@@ -346,16 +372,16 @@ public sealed class AssistantController : IBrookInteraction
     /// <summary>完全访问模式：所有需审批的操作自动通过（会话内有效，重启后复位）。</summary>
     public bool FullAccess { get; set; }
 
-    private readonly Queue<string> _queuedInput = new();
+    private readonly Queue<ChatMessage> _queuedInput = new();
     public event Action<int>? QueueChanged;   // 队列深度变化（UI 显示排队数）
 
     /// <summary>打断当前回合（停止模型流，已完成部分保留）。</summary>
     public void CancelTurn() => Agent?.CancelTurn();
 
-    /// <summary>排队一条输入：当前回合结束后自动发送（用户在模型工作中补充信息）。</summary>
-    public void EnqueueInput(string text)
+    /// <summary>排队一条输入：当前回合结束后自动发送（用户在模型工作中补充信息）。支持多模态。</summary>
+    public void EnqueueInput(ChatMessage message)
     {
-        _queuedInput.Enqueue(text);
+        _queuedInput.Enqueue(message);
         QueueChanged?.Invoke(_queuedInput.Count);
     }
 

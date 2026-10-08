@@ -119,6 +119,8 @@ internal static class I18n
         ["设置失败：{0}"] = "Failed to apply: {0}",
         ["提示音"] = "Notification sound",
         ["复制"] = "Copy",
+        ["打开对话"] = "Open chat",
+        ["打开设置"] = "Open settings",
         ["复制全文"] = "Copy all",
         ["复制表格"] = "Copy table",
         ["主工作空间"] = "Main workspace",

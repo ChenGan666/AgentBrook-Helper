@@ -47,7 +47,7 @@ The gap isn't model quality — it's proximity. So this project takes an agent c
 
 ### An ambient bubble
 
-A draggable, always-on-top bubble that does not steal focus. It breathes when idle, spins while thinking, and turns amber when it needs you — opening the chat window by itself. Closing the window hides it; the bubble stays.
+A draggable, always-on-top bubble that does not steal focus. It breathes when idle, spins while thinking, and turns amber when it needs you — opening the chat window by itself. Closing the window hides it; the bubble stays. Paste screenshots straight into the input with Ctrl/⌘+V.
 
 ### A full runtime behind it
 

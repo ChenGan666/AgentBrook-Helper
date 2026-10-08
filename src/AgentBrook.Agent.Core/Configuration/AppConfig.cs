@@ -77,8 +77,12 @@ public sealed class AgentOptions
     /// </summary>
     public string? SummarizeModel { get; set; }
 
-    /// <summary>历史字符总量超过该预算时触发自动压缩（摘要+裁剪）。</summary>
-    public long ContextBudgetChars { get; set; } = 220_000;
+    /// <summary>
+    /// 历史字符总量超过该预算时触发自动压缩（摘要+裁剪）。
+    /// 12 万字符 ≈ 6 万 token：超过后推理模型的思考延迟会明显上升，
+    /// 在延迟与记忆之间取平衡；需要更长记忆可在 appsettings 调大。
+    /// </summary>
+    public long ContextBudgetChars { get; set; } = 120_000;
 
     /// <summary>
     /// 模型回复语言（zh/en）。由设置界面保存、ApplyAssistantSettingsAsync 写回，

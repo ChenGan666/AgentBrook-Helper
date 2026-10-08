@@ -9,12 +9,16 @@ using Avalonia.Input;
 using Avalonia.Markup.Xaml;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input.Platform;
+using Avalonia.Interactivity;
 using Avalonia.Media.Imaging;
 using Avalonia.VisualTree;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using System.Diagnostics;
+using System.Text;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.AI;
 
 namespace AgentBrook.Helper;
 
@@ -36,6 +40,7 @@ public partial class MainWindow : Window
 
     private (long In, long Out, long Total)? _lastTurnUsage;
     private long _cumTokens;
+    private DateTime _lastPasteAttempt = DateTime.MinValue;
 
     // 执行过程折叠组：同一回合的工具调用/结果/自动批准收进一组，默认收起
     private Expander? _execGroup;
@@ -228,6 +233,15 @@ public partial class MainWindow : Window
             ApplyStaticTexts();
             SetStatus(_lastState, _lastDetail, _lastWithModel);
         });
+
+        // 全局粘贴拦截：隧道阶段抢在输入框之前处理 Ctrl/Cmd+V，
+        // 剪贴板含图片/文件时转成附件；纯文本时仍放行给输入框默认粘贴。
+        // 注册在 InputBox 上而不是 Window 上：更接近事件源，兼容 macOS/Windows 的事件路由差异。
+        if (_inputBox is not null)
+        {
+            _inputBox.AddHandler(InputElement.KeyDownEvent, OnInputKeyDownTunnel,
+                RoutingStrategies.Tunnel, handledEventsToo: true);
+        }
 
         // 窗口位置记忆：启动恢复上次位置/尺寸（带可见性校验），移动/缩放后防抖保存
         RestoreWindowBounds();
@@ -730,11 +744,16 @@ public partial class MainWindow : Window
         {
             return;
         }
+
+        // 附件：复制进工作区，图片同时作为 DataContent 直接送进模型视觉输入
+        var attachments = _attachments.Count > 0 ? SaveAttachmentsToWorkspace() : new List<SentAttachment>();
+        var message = BuildUserMessage(text, attachments);
+
         // 忙碌中：输入自动排队（补充信息），回合结束后逐条发送
         if (_controller.Busy)
         {
             _inputBox!.Text = "";
-            _controller.EnqueueInput(text);
+            _controller.EnqueueInput(message);
             UpdateQueueBar();
             return;
         }
@@ -746,20 +765,61 @@ public partial class MainWindow : Window
         _lastSendRequest = now;
         _inputBox!.Text = "";
 
-        // 附件：复制进工作区并以路径引用进消息（模型可用文件工具读取）
-        var attachments = _attachments.Count > 0 ? SaveAttachmentsToWorkspace() : new List<SentAttachment>();
-        var sendText = text;
         if (attachments.Count > 0)
         {
             _bubbleAttachments = attachments;
-            var lines = attachments.Select(a => a.IsImage
-                ? $"- 图片（二进制，请勿读取其内容）：{a.RelPath}"
-                : $"- 文件（可用 read_file 查看）：{a.RelPath}");
-            sendText += "\n\n【用户附加了以下附件，已保存到工作区】\n" + string.Join("\n", lines) +
-                "\n注意：图片是二进制文件，read_file 无法读取其内容，也不要尝试其他方式读取；如用户希望查看图片或基于图片处理，请说明当前模型不支持视觉输入。";
         }
-        await _controller.SendAsync(sendText);
+        await _controller.SendAsync(message);
     }
+
+    /// <summary>构造用户消息：文本 + 非图片文件说明 + 图片 DataContent（多模态输入）。</summary>
+    private ChatMessage BuildUserMessage(string text, List<SentAttachment> attachments)
+    {
+        var imageAttachments = attachments.Where(a => a.IsImage).ToList();
+        var fileAttachments = attachments.Where(a => !a.IsImage).ToList();
+
+        var sb = new StringBuilder(text);
+        if (fileAttachments.Count > 0)
+        {
+            sb.Append("\n\n【用户附加了以下文件，已保存到工作区】\n");
+            foreach (var a in fileAttachments)
+            {
+                sb.AppendLine($"- {a.RelPath}");
+            }
+        }
+        if (imageAttachments.Count > 0)
+        {
+            sb.Append($"\n\n【用户附加了 {imageAttachments.Count} 张图片，已作为视觉输入一并提供】");
+        }
+
+        var contents = new List<AIContent> { new TextContent(sb.ToString()) };
+        foreach (var img in imageAttachments)
+        {
+            try
+            {
+                var bytes = File.ReadAllBytes(img.AbsPath);
+                var mime = GetMimeType(img.AbsPath);
+                contents.Add(new DataContent(bytes, mime));
+                Console.Error.WriteLine($"[send] 附加图片 {img.RelPath} ({bytes.Length}B, {mime})");
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[send] ✖ 读取图片失败 {img.AbsPath}: {ex.Message}");
+            }
+        }
+
+        return new ChatMessage(ChatRole.User, contents);
+    }
+
+    private static string GetMimeType(string path) => Path.GetExtension(path).ToLowerInvariant() switch
+    {
+        ".png" => "image/png",
+        ".jpg" or ".jpeg" => "image/jpeg",
+        ".gif" => "image/gif",
+        ".webp" => "image/webp",
+        ".bmp" => "image/bmp",
+        _ => "application/octet-stream",
+    };
 
     // ───────────────────────── HITL 卡片（由控制器在 UI 线程调用）─────────────────────────
     /// <summary>审批提要的公开入口：气泡快捷卡复用同一套「人话翻译」规则。</summary>
@@ -1591,12 +1651,6 @@ public partial class MainWindow : Window
 
     private void OnInputKeyDown(object? sender, KeyEventArgs e)
     {
-        // Cmd+V：剪贴板里有图片/文件时转为附件（文本仍走默认粘贴，无副作用）
-        if (e.Key == Key.V && e.KeyModifiers.HasFlag(KeyModifiers.Meta))
-        {
-            _ = TryAttachFromClipboardAsync();
-            return;
-        }
         if (e.Key == Key.Enter)
         {
             e.Handled = true;
@@ -1607,6 +1661,49 @@ public partial class MainWindow : Window
             e.Handled = true;
             StopTurn();   // Esc 快捷打断当前回合
         }
+        else if (IsPasteCombo(e) && TryMarkPasteAttempt())
+        {
+            // 兜底：如果隧道阶段被输入框默认粘贴吞掉，直接阶段再试一次。
+            // 200ms 防抖避免隧道与直接阶段重复附加同一张图片（跨平台兼容）。
+            Console.Error.WriteLine("[paste-direct] 在输入框直接阶段兜底粘贴");
+            _ = TryAttachFromClipboardAsync();
+        }
+    }
+
+    /// <summary>测试钩子：模拟一次 Ctrl/Cmd+V 按键路由事件（tunnel + handledEventsToo 全链路）。</summary>
+    public void RaisePasteKeyEvent()
+    {
+        var args = new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.V, KeyModifiers = KeyModifiers.Control };
+        Console.Error.WriteLine("[paste-tunnel] 模拟按键路由事件");
+        RaiseEvent(args);
+    }
+
+    /// <summary>
+    /// 隧道阶段拦截 Ctrl/Cmd+V：必须用 Tunnel——输入框的类粘贴处理会把按键标记为已处理，
+    /// 冒泡阶段到达窗口时事件已被吞掉（图片粘贴此前从不触发的根因）。
+    /// 剪贴板有图片/文件时异步转附件；纯文本时不做任何事，输入框默认粘贴不受影响。
+    /// </summary>
+    private void OnInputKeyDownTunnel(object? sender, KeyEventArgs e)
+    {
+        if (IsPasteCombo(e) && TryMarkPasteAttempt())
+        {
+            Console.Error.WriteLine("[paste-tunnel] 拦截到 Ctrl/Cmd+V");
+            _ = TryAttachFromClipboardAsync();
+        }
+    }
+
+    private static bool IsPasteCombo(KeyEventArgs e)
+        => e.Key == Key.V && (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta));
+
+    private bool TryMarkPasteAttempt()
+    {
+        var now = DateTime.Now;
+        if ((now - _lastPasteAttempt).TotalMilliseconds < 200)
+        {
+            return false;
+        }
+        _lastPasteAttempt = now;
+        return true;
     }
 
     // ───────────────────────── 附件 ─────────────────────────
@@ -1618,7 +1715,7 @@ public partial class MainWindow : Window
     private static bool IsImageFile(string path) =>
         Path.GetExtension(path).ToLowerInvariant() is ".png" or ".jpg" or ".jpeg" or ".gif" or ".webp" or ".bmp";
 
-    /// <summary>剪贴板转附件：优先文件（Finder 复制），其次图片位图。</summary>
+    /// <summary>剪贴板转附件：优先文件（Finder 复制），其次图片位图（多格式回退 + 平台兜底）。</summary>
     private async Task TryAttachFromClipboardAsync()
     {
         try
@@ -1626,9 +1723,11 @@ public partial class MainWindow : Window
             var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
             if (clipboard is null)
             {
+                Console.Error.WriteLine("[paste] ✖ Clipboard 为空");
                 return;
             }
             var files = await clipboard.TryGetFilesAsync();
+            Console.Error.WriteLine($"[paste] TryGetFilesAsync → {(files is null ? "null" : files.Count() + " 个文件")}");
             if (files is not null)
             {
                 var added = false;
@@ -1637,6 +1736,7 @@ public partial class MainWindow : Window
                     var p = f.Path.LocalPath;
                     if (File.Exists(p))
                     {
+                        Console.Error.WriteLine($"[paste] 添加文件附件：{p}");
                         AddAttachment(p);
                         added = true;
                     }
@@ -1647,16 +1747,75 @@ public partial class MainWindow : Window
                 }
             }
             var bmp = await clipboard.TryGetBitmapAsync();
+            Console.Error.WriteLine($"[paste] TryGetBitmapAsync → {(bmp is not null ? "已读到位图" : "null")}");
             if (bmp is not null)
             {
                 var tmp = Path.Combine(Path.GetTempPath(), $"clip-{DateTime.Now:yyyyMMdd-HHmmss}.png");
-                bmp.Save(tmp);
+                try
+                {
+                    bmp.Save(tmp);
+                    Console.Error.WriteLine($"[paste] 已保存 {tmp} ({new FileInfo(tmp).Length}B)");
+                }
+                catch (Exception saveEx)
+                {
+                    Console.Error.WriteLine($"[paste] ✖ Save 失败：{saveEx.Message}");
+                }
                 AddAttachment(tmp);
+                return;
+            }
+            else
+            {
+                // 平台兜底：TryGetBitmapAsync 读不到的剪贴板位图（截图工具/聊天软件只放 DIB/TIFF/PNGf 的场景），
+                // macOS 经 osascript 写出 PNGf；Windows 经 PowerShell 读位图
+                Console.Error.WriteLine("[paste] 进入平台兜底读取剪贴板图片");
+                var tmp = Path.Combine(Path.GetTempPath(), $"clip-{Guid.NewGuid():N}.png");
+                if (OperatingSystem.IsMacOS())
+                {
+                    var script =
+                        "set pngData to (the clipboard as «class PNGf»)\n" +
+                        $"set f to open for access POSIX file \"{tmp}\" with write permission\n" +
+                        "set eof f to 0\n" +
+                        "write pngData to f\n" +
+                        "close access f";
+                    var psi = new System.Diagnostics.ProcessStartInfo("/usr/bin/osascript", $"-e \"{script.Replace("\"", "\\\"")}\"")
+                    {
+                        CreateNoWindow = true,
+                        UseShellExecute = false,
+                    };
+                    using var p = System.Diagnostics.Process.Start(psi);
+                    p?.WaitForExit(4000);
+                }
+                else if (OperatingSystem.IsWindows())
+                {
+                    var script =
+                        "Add-Type -AssemblyName System.Windows.Forms; " +
+                        "Add-Type -AssemblyName System.Drawing; " +
+                        "$i = [System.Windows.Forms.Clipboard]::GetImage(); " +
+                        "$i.Save('" + tmp + "', [System.Drawing.Imaging.ImageFormat]::Png)";
+                    var psi = new System.Diagnostics.ProcessStartInfo("powershell", "-NoProfile -ExecutionPolicy Bypass -Command \"" + script + "\"")
+                    {
+                        CreateNoWindow = true,
+                        UseShellExecute = false,
+                    };
+                    using var p = System.Diagnostics.Process.Start(psi);
+                    p?.WaitForExit(4000);
+                }
+                if (File.Exists(tmp) && new FileInfo(tmp).Length > 0)
+                {
+                    Console.Error.WriteLine("[paste] 平台兜底已读取图片");
+                    AddAttachment(tmp);
+                }
+                else
+                {
+                    Console.Error.WriteLine("[paste] 平台兜底未读到图片");
+                    try { File.Delete(tmp); } catch { }
+                }
             }
         }
-        catch
+        catch (Exception ex)
         {
             // 剪贴板读取失败时静默：不影响默认粘贴行为
+            Console.Error.WriteLine($"[paste] ✖ 剪贴板读取异常：{ex.Message}");
         }
     }
 
