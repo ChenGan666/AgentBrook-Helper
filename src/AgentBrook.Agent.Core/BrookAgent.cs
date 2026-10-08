@@ -91,6 +91,7 @@ public sealed class BrookAgent : IAsyncDisposable
             return "模型供应商配置为空：请在模型设置中添加供应商。";
         }
         var key = p.ApiKey ?? "";
+        Console.Error.WriteLine($"[validate] provider「{p.Name}」BaseUrl={p.BaseUrl} key 前 6 位={key[..Math.Min(6, key.Length)]}… 长度={key.Length} 非ASCII={key.Any(c => c > 127)}");
         if (key.Any(c => c > 127))
         {
             return "API Key 含非 ASCII 字符（可能是占位符）：请在模型设置中填写你的真实 Key。";
@@ -395,6 +396,7 @@ public sealed class BrookAgent : IAsyncDisposable
             @"5\.\s*用(中文|英文)与用户交流（除非用户使用其他语言）。|5\.\s*Always reply in English[^\n]*。",
             langRule);
         _language = newLang;
+        _config.Agent.ReplyLanguage = newLang;   // 供 AgentFactory 在重建时注入末尾语言强指令
 
         // 3) 默认提示词：移除旧段、追加新段
         if (_customPrompt.Length > 0)
@@ -410,7 +412,7 @@ public sealed class BrookAgent : IAsyncDisposable
         var head = instructions[..Math.Min(80, instructions.Length)].Replace("\n", " ");
         System.Console.Error.WriteLine(
             $"[apply-core] name={_identityName} lang={_language} prompt={_customPrompt} " +
-            $"instrEn={instructions.Contains("用英文与用户交流")} instrZh={instructions.Contains("用中文与用户交流")} " +
+            $"instrEn={instructions.Contains("Always reply in English")} instrZh={instructions.Contains("始终用中文回复")} " +
             $"instrName={instructions.Contains($"你是 {newName}，")} customSeg={instructions.Contains("# 用户自定义指令")} " +
             $"head=[{head}]");
 

@@ -163,8 +163,8 @@
                          HorizontalAlignment="Left"/>
                 <TextBlock x:Name="LabelReplyLang" Text="交流语言（影响模型回复语言）" Classes="formLabel"/>
                 <ComboBox x:Name="LanguageBox" FontSize="13.5" Width="160" HorizontalAlignment="Left" SelectedIndex="0">
-                    <ComboBoxItem Content="中文"/>
-                    <ComboBoxItem Content="English"/>
+                    <ComboBoxItem Content="中文" Tag="zh"/>
+                    <ComboBoxItem Content="English" Tag="en"/>
                 </ComboBox>
                 <TextBlock x:Name="LabelUiLang" Text="界面语言（UI 显示；切换后重启应用完全生效）" Classes="formLabel"/>
                 <ComboBox x:Name="UiLanguageBox" FontSize="13.5" Width="160" HorizontalAlignment="Left" SelectedIndex="0">

@@ -42,6 +42,29 @@ public partial class App : Application
             var bubble = new BubbleWindow();
             Controller.AttachBubble(bubble);
             desktop.MainWindow = bubble;
+
+            // --fullaccess：完全访问模式启动（审批自动通过，测试钩子）
+            if (desktop.Args is not null && desktop.Args.Contains("--fullaccess"))
+            {
+                Controller.FullAccess = true;
+            }
+
+            // --settings：就绪后自动打开设置窗口（端到端测试钩子）
+            if (desktop.Args is not null && desktop.Args.Contains("--settings"))
+            {
+                var stTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+                stTimer.Tick += (_, _) =>
+                {
+                    if (!Controller.Ready)
+                    {
+                        return;
+                    }
+                    stTimer.Stop();
+                    var settings = new ModelSettingsWindow();
+                    settings.Show();
+                };
+                stTimer.Start();
+            }
             // --show：启动即打开对话窗（免找气泡，也便于自动化自测）
             if (desktop.Args is not null && desktop.Args.Contains("--show"))
             {

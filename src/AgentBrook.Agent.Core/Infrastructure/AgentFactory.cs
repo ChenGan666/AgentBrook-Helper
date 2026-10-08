@@ -42,6 +42,12 @@ public static class AgentFactory
         var instructions = config.Agent.Instructions.Trim() + "\n\n" + skillSummary
             + "\n\n" + PlatformEnvironment.DescribeBlock().Trim();
 
+        // 语言指令放在系统提示词最末尾（最高权重位置）：模型对结尾指令的遵循度远高于中部长篇规则
+        var langDirective = config.Agent.ReplyLanguage == "en"
+            ? "# Reply language (highest priority)\nAlways respond in English, regardless of the language the user writes in. Never mirror the user's language."
+            : "# 回复语言（最高优先级）\n始终用中文回复，无论用户使用什么语言书写，都不要跟随用户的语言。";
+        instructions += "\n\n" + langDirective;
+
         var chatOptions = new ChatOptions
         {
             Instructions = instructions,

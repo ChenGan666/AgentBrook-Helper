@@ -79,6 +79,12 @@ public sealed class AgentOptions
 
     /// <summary>历史字符总量超过该预算时触发自动压缩（摘要+裁剪）。</summary>
     public long ContextBudgetChars { get; set; } = 220_000;
+
+    /// <summary>
+    /// 模型回复语言（zh/en）。由设置界面保存、ApplyAssistantSettingsAsync 写回，
+    /// AgentFactory 会把它作为系统提示词的最后一条最高优先级指令块注入。
+    /// </summary>
+    public string ReplyLanguage { get; set; } = "zh";
 }
 
 /// <summary>MCP 服务器接入配置（stdio 传输）。</summary>
