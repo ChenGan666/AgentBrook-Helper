@@ -38,29 +38,78 @@ public static class MarkdownView
     {
         var doc = Markdown.Parse(markdown ?? "", Pipeline);
         var panel = new StackPanel { Spacing = 6 };
+        var textBlock = NewTextBlock();
+        var hasText = false;
+
+        void FlushText()
+        {
+            if (!hasText) return;
+            // 移除末尾多余的换行
+            var inlines = textBlock.Inlines!;
+            while (inlines.Count > 0 && inlines[^1] is LineBreak)
+            {
+                inlines.RemoveAt(inlines.Count - 1);
+            }
+            panel.Children.Add(Selectable(textBlock));
+            textBlock = NewTextBlock();
+            hasText = false;
+        }
+
         foreach (var block in doc)
         {
-            var c = RenderBlock(block);
-            if (c is not null)
+            switch (block)
             {
-                panel.Children.Add(c);
+                case HeadingBlock h:
+                    hasText = true;
+                    textBlock.Inlines!.Add(new Run
+                    {
+                        Text = GetInlineText(h.Inline),
+                        FontSize = h.Level switch { 1 => 22, 2 => 19, 3 => 17, _ => 16 },
+                        FontWeight = FontWeight.Bold,
+                        Foreground = BrushLight,
+                    });
+                    textBlock.Inlines!.Add(new LineBreak());
+                    break;
+
+                case ParagraphBlock p:
+                    // 仅含一张图片的段落：作为独立图片控件渲染，不混入文本流
+                    if (TryExtractImageOnly(p) is { } imgControl)
+                    {
+                        FlushText();
+                        panel.Children.Add(imgControl);
+                        break;
+                    }
+                    hasText = true;
+                    if (p.Inline is not null)
+                    {
+                        FillInlines(p.Inline, textBlock.Inlines!);
+                    }
+                    textBlock.Inlines!.Add(new LineBreak());
+                    break;
+
+                default:
+                    FlushText();
+                    var c = RenderBlock(block);
+                    if (c is not null)
+                    {
+                        panel.Children.Add(c);
+                    }
+                    break;
             }
         }
+        FlushText();
         return panel;
     }
 
+    private static SelectableTextBlock NewTextBlock() => new()
+    {
+        TextWrapping = TextWrapping.Wrap,
+        Foreground = BrushLight,
+        FontSize = 15,
+    };
+
     private static Control? RenderBlock(Block block) => block switch
     {
-        HeadingBlock h => Selectable(new SelectableTextBlock
-        {
-            Text = GetInlineText(h.Inline),
-            FontSize = h.Level switch { 1 => 22, 2 => 19, 3 => 17, _ => 16 },
-            FontWeight = FontWeight.Bold,
-            Foreground = BrushLight,
-            Margin = new Thickness(0, h.Level <= 2 ? 8 : 4, 0, 2),
-            TextWrapping = TextWrapping.Wrap,
-        }),
-        ParagraphBlock p => RenderParagraph(p),
         Markdig.Syntax.FencedCodeBlock fenced => RenderCodeBlock(fenced),
         Markdig.Syntax.CodeBlock code => RenderCodeBlock(code),
         ListBlock list => RenderList(list),
@@ -70,51 +119,43 @@ public static class MarkdownView
         _ => RenderPlainText(block),
     };
 
-    private static Control RenderParagraph(ParagraphBlock p)
+    /// <summary>段落仅含一张图片时：块级渲染本地图片；否则返回 null。</summary>
+    private static Control? TryExtractImageOnly(ParagraphBlock p)
     {
-        // 段落仅含一张图片时：块级渲染本地图片
-        if (p.Inline is not null)
-        {
-            var img = p.Inline.FirstOrDefault() as LinkInline;
-            if (img is { IsImage: true } && img.FirstChild is LiteralInline li)
-            {
-                var src = li.Content.ToString();
-                var full = src.StartsWith("http", StringComparison.OrdinalIgnoreCase)
-                    ? src
-                    : Path.Combine(App.Controller.Agent!.WorkspaceRoot, src.TrimStart('/'));
-                if (File.Exists(full))
-                {
-                    var preview = new Image
-                    {
-                        Source = new Bitmap(full),
-                        MaxWidth = 380,
-                        Margin = new Thickness(0, 4),
-                        HorizontalAlignment = HorizontalAlignment.Left,
-                        Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
-                    };
-                    preview.PointerReleased += (_, _) => OpenTarget(full);
-                    ToolTip.SetTip(preview, "点击打开原图");
-                    return preview;
-                }
-                return new TextBlock
-                {
-                    Text = $"[图片：{src}（文件不存在）]",
-                    Classes = { "procLine" },
-                };
-            }
-        }
+        if (p.Inline is null) return null;
+        var img = p.Inline.FirstOrDefault() as LinkInline;
+        if (img is not { IsImage: true } || img.FirstChild is not LiteralInline li) return null;
 
-        var tb = Selectable(new SelectableTextBlock { TextWrapping = TextWrapping.Wrap, Foreground = BrushLight, FontSize = 15 });
-        if (p.Inline is not null)
+        var src = li.Content.ToString();
+        var full = src.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+            ? src
+            : Path.Combine(App.Controller.Agent!.WorkspaceRoot, src.TrimStart('/'));
+        if (File.Exists(full))
         {
-            FillInlines(p.Inline, tb.Inlines);
+            var preview = new Image
+            {
+                Source = new Bitmap(full),
+                MaxWidth = 380,
+                Margin = new Thickness(0, 4),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+            };
+            preview.PointerReleased += (_, _) => OpenTarget(full);
+            ToolTip.SetTip(preview, "点击打开原图");
+            return preview;
         }
-        return tb;
+        return new TextBlock
+        {
+            Text = $"[图片：{src}（文件不存在）]",
+            Classes = { "procLine" },
+        };
     }
 
     /// <summary>可选中可复制的文本块：附右键"复制"菜单（有选区复制选区，否则复制全文）。供对话区各文本块复用。</summary>
     public static T Selectable<T>(T tb) where T : SelectableTextBlock
     {
+        // 背景必须非 null 才能被鼠标命中，否则只能点击到文字本身、行间空白无法开始选择。
+        tb.Background ??= Brushes.Transparent;
         var item = new MenuItem { Header = I18n.T("复制") };
         item.Click += async (_, _) =>
         {
@@ -195,7 +236,7 @@ public static class MarkdownView
                     }
                     break;
                 case LineBreakInline:
-                    target.Add(new Run { Text = "\n" });
+                    target.Add(new LineBreak());
                     break;
                 default:
                     var t = GetInlineText(inline);
@@ -247,20 +288,21 @@ public static class MarkdownView
 
         // 单行内容若是工作区内真实存在的文件路径 → 保留代码块样式，整块可点击打开
         var trimmed = lines.Trim();
+        var tb = Selectable(new SelectableTextBlock
+        {
+            Text = lines,
+            FontFamily = MonoFont,
+            FontSize = 13,
+            Foreground = new SolidColorBrush(Color.Parse("#9cdcfe")),
+            TextWrapping = TextWrapping.Wrap,
+        });
         var border = new Border
         {
             Background = new SolidColorBrush(Color.Parse("#1a1a1a")),
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(10, 8),
             Margin = new Thickness(0, 2),
-            Child = new SelectableTextBlock
-            {
-                Text = lines,
-                FontFamily = MonoFont,
-                FontSize = 13,
-                Foreground = new SolidColorBrush(Color.Parse("#9cdcfe")),
-                TextWrapping = TextWrapping.Wrap,
-            },
+            Child = tb,
         };
 
         if (trimmed.Split('\n').Length == 1 && TryResolveWorkspaceFile(trimmed) is { } resolved)
@@ -291,23 +333,43 @@ public static class MarkdownView
 
     private static Control RenderList(ListBlock list)
     {
-        var panel = new StackPanel { Margin = new Thickness(14, 2, 0, 2), Spacing = 3 };
-        var index = 1;
-        foreach (var item in list)
+        var tb = Selectable(new SelectableTextBlock
         {
-            var text = GetBlockText(item);
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = BrushLight,
+            FontSize = 15,
+            Margin = new Thickness(14, 2, 0, 2),
+        });
+        var index = 1;
+        var first = true;
+        foreach (var item in list.OfType<ListItemBlock>())
+        {
+            if (!first) tb.Inlines!.Add(new LineBreak());
+            first = false;
             var prefix = list.IsOrdered ? $"{index}. " : "•  ";
-            var tb = Selectable(new SelectableTextBlock
-            {
-                Text = prefix + text,
-                TextWrapping = TextWrapping.Wrap,
-                Foreground = BrushLight,
-                FontSize = 15,
-            });
-            panel.Children.Add(tb);
+            tb.Inlines!.Add(new Run { Text = prefix, Foreground = BrushLight });
+            FillListItemInlines(item, tb.Inlines!);
             index++;
         }
-        return panel;
+        return tb;
+    }
+
+    private static void FillListItemInlines(ListItemBlock item, Avalonia.Controls.Documents.InlineCollection target)
+    {
+        var first = true;
+        foreach (var child in item)
+        {
+            if (!first) target.Add(new LineBreak());
+            first = false;
+            if (child is ParagraphBlock p && p.Inline is not null)
+            {
+                FillInlines(p.Inline, target);
+            }
+            else
+            {
+                target.Add(new Run { Text = GetBlockText(child) });
+            }
+        }
     }
 
     private static Control RenderQuote(QuoteBlock quote)

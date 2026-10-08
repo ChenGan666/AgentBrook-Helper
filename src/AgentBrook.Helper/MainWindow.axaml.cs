@@ -41,6 +41,7 @@ public partial class MainWindow : Window
     private (long In, long Out, long Total)? _lastTurnUsage;
     private long _cumTokens;
     private DateTime _lastPasteAttempt = DateTime.MinValue;
+    private ChatMessage? _lastUserMessage;
 
     // 执行过程折叠组：同一回合的工具调用/结果/自动批准收进一组，默认收起
     private Expander? _execGroup;
@@ -769,6 +770,7 @@ public partial class MainWindow : Window
         {
             _bubbleAttachments = attachments;
         }
+        _lastUserMessage = message;
         await _controller.SendAsync(message);
     }
 
@@ -1394,8 +1396,78 @@ public partial class MainWindow : Window
         {
             MarkdownView.AppendMenuItem(direct, "复制全文", () => MarkdownView.ToPlainText(answer));
         }
-        _chatPanel!.Children.Add(render);
+
+        // 操作按钮：复制全文、重试/重新生成
+        var buttonRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 6, 0, 2),
+        };
+        var copyBtn = CreateIconButton("Icon.Copy", I18n.T("复制"));
+        copyBtn.Click += async (_, _) =>
+        {
+            var clip = TopLevel.GetTopLevel(this)?.Clipboard;
+            if (clip is null) return;
+            await clip.SetTextAsync(MarkdownView.ToPlainText(answer));
+        };
+        var retryBtn = CreateIconButton("Icon.Refresh", I18n.T("重试"));
+        retryBtn.Click += async (_, _) =>
+        {
+            if (_controller.Busy || _lastUserMessage is null) return;
+            await _controller.SendAsync(_lastUserMessage);
+        };
+        buttonRow.Children.Add(copyBtn);
+        buttonRow.Children.Add(retryBtn);
+
+        var wrapper = new StackPanel { Spacing = 2 };
+        wrapper.Children.Add(render);
+        wrapper.Children.Add(buttonRow);
+        _chatPanel!.Children.Add(wrapper);
         ScrollToEnd();
+    }
+
+    /// <summary>构造一个带矢量图标和文字的轻量按钮；图标与文字统一使用同一套中性色，hover 变白。</summary>
+    private static Button CreateIconButton(string iconKey, string label)
+    {
+        var iconBrush = new SolidColorBrush(Color.Parse("#b0b8c4"));
+        var icon = new PathIcon
+        {
+            Data = (StreamGeometry)Application.Current!.Resources[iconKey]!,
+            Width = 14,
+            Height = 14,
+            Foreground = iconBrush,
+        };
+        var text = new TextBlock
+        {
+            Text = label,
+            FontSize = 12,
+            Foreground = iconBrush,
+        };
+        var stack = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
+        stack.Children.Add(icon);
+        stack.Children.Add(text);
+        var btn = new Button
+        {
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(4, 2),
+            Cursor = new Cursor(StandardCursorType.Hand),
+            Content = stack,
+        };
+        btn.PointerEntered += (_, _) =>
+        {
+            var hover = new SolidColorBrush(Color.Parse("#e6e6e6"));
+            icon.Foreground = hover;
+            text.Foreground = hover;
+        };
+        btn.PointerExited += (_, _) =>
+        {
+            icon.Foreground = iconBrush;
+            text.Foreground = iconBrush;
+        };
+        return btn;
     }
 
 
