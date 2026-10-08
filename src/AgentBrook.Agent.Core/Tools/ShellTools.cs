@@ -102,6 +102,9 @@ public sealed class ShellTools(Workspace workspace, int defaultTimeoutSeconds, i
             // Windows 下 GUI 宿主启动控制台程序默认会弹出新的控制台窗口，须显式抑制（Unix 上此属性无效）
             CreateNoWindow = true,
         };
+        // PATH 增强：GUI/"应用程序"启动的进程只有系统 PATH，补齐 Homebrew/nvm 等目录，
+        // 否则模型执行的 git/node 等命令会"找不到命令"
+        psi.EnvironmentVariables["PATH"] = Infrastructure.CommandPathResolver.AugmentedPath();
 
         if (OperatingSystem.IsWindows())
         {

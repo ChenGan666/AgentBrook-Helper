@@ -14,6 +14,14 @@ internal static class UiPrefs
     {
         if (_dir is null)
         {
+            // 用户自定义主工作空间优先（设置中配置，重启生效）
+            var overridePath = WorkspacePrefs.LoadOverride();
+            if (!string.IsNullOrWhiteSpace(overridePath))
+            {
+                Directory.CreateDirectory(overridePath);
+                _dir = overridePath;
+                return _dir;
+            }
             var configuration = new ConfigurationBuilder()
                 .SetBasePath(AppContext.BaseDirectory)
                 .AddJsonFile("appsettings.json", optional: false)
@@ -25,6 +33,9 @@ internal static class UiPrefs
         }
         return _dir;
     }
+
+    /// <summary>工作区覆盖变更后清除目录缓存（重启应用后整体生效，此处理保证保存后同会话读写一致）。</summary>
+    public static void InvalidateWorkspaceDirCache() => _dir = null;
 
     public static T? Load<T>(string file) where T : class
     {

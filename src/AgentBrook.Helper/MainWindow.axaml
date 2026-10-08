@@ -7,8 +7,7 @@
         Width="520" Height="800"
         MinWidth="420" MinHeight="560"
         Background="#1f1f1f"
-        FontFamily="PingFang SC, Hiragino Sans GB, Microsoft YaHei"
-        TransparencyLevelHint="AcrylicBlur">
+        FontFamily="PingFang SC, Hiragino Sans GB, Microsoft YaHei">
 
     <Window.Styles>
         <!-- 图标按钮 -->

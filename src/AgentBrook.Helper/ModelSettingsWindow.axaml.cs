@@ -53,6 +53,59 @@ public partial class ModelSettingsWindow : Window
         this.FindControl<Button>("SavePersonalBtn")!.Click += async (_, _) => await SavePersonalAsync();
         this.FindControl<Button>("ResetPosBtn")!.Click += (_, _) => ResetBubblePosition();
 
+        this.FindControl<Button>("ResetPosBtn")!.Click += (_, _) => ResetBubblePosition();
+
+        // 主工作空间：回显当前生效目录；保存/恢复写覆盖配置（重启应用生效）
+        var wsBox = this.FindControl<TextBox>("WorkspaceBox");
+        var wsSave = this.FindControl<Button>("WorkspaceSaveBtn");
+        var wsReset = this.FindControl<Button>("WorkspaceResetBtn");
+        var wsPick = this.FindControl<Button>("WorkspacePickBtn");
+        if (wsBox is not null && wsSave is not null && wsReset is not null && wsPick is not null)
+        {
+            wsBox.Text = UiPrefs.WorkspaceDir();
+            wsPick.Click += async (_, _) =>
+            {
+                var folders = await StorageProvider.OpenFolderPickerAsync(new Avalonia.Platform.Storage.FolderPickerOpenOptions
+                {
+                    Title = I18n.T("选择主工作空间目录"),
+                    AllowMultiple = false,
+                });
+                if (folders.Count > 0)
+                {
+                    wsBox.Text = folders[0].Path.LocalPath;
+                }
+            };
+            wsSave.Click += (_, _) =>
+            {
+                var hint = this.FindControl<TextBlock>("WorkspaceHint");
+                var path = (wsBox.Text ?? "").Trim();
+                if (path.Length == 0)
+                {
+                    if (hint is not null) hint.Text = I18n.T("请输入或选择工作空间目录");
+                    return;
+                }
+                var err = WorkspacePrefs.SaveOverride(path);
+                if (hint is not null)
+                {
+                    hint.Text = err is null
+                        ? I18n.T("✔ 已保存，重启应用后生效")
+                        : I18n.T("保存失败：{0}", err);
+                }
+            };
+            wsReset.Click += (_, _) =>
+            {
+                var err = WorkspacePrefs.SaveOverride(null);
+                var hint = this.FindControl<TextBlock>("WorkspaceHint");
+                wsBox.Text = UiPrefs.WorkspaceDir();
+                if (hint is not null)
+                {
+                    hint.Text = err is null
+                        ? I18n.T("已恢复默认工作空间，重启应用后生效")
+                        : I18n.T("保存失败：{0}", err);
+                }
+            };
+        }
+
         // 开机自启动：状态回显读系统侧实际值（注册表/plist），切换即生效（不经过"保存"按钮）
         var autoStartSwitch = this.FindControl<ToggleSwitch>("AutoStartSwitch");
         if (autoStartSwitch is not null)
@@ -297,6 +350,14 @@ public partial class ModelSettingsWindow : Window
         SetT("LabelUiLang", "界面语言（UI 显示；切换后重启应用完全生效）");
         SetT("LabelAutoStart", "开机自启动");
         SetT("AutoStartDesc", "登录系统后自动启动，气泡常驻待命");
+        SetT("LabelWorkspace", "主工作空间");
+        SetT("WorkspaceDesc", "智能体的文件、脚本与记忆所在目录；修改保存后重启应用生效，助手设置随工作空间保存");
+        var wsPickBtn = this.FindControl<Button>("WorkspacePickBtn");
+        if (wsPickBtn is not null) wsPickBtn.Content = I18n.T("选择目录…");
+        var wsSaveBtn = this.FindControl<Button>("WorkspaceSaveBtn");
+        if (wsSaveBtn is not null) wsSaveBtn.Content = I18n.T("保存工作空间");
+        var wsResetBtn = this.FindControl<Button>("WorkspaceResetBtn");
+        if (wsResetBtn is not null) wsResetBtn.Content = I18n.T("恢复默认");
         SetT("LabelNotifySound", "提示音");
         SetT("NotifySoundDesc", "任务完成且对话窗不在前台时播放");
         var nsBox = this.FindControl<ComboBox>("NotifySoundBox");

@@ -113,6 +113,14 @@ public sealed class AssistantController : IBrookInteraction
             File.WriteAllText(probe, "ok");
             File.Delete(probe);
 
+            // 0) 用户自定义主工作空间（设置中配置，重启应用生效）
+            var wsOverride = WorkspacePrefs.LoadOverride();
+            if (!string.IsNullOrWhiteSpace(wsOverride))
+            {
+                Directory.CreateDirectory(wsOverride);
+                config.Agent.WorkspaceRoot = wsOverride;
+            }
+
             // 2) 工作区：与 UiPrefs 共用同一解析规则（配置路径存在用之；全新安装回退数据目录内 workspace）
             var resolvedWs = Workspace.ResolveWorkspaceDir(appRoot, config.Agent.WorkspaceRoot);
             if (Path.GetFullPath(resolvedWs) != Path.GetFullPath(Path.Combine(appRoot, config.Agent.WorkspaceRoot)))
@@ -206,6 +214,17 @@ public sealed class AssistantController : IBrookInteraction
         _lastAnswer = "";
         _turnHadError = false;
         UserSaid?.Invoke(text);
+
+        // 回合前置校验：Key 为占位符/非法时直接给出明确提示，不发必然失败的请求
+        var keyError = Agent!.ValidateActiveProvider();
+        if (keyError is not null)
+        {
+            Console.Error.WriteLine($"[turn] ✖ {keyError}");
+            EventRaised?.Invoke(new BrookEvent.Failed(keyError));
+            RaiseState(BrookRunState.Idle, null);
+            DequeueAndSend();
+            return;
+        }
         RaiseState(BrookRunState.Thinking, null);
 
         var pendingTool = "";
@@ -239,6 +258,7 @@ public sealed class AssistantController : IBrookInteraction
         catch (OperationCanceledException) when (Agent?.TurnCancelRequested == true)
         {
             turnCancelled = true;
+            Console.Error.WriteLine("[turn] ⏹ 用户停止");
             // 用户主动停止：不是错误。已完成部分保留，追加一条灰色日志行说明。
             EventRaised?.Invoke(new BrookEvent.ToolStarted("log:" +
                 AgentBrook.Agent.Infrastructure.CoreStrings.L(
@@ -248,11 +268,13 @@ public sealed class AssistantController : IBrookInteraction
         catch (Exception ex)
         {
             _turnHadError = true;
+            Console.Error.WriteLine($"[turn] ✖ {ex.Message}");
             EventRaised?.Invoke(new BrookEvent.Failed(ex.Message));
         }
         finally
         {
             Busy = false;
+            Console.Error.WriteLine($"[turn] 结束（{(sawTurnCompleted ? "正常" : "异常终止")}，回答 {(Agent?.TurnAnswer.Length ?? 0)} 字符）");
             RaiseState(BrookRunState.Idle, null);
             if (!sawTurnCompleted)
             {

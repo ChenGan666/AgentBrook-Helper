@@ -30,20 +30,29 @@ public static class McpToolSource
         {
             try
             {
+                // GUI/"应用程序"启动的进程 PATH 只有系统目录，需补齐 Homebrew/nvm 等常见目录
+                // 并解析出命令绝对路径，否则 npx/uvx 等会报 "Failed to connect transport"。
+                var resolvedCommand = Infrastructure.CommandPathResolver.Resolve(server.Command);
+                if (resolvedCommand is null)
+                {
+                    log(Infrastructure.CoreStrings.L(
+                        $"✖ MCP 服务器 {server.Name} 连接失败（已跳过）：未找到命令「{server.Command}」。请安装对应运行时（如 Node.js：https://nodejs.org）或将安装目录加入 PATH，然后重启应用。",
+                        $"✖ MCP server {server.Name} connection failed (skipped): command \"{server.Command}\" not found. Install the runtime (e.g. Node.js from https://nodejs.org) or add its dir to PATH, then restart."));
+                    continue;
+                }
+
                 log(Infrastructure.CoreStrings.L(
-                    $"⟳ 连接 MCP 服务器 {server.Name}（{server.Command}）…",
-                    $"⟳ Connecting MCP server {server.Name} ({server.Command})…"));
+                    $"⟳ 连接 MCP 服务器 {server.Name}（{resolvedCommand}）…",
+                    $"⟳ Connecting MCP server {server.Name} ({resolvedCommand})…"));
 
                 // 注意：transport 由 McpClient 管理生命周期，这里不能提前释放。
                 var transport = new StdioClientTransport(new StdioClientTransportOptions
                 {
                     Name = server.Name,
-                    Command = server.Command,
+                    Command = resolvedCommand,
                     Arguments = [.. server.Args.Select(workspace.Expand)],
                     WorkingDirectory = workspace.Expand(server.WorkingDirectory ?? workspace.Root),
-                    EnvironmentVariables = server.Env.Count > 0
-                        ? server.Env.ToDictionary(kv => kv.Key, kv => (string?)workspace.Expand(kv.Value))
-                        : null,
+                    EnvironmentVariables = BuildChildEnvironment(server, workspace),
                 });
 
                 var client = await McpClient.CreateAsync(transport);
@@ -74,6 +83,24 @@ public static class McpToolSource
     /// <summary>汇总所有 MCP 工具（已加服务器名前缀，可直接并入智能体工具面）。</summary>
     public static IEnumerable<AIFunction> SelectTools(IEnumerable<McpConnection> connections) =>
         connections.SelectMany(c => c.Tools);
+
+    /// <summary>
+    /// 构建子进程环境：服务器配置的环境变量（{WORKSPACE} 展开）+ PATH 增强。
+    /// PATH 增强必须项：npx 是 "env node" 脚本，子进程 PATH 里没有 node 目录就无法运行。
+    /// </summary>
+    private static Dictionary<string, string?> BuildChildEnvironment(McpServerConfig server, Workspace workspace)
+    {
+        var env = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kv in server.Env)
+        {
+            env[kv.Key] = workspace.Expand(kv.Value);
+        }
+        if (!env.ContainsKey("PATH"))
+        {
+            env["PATH"] = Infrastructure.CommandPathResolver.AugmentedPath();
+        }
+        return env;
+    }
 
     private static string Prefix(string serverName)
     {

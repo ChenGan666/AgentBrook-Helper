@@ -77,6 +77,35 @@ public sealed class BrookAgent : IAsyncDisposable
     public string CurrentModel { get; private set; } = "";
     public string CurrentProvider => _activeProvider.Name;
     public IReadOnlyList<ProviderConfig> Providers => _providers.Providers;
+
+    /// <summary>
+    /// 回合前置校验：活跃供应商的 Key 是否可用于发请求。
+    /// 占位符 Key（含中文的"请填写"类）会导致 HTTP 头非 ASCII 的隐晦错误，这里转成可操作的明确提示。
+    /// 返回 null 表示可用，否则为错误说明。
+    /// </summary>
+    public string? ValidateActiveProvider()
+    {
+        var p = _providers.Active;
+        if (p is null)
+        {
+            return "模型供应商配置为空：请在模型设置中添加供应商。";
+        }
+        var key = p.ApiKey ?? "";
+        if (key.Any(c => c > 127))
+        {
+            return "API Key 含非 ASCII 字符（可能是占位符）：请在模型设置中填写你的真实 Key。";
+        }
+        if (key.Contains("请", StringComparison.OrdinalIgnoreCase) ||
+            key.Contains("please-fill", StringComparison.OrdinalIgnoreCase))
+        {
+            return "尚未填写 API Key：请在模型设置中填入你的 Key。";
+        }
+        if (string.IsNullOrWhiteSpace(p.BaseUrl))
+        {
+            return "模型 BaseUrl 未配置：请在模型设置中填写。";
+        }
+        return null;
+    }
     public IReadOnlyList<string> Models => _activeProvider.Models;
     public string WorkspaceRoot => _workspace.Root;
     public IReadOnlyList<ToolInfo> ToolCatalog { get; }

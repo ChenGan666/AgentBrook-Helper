@@ -55,3 +55,9 @@ src/AgentBrook.Helper/workspace/
 appsettings.*.Local.json
 *.env
 !*.env.example
+
+# ───────── 运行时/本机配置（含个人数据与密钥，禁止入库） ─────────
+workspace-override.json
+src/**/workspace-override.json
+workspace/
+.DS_Store

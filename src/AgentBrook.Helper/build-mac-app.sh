@@ -126,7 +126,7 @@ p = sys.argv[1]
 d = json.load(open(p, encoding="utf-8"))
 llm = d.get("LLM")
 if isinstance(llm, dict) and llm.get("ApiKey"):
-    llm["ApiKey"] = "sk-请填写你的APIKey"
+    llm["ApiKey"] = "sk-please-fill-in-your-api-key"
     json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
     print(f"  已清除 {p} 中的 ApiKey（目标机在模型设置中填写）")
 PY

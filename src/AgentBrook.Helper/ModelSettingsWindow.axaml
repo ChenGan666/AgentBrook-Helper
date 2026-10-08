@@ -5,8 +5,7 @@
         Title="设置" Width="920" Height="680" MinWidth="760" MinHeight="560"
         Icon="avares://AgentBrook.Helper/Assets/app-icon.png"
         Background="#1f1f1f"
-        FontFamily="PingFang SC, Hiragino Sans GB, Microsoft YaHei"
-        TransparencyLevelHint="AcrylicBlur">
+        FontFamily="PingFang SC, Hiragino Sans GB, Microsoft YaHei">
 
     <Window.Styles>
         <!-- 左侧导航项（RadioButton 重模板为导航条目） -->
@@ -146,6 +145,19 @@
                 <TextBlock x:Name="GeneralTitle" Text="常规" Classes="pageTitle"/>
                 <TextBlock x:Name="GeneralDesc" Text="助手身份与交流偏好。" Classes="pageDesc" Margin="0,2,0,14"/>
 
+                <TextBlock x:Name="LabelWorkspace" Text="主工作空间" Classes="formLabel"/>
+                <TextBlock x:Name="WorkspaceDesc" Text="智能体的文件、脚本与记忆所在目录；修改保存后重启应用生效，助手设置随工作空间保存" Classes="pageDesc" FontSize="12" Margin="0,0,0,6" TextWrapping="Wrap"/>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBox x:Name="WorkspaceBox" Width="380" FontSize="13"/>
+                    <Button x:Name="WorkspacePickBtn" Classes="ghostBtn" Content="选择目录…"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,8,0,0">
+                    <Button x:Name="WorkspaceSaveBtn" Classes="primaryBtn" Content="保存工作空间"/>
+                    <Button x:Name="WorkspaceResetBtn" Classes="ghostBtn" Content="恢复默认"/>
+                    <TextBlock x:Name="WorkspaceHint" Text="" FontSize="12" Foreground="#8a8a8a" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                </StackPanel>
+
+                <Separator Margin="0,14,0,10" Background="#333333"/>
                 <TextBlock x:Name="LabelAssistantName" Text="助手名字" Classes="formLabel"/>
                 <TextBox x:Name="PersonalNameBox" Watermark="Brook" FontSize="14" MaxWidth="380"
                          HorizontalAlignment="Left"/>
