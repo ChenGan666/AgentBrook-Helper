@@ -27,12 +27,19 @@ printf '%s\n' "$VERSION" > "$VERSION_FILE"
 echo "==> 发布版本：$VERSION"
 
 # 发布根目录，可通过环境变量覆盖
-PUBLISH_BASE="${PUBLISH_BASE:-$(cd "$(dirname "$0")" && pwd)/publish}"
+PUBLISH_BASE="${PUBLISH_BASE:-$(cd .. && pwd)/publish}"
 
 publish() {
   local rid=$1 dir=$2
   echo "==> dotnet publish（$rid，self-contained，v$VERSION）"
   dotnet publish -c Release -r $rid --self-contained true -p:Version=$VERSION -o "$dir" || exit 1
+  # 清除输出目录 appsettings.json 中的 API Key 等敏感信息
+  local out_settings="$dir/appsettings.json"
+  if [ -f "$out_settings" ]; then
+    sed -i '' -E 's/"ApiKey"[[:space:]]*:[[:space:]]*"[^"]*"/"ApiKey": ""/g' "$out_settings"
+    sed -i '' -E 's/"GITHUB_PERSONAL_ACCESS_TOKEN"[[:space:]]*:[[:space:]]*"[^"]*"/"GITHUB_PERSONAL_ACCESS_TOKEN": ""/g' "$out_settings"
+    echo "  -> 已清除 appsettings.json 中的敏感信息"
+  fi
 }
 
 write_plist() {

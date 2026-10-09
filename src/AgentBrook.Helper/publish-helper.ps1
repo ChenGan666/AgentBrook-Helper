@@ -30,6 +30,9 @@ foreach ($rid in $runtimes) {
     $outDir = Join-Path $publishBase $rid
     Write-Host ""
     Write-Host "==> 正在发布 $rid -> $outDir"
+    # 删除旧 appsettings.json，确保 dotnet publish 用源文件覆盖
+    $staleSettings = Join-Path $outDir "appsettings.json"
+    if (Test-Path $staleSettings) { Remove-Item $staleSettings -Force }
     dotnet publish $projectDir `
         -c $Configuration `
         -r $rid `
@@ -37,6 +40,16 @@ foreach ($rid in $runtimes) {
         -p:Version=$version `
         -o $outDir
     if ($LASTEXITCODE -ne 0) { throw "Publish failed for $rid" }
+
+    # 清除输出目录 appsettings.json 中的 API Key 等敏感信息
+    $outSettings = Join-Path $outDir "appsettings.json"
+    if (Test-Path $outSettings) {
+        $raw = Get-Content $outSettings -Raw -Encoding utf8
+        $raw = $raw -replace '"ApiKey"\s*:\s*"[^"]*"', '"ApiKey": ""'
+        $raw = $raw -replace '"GITHUB_PERSONAL_ACCESS_TOKEN"\s*:\s*"[^"]*"', '"GITHUB_PERSONAL_ACCESS_TOKEN": ""'
+        [System.IO.File]::WriteAllText($outSettings, $raw, [System.Text.UTF8Encoding]::new($false))
+        Write-Host "  -> 已清除 appsettings.json 中的敏感信息"
+    }
 
     # 平台分发包：版本号 + rid
     $distZipName = "AgentBrook.Helper-$version-$rid.zip"
