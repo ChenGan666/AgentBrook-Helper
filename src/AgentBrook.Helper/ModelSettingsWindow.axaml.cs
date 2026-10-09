@@ -1,4 +1,6 @@
 using AgentBrook.Agent.Infrastructure;
+using AgentBrook.Agent.Skills;
+using AgentBrook.Helper.Update;
 using Avalonia.Controls;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -27,13 +29,33 @@ public partial class ModelSettingsWindow : Window
     private string _activeName = "";
     private int _selectedIndex = -1;
     private bool _dirty;
+    private TextBlock? _skillsHint;
+    private UpdateInfo? _pendingUpdate;
 
     public ModelSettingsWindow()
     {
         InitializeComponent();
+        Opened += (_, _) => CenterOnScreen();
         LoadFromController();
         BuildProviderList();
         BuildPresets();
+
+        _skillsHint = this.FindControl<TextBlock>("SkillsHint");
+        BuildSkillsList();
+
+        var currentVersionText = this.FindControl<TextBlock>("CurrentVersionText");
+        if (currentVersionText is not null)
+        {
+            currentVersionText.Text = I18n.T("当前版本：{0}", AutoUpdater.CurrentVersion.ToString());
+        }
+        var checkUpdateBtn = this.FindControl<Button>("CheckUpdateBtn");
+        if (checkUpdateBtn is not null) checkUpdateBtn.Click += async (_, _) => await CheckUpdateAsync();
+        var upgradeBtn = this.FindControl<Button>("UpgradeBtn");
+        if (upgradeBtn is not null) upgradeBtn.Click += async (_, _) => await UpgradeAsync();
+        var updateUrlBox = this.FindControl<TextBox>("UpdateServiceUrlBox");
+        if (updateUrlBox is not null) updateUrlBox.Text = LoadUpdateServiceUrl();
+        var saveUpdateUrlBtn = this.FindControl<Button>("SaveUpdateUrlBtn");
+        if (saveUpdateUrlBtn is not null) saveUpdateUrlBtn.Click += (_, _) => SaveUpdateServiceUrl();
 
         ApplyWindowLanguage();
         I18n.LanguageChanged += ApplyWindowLanguage;
@@ -136,6 +158,10 @@ public partial class ModelSettingsWindow : Window
         NavModels.IsCheckedChanged += (_, _) =>
         {
             if (NavModels.IsChecked == true) ShowPage(PageModels);
+        };
+        NavSkills.IsCheckedChanged += (_, _) =>
+        {
+            if (NavSkills.IsChecked == true) ShowPage(PageSkills);
         };
         ShowPage(PageGeneral);   // 与 NavGeneral 默认选中一致
         this.FindControl<Button>("SaveApplyBtn")!.Click += async (_, _) => await SaveAndApplyAsync();
@@ -257,6 +283,22 @@ public partial class ModelSettingsWindow : Window
         PageGeneral.IsVisible = page == PageGeneral;
         PageAppearance.IsVisible = page == PageAppearance;
         PageModels.IsVisible = page == PageModels;
+        PageSkills.IsVisible = page == PageSkills;
+    }
+
+    private void CenterOnScreen()
+    {
+        var screen = Screens.ScreenFromWindow(this) ?? Screens.Primary;
+        if (screen is null)
+        {
+            return;
+        }
+        var scale = screen.Scaling;
+        var width = ClientSize.Width * scale;
+        var height = ClientSize.Height * scale;
+        var x = screen.WorkingArea.X + (screen.WorkingArea.Width - width) / 2;
+        var y = screen.WorkingArea.Y + (screen.WorkingArea.Height - height) / 2;
+        Position = new PixelPoint((int)x, (int)y);
     }
 
     /// <summary>删除位置偏好并通知气泡窗口回到默认位置。</summary>
@@ -271,6 +313,208 @@ public partial class ModelSettingsWindow : Window
         Hint(I18n.T("气泡位置已重置。"));
     }
 
+    // ───────────────────────── Skill 管理 ─────────────────────────
+    private void BuildSkillsList()
+    {
+        if (SkillsListPanel is null) return;
+        SkillsListPanel.Children.Clear();
+        var skills = App.Controller.GetSkills();
+        if (skills.Count == 0)
+        {
+            SkillsListPanel.Children.Add(new TextBlock
+            {
+                Text = I18n.T("暂无已安装的技能。"),
+                FontSize = 13,
+                Foreground = new SolidColorBrush(Color.Parse("#8a8a8a")),
+            });
+            return;
+        }
+        foreach (var skill in skills)
+        {
+            var card = new Border
+            {
+                Background = new SolidColorBrush(Color.Parse("#2b2b2b")),
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(12, 10),
+            };
+            var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+            var textPanel = new StackPanel { Spacing = 4 };
+            textPanel.Children.Add(new TextBlock
+            {
+                Text = skill.Name,
+                FontSize = 14,
+                FontWeight = FontWeight.SemiBold,
+                Foreground = new SolidColorBrush(Color.Parse("#f0f0f0")),
+            });
+            if (!string.IsNullOrWhiteSpace(skill.Description))
+            {
+                textPanel.Children.Add(new TextBlock
+                {
+                    Text = skill.Description,
+                    FontSize = 12.5,
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = new SolidColorBrush(Color.Parse("#9a9a9a")),
+                });
+            }
+            Grid.SetColumn(textPanel, 0);
+            var delBtn = new Button
+            {
+                Content = I18n.T("删除技能"),
+                Classes = { "dangerBtn" },
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+            };
+            var name = skill.Name;
+            delBtn.Click += (_, _) => DeleteSkill(name);
+            Grid.SetColumn(delBtn, 1);
+            grid.Children.Add(textPanel);
+            grid.Children.Add(delBtn);
+            card.Child = grid;
+            SkillsListPanel.Children.Add(card);
+        }
+    }
+
+    private void DeleteSkill(string name)
+    {
+        try
+        {
+            if (App.Controller.DeleteSkill(name))
+            {
+                if (_skillsHint is not null) _skillsHint.Text = I18n.T("已删除技能「{0}」", name);
+                BuildSkillsList();
+            }
+            else
+            {
+                if (_skillsHint is not null) _skillsHint.Text = I18n.T("删除失败：{0}", I18n.T("未找到该技能"));
+            }
+        }
+        catch (Exception ex)
+        {
+            if (_skillsHint is not null) _skillsHint.Text = I18n.T("删除失败：{0}", ex.Message);
+        }
+    }
+
+    private string BuildVersionUrl(string baseUrl)
+    {
+        var url = (baseUrl ?? "http://helper.agentbrook.com").Trim().TrimEnd('/');
+        if (url.EndsWith("/api/update/version", StringComparison.OrdinalIgnoreCase))
+        {
+            url = url[..^"/api/update/version".Length].TrimEnd('/');
+        }
+        var (os, arch) = AutoUpdater.CurrentPlatform;
+        return $"{url}/api/update/version?os={os}&arch={arch}";
+    }
+
+    private string LoadUpdateServiceUrl()
+    {
+        var saved = UiPrefs.Load<string>("update-service-url.json");
+        var url = string.IsNullOrWhiteSpace(saved) ? "http://helper.agentbrook.com" : saved.Trim().TrimEnd('/');
+        return url;
+    }
+
+    private void SaveUpdateServiceUrl()
+    {
+        var box = this.FindControl<TextBox>("UpdateServiceUrlBox");
+        var url = box?.Text?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            url = "http://helper.agentbrook.com";
+        }
+        UiPrefs.Save("update-service-url.json", url.TrimEnd('/'));
+        Hint(I18n.T("地址已保存"));
+    }
+
+    private async Task CheckUpdateAsync()
+    {
+        var updateHint = this.FindControl<TextBlock>("UpdateHint");
+        var upgradeBtn = this.FindControl<Button>("UpgradeBtn");
+        if (updateHint is not null) updateHint.Text = I18n.T("正在检查更新…");
+        if (upgradeBtn is not null) upgradeBtn.IsVisible = false;
+        ShowUpdateDetails(null);
+        _pendingUpdate = null;
+
+        var urlBox = this.FindControl<TextBox>("UpdateServiceUrlBox");
+        var baseUrl = urlBox?.Text?.Trim();
+        var versionUrl = BuildVersionUrl(baseUrl!);
+
+        var info = await AutoUpdater.CheckAsync(versionUrl);
+        if (info is null)
+        {
+            if (updateHint is not null) updateHint.Text = I18n.T("无法连接更新服务，请确认服务已启动。");
+            return;
+        }
+
+        if (!AutoUpdater.IsNewer(info.Version))
+        {
+            if (updateHint is not null) updateHint.Text = I18n.T("已是最新版本。");
+            return;
+        }
+
+        _pendingUpdate = info;
+        if (updateHint is not null) updateHint.Text = I18n.T("发现新版本：{0}", info.Version);
+        if (upgradeBtn is not null) upgradeBtn.IsVisible = true;
+        ShowUpdateDetails(info);
+    }
+
+    private void ShowUpdateDetails(UpdateInfo? info)
+    {
+        var detailsPanel = this.FindControl<Border>("UpdateDetailsPanel");
+        if (detailsPanel is not null) detailsPanel.IsVisible = info is not null;
+        if (info is null) return;
+
+        var platformText = this.FindControl<TextBlock>("UpdatePlatformText");
+        if (platformText is not null) platformText.Text = I18n.T("目标平台：{0}", info.Platform);
+
+        var fileInfoText = this.FindControl<TextBlock>("UpdateFileInfoText");
+        if (fileInfoText is not null)
+        {
+            fileInfoText.Text = I18n.T("文件：{0}，大小：{1:F2} MB", info.FileName, info.Size / (1024.0 * 1024.0));
+        }
+
+        var notesText = this.FindControl<TextBlock>("UpdateReleaseNotesText");
+        if (notesText is not null)
+        {
+            notesText.Text = string.IsNullOrWhiteSpace(info.ReleaseNotes)
+                ? I18n.T("无")
+                : info.ReleaseNotes;
+        }
+    }
+
+    private async Task UpgradeAsync()
+    {
+        if (_pendingUpdate is null) return;
+        var updateHint = this.FindControl<TextBlock>("UpdateHint");
+        var upgradeBtn = this.FindControl<Button>("UpgradeBtn");
+        var progressPanel = this.FindControl<StackPanel>("UpdateProgressPanel");
+        var progressBar = this.FindControl<ProgressBar>("UpdateProgressBar");
+        var progressText = this.FindControl<TextBlock>("UpdateProgressText");
+
+        if (updateHint is not null) updateHint.Text = I18n.T("正在下载更新…");
+        if (upgradeBtn is not null) upgradeBtn.IsVisible = false;
+        if (progressPanel is not null) progressPanel.IsVisible = true;
+        if (progressBar is not null) progressBar.Value = 0;
+        if (progressText is not null) progressText.Text = "0%";
+
+        var progress = new Progress<double>(p =>
+        {
+            var percent = p * 100;
+            if (progressBar is not null) progressBar.Value = percent;
+            if (progressText is not null) progressText.Text = $"{percent:F0}%";
+        });
+
+        var error = await AutoUpdater.UpgradeAsync(_pendingUpdate, progress);
+        if (!string.IsNullOrEmpty(error))
+        {
+            if (updateHint is not null) updateHint.Text = I18n.T("升级失败：{0}", error);
+            if (progressPanel is not null) progressPanel.IsVisible = false;
+            return;
+        }
+
+        if (updateHint is not null) updateHint.Text = I18n.T("下载完成，即将关闭并升级。");
+        if (progressText is not null) progressText.Text = "100%";
+        await Task.Delay(800);
+        Environment.Exit(0);
+    }
+
     /// <summary>按当前语言设置窗口标题与导航文案。</summary>
     private void ApplyWindowLanguage()
     {
@@ -281,6 +525,10 @@ public partial class ModelSettingsWindow : Window
         if (ngb is not null) ngb.Text = I18n.T("基础设置");
         var ngm = this.FindControl<TextBlock>("NavGroupModels");
         if (ngm is not null) ngm.Text = I18n.T("模型");
+        var nga = this.FindControl<TextBlock>("NavGroupAgent");
+        if (nga is not null) nga.Text = I18n.T("智能体");
+        var nst = this.FindControl<TextBlock>("NavSkillsText");
+        if (nst is not null) nst.Text = I18n.T("Skill管理");
         var pt = this.FindControl<TextBlock>("PersonalTitle");
         if (pt is not null) pt.Text = I18n.T("个性化");
         var ph = this.FindControl<TextBlock>("PresetHeader");
@@ -376,6 +624,20 @@ public partial class ModelSettingsWindow : Window
         if (resetPosBtn is not null) resetPosBtn.Content = I18n.T("重置到默认位置（右上角）");
         SetT("ModelsTitle", "模型设置");
         SetT("ModelsDesc", "管理模型供应商，配置后即可在底部切换使用。");
+        var checkUpdateBtn = this.FindControl<Button>("CheckUpdateBtn");
+        if (checkUpdateBtn is not null) checkUpdateBtn.Content = I18n.T("检查更新");
+        var upgradeBtn = this.FindControl<Button>("UpgradeBtn");
+        if (upgradeBtn is not null) upgradeBtn.Content = I18n.T("立即升级");
+        SetT("LabelUpdate", "版本更新");
+        var currentVersionText = this.FindControl<TextBlock>("CurrentVersionText");
+        if (currentVersionText is not null) currentVersionText.Text = I18n.T("当前版本：{0}", AutoUpdater.CurrentVersion.ToString());
+        SetT("LabelUpdateServiceUrl", "更新服务地址");
+        var saveUrlBtn = this.FindControl<Button>("SaveUpdateUrlBtn");
+        if (saveUrlBtn is not null) saveUrlBtn.Content = I18n.T("保存地址");
+        var releaseNotesTitle = this.FindControl<TextBlock>("UpdateReleaseNotesTitle");
+        if (releaseNotesTitle is not null) releaseNotesTitle.Text = I18n.T("更新说明");
+        SetT("SkillsTitle", "Skill管理");
+        SetT("SkillsDesc", "管理已安装的技能，删除后立即生效。");
         SetT("LabelProviderName", "供应商名称");
         SetT("LabelApiEndpoint", "API 地址（OpenAI 兼容端点）");
         SetT("LabelApiKey", "API Key");

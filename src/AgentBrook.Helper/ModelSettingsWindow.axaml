@@ -132,6 +132,13 @@
                             <TextBlock x:Name="NavModelsText" Text="模型设置"/>
                         </StackPanel>
                     </RadioButton>
+                    <TextBlock x:Name="NavGroupAgent" Text="智能体" Classes="navGroup"/>
+                    <RadioButton x:Name="NavSkills" Classes="navItem" GroupName="nav">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <PathIcon Data="{StaticResource Icon.Book}" Width="15" Height="15"/>
+                            <TextBlock x:Name="NavSkillsText" Text="Skill管理"/>
+                        </StackPanel>
+                    </RadioButton>
                 </StackPanel>
             </ScrollViewer>
         </Border>
@@ -202,6 +209,42 @@
                     <TextBlock x:Name="NotifySoundDesc" Text="任务完成且对话窗不在前台时播放" FontSize="12.5"
                                Foreground="#8a8a8a" VerticalAlignment="Center"/>
                 </StackPanel>
+
+                <Separator Margin="0,16,0,8" Background="#333333"/>
+                <TextBlock x:Name="LabelUpdate" Text="版本更新" Classes="formLabel"/>
+                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,2,0,0">
+                    <TextBlock x:Name="LabelUpdateServiceUrl" Text="更新服务地址" Classes="formLabel"
+                               VerticalAlignment="Center"/>
+                    <TextBox x:Name="UpdateServiceUrlBox" Width="260" FontSize="13"
+                             Watermark="http://helper.agentbrook.com"/>
+                    <Button x:Name="SaveUpdateUrlBtn" Classes="ghostBtn" Content="保存地址"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,8,0,0">
+                    <TextBlock x:Name="CurrentVersionText" Text="当前版本：—" FontSize="12.5"
+                               Foreground="#9a9a9a" VerticalAlignment="Center"/>
+                    <Button x:Name="CheckUpdateBtn" Classes="ghostBtn" Content="检查更新"/>
+                    <Button x:Name="UpgradeBtn" Classes="primaryBtn" Content="立即升级" IsVisible="False"/>
+                </StackPanel>
+                <TextBlock x:Name="UpdateHint" Text="" FontSize="12" Foreground="#8a8a8a"
+                           TextWrapping="Wrap" Margin="0,4,0,0"/>
+                <StackPanel x:Name="UpdateProgressPanel" Orientation="Horizontal" Spacing="10" IsVisible="False"
+                            Margin="0,4,0,0">
+                    <ProgressBar x:Name="UpdateProgressBar" Minimum="0" Maximum="100" Value="0" Width="200"
+                                 Height="8" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="UpdateProgressText" Text="0%" FontSize="12.5" Foreground="#9a9a9a"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+                <Border x:Name="UpdateDetailsPanel" IsVisible="False" Background="#252525" CornerRadius="12"
+                        Padding="12" BorderBrush="#333333" BorderThickness="1" Margin="0,6,0,0">
+                    <StackPanel Spacing="6">
+                        <TextBlock x:Name="UpdatePlatformText" FontSize="12.5" Foreground="#9a9a9a"/>
+                        <TextBlock x:Name="UpdateFileInfoText" FontSize="12.5" Foreground="#9a9a9a"/>
+                        <TextBlock x:Name="UpdateReleaseNotesTitle" Text="更新说明" FontSize="12.5"
+                                   Foreground="#f0f0f0" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="UpdateReleaseNotesText" FontSize="12.5" Foreground="#9a9a9a"
+                                   TextWrapping="Wrap" MaxHeight="120" ScrollViewer.VerticalScrollBarVisibility="Auto"/>
+                    </StackPanel>
+                </Border>
             </StackPanel>
 
             <!-- 外观 -->
@@ -262,6 +305,21 @@
                         </ScrollViewer>
                     </Border>
                 </Grid>
+            </StackPanel>
+
+            <!-- Skill 管理 -->
+            <StackPanel x:Name="PageSkills" IsVisible="False" Spacing="6">
+                <TextBlock x:Name="SkillsTitle" Text="Skill管理" Classes="pageTitle"/>
+                <TextBlock x:Name="SkillsDesc" Text="管理已安装的技能，删除后立即生效。"
+                           Classes="pageDesc" Margin="0,2,0,14"/>
+                <Border Background="#252525" CornerRadius="12" Padding="12"
+                        BorderBrush="#333333" BorderThickness="1">
+                    <ScrollViewer MaxHeight="420">
+                        <StackPanel x:Name="SkillsListPanel" Spacing="8"/>
+                    </ScrollViewer>
+                </Border>
+                <TextBlock x:Name="SkillsHint" Text="" FontSize="12.5" Foreground="#8a8a8a"
+                           TextWrapping="Wrap" Margin="0,6,0,0"/>
             </StackPanel>
         </Panel>
         </ScrollViewer>

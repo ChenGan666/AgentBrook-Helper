@@ -13,6 +13,7 @@ using Avalonia.Animation.Easings;
 using Avalonia.Controls.Shapes;
 using Avalonia.Threading;
 using System.Runtime.InteropServices;
+using Avalonia.Platform.Storage;
 
 namespace AgentBrook.Helper;
 
@@ -59,6 +60,11 @@ public partial class BubbleWindow : Window
 
         // 不抢占焦点：气泡被点击时不会把其他应用切到后台
         ShowActivated = false;
+
+        // 拖入文件到气泡 → 自动打开对话窗并加入附件
+        DragDrop.SetAllowDrop(this, true);
+        DragDrop.AddDragOverHandler(this, OnDragOver);
+        DragDrop.AddDropHandler(this, OnDrop);
 
         _controller.StateChanged += OnStateChanged;
         _controller.ReadyChanged += () => Dispatcher.UIThread.Post(
@@ -688,6 +694,38 @@ public partial class BubbleWindow : Window
     private void OnMenuOpenChat(object? sender, RoutedEventArgs e) => _controller.ShowConversation();
     private void OnMenuCycleModel(object? sender, RoutedEventArgs e) => _controller.CycleModel();
     private void OnMenuExit(object? sender, RoutedEventArgs e) => _controller.Shutdown();
+
+    private void OnDragOver(object? sender, DragEventArgs e)
+    {
+        if (e.DataTransfer.Formats.Contains(DataFormat.File))
+        {
+            e.DragEffects = DragDropEffects.Copy;
+        }
+        else
+        {
+            e.DragEffects = DragDropEffects.None;
+        }
+    }
+
+    private void OnDrop(object? sender, DragEventArgs e)
+    {
+        if (!e.DataTransfer.Formats.Contains(DataFormat.File))
+        {
+            return;
+        }
+        var files = e.DataTransfer.TryGetFiles();
+        if (files is null)
+        {
+            return;
+        }
+        var paths = files.OfType<IStorageFile>().Select(f => f.Path.LocalPath).ToList();
+        if (paths.Count == 0)
+        {
+            return;
+        }
+        _controller.ShowConversation();
+        _controller.ConversationWindow?.AddAttachmentFromDrop(paths);
+    }
 
     protected override void OnClosing(WindowClosingEventArgs e)
     {

@@ -204,6 +204,11 @@ public partial class MainWindow : Window
             };
         }
 
+        // 拖入文件到附件
+        DragDrop.SetAllowDrop(this, true);
+        DragDrop.AddDragOverHandler(this, OnDragOver);
+        DragDrop.AddDropHandler(this, OnDrop);
+
         // 事件订阅：控制器 → UI（缺失会导致状态/消息/审批全部失联）
         _controller.EventRaised -= OnControllerEvent;
         _controller.EventRaised += OnControllerEvent;
@@ -1891,6 +1896,35 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnDragOver(object? sender, DragEventArgs e)
+    {
+        if (e.DataTransfer.Formats.Contains(DataFormat.File))
+        {
+            e.DragEffects = DragDropEffects.Copy;
+        }
+        else
+        {
+            e.DragEffects = DragDropEffects.None;
+        }
+    }
+
+    private void OnDrop(object? sender, DragEventArgs e)
+    {
+        if (!e.DataTransfer.Formats.Contains(DataFormat.File))
+        {
+            return;
+        }
+        var files = e.DataTransfer.TryGetFiles();
+        if (files is null)
+        {
+            return;
+        }
+        foreach (var file in files.OfType<Avalonia.Platform.Storage.IStorageFile>())
+        {
+            AddAttachment(file.Path.LocalPath);
+        }
+    }
+
     /// <summary>文件选择器添加附件。</summary>
     private async Task PickFilesAsync()
     {
@@ -1913,6 +1947,23 @@ public partial class MainWindow : Window
         }
         _attachments.Add(new PendingAttachment(path, Path.GetFileName(path), IsImageFile(path)));
         RenderAttachmentBar();
+    }
+
+    /// <summary>由气泡拖入文件时调用：确保窗口可见并批量加入附件。</summary>
+    public void AddAttachmentFromDrop(IEnumerable<string> paths)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!IsVisible)
+            {
+                Show();
+            }
+            Activate();
+            foreach (var path in paths)
+            {
+                AddAttachment(path);
+            }
+        });
     }
 
     /// <summary>重建附件预览条（图片缩略 + 名称 + 移除）。</summary>

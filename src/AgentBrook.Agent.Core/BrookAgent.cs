@@ -111,7 +111,19 @@ public sealed class BrookAgent : IAsyncDisposable
     public string WorkspaceRoot => _workspace.Root;
     public IReadOnlyList<ToolInfo> ToolCatalog { get; }
     public IReadOnlyList<SkillInfo> Skills => _skills;
+    public SkillStore SkillStore => _skillStore;
     public IReadOnlyList<string> ApprovalTools => _config.Agent.RequireApprovalTools;
+
+    /// <summary>删除已安装技能并重建主能力索引。</summary>
+    public bool DeleteSkill(string name)
+    {
+        if (_skillStore.DeleteSkill(name))
+        {
+            _refreshMasterIndex?.Invoke();
+            return true;
+        }
+        return false;
+    }
 
     /// <summary>创建并初始化智能体（模型客户端、MCP、记忆、技能、会话恢复）。</summary>
     public static async Task<BrookAgent> CreateAsync(

@@ -1,0 +1,49 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="AgentBrook.Helper.AboutWindow"
+        Title="关于 AgentBrook"
+        Width="420"
+        Height="520"
+        CanResize="False"
+        WindowStartupLocation="CenterScreen"
+        Background="#1e1e1e">
+  <Border Padding="28" Background="#1e1e1e">
+    <StackPanel Spacing="18" HorizontalAlignment="Center" VerticalAlignment="Center">
+      <Image Source="avares://AgentBrook.Helper/Assets/app-icon.png"
+             Width="128" Height="128" HorizontalAlignment="Center"/>
+
+      <TextBlock Text="AgentBrook"
+                 FontSize="28"
+                 FontWeight="Bold"
+                 Foreground="#f0f0f0"
+                 HorizontalAlignment="Center"/>
+
+      <TextBlock x:Name="VersionText"
+                 FontSize="13"
+                 Foreground="#9a9a9a"
+                 HorizontalAlignment="Center"/>
+
+      <TextBlock Text="AgentBrook 是跨平台 AI 助手，支持语音交互、多模型切换、工具调用与技能管理。"
+                 FontSize="13.5"
+                 Foreground="#c8c8c8"
+                 TextWrapping="Wrap"
+                 TextAlignment="Center"
+                 MaxWidth="320"/>
+
+      <Button Content="了解更多"
+              Classes="primaryBtn"
+              HorizontalAlignment="Center"
+              Click="OnLearnMoreClick"/>
+
+      <Button Content="关闭"
+              Classes="ghostBtn"
+              HorizontalAlignment="Center"
+              Click="OnCloseClick"/>
+
+      <TextBlock Text="© 2026 AgentBrook"
+                 FontSize="12"
+                 Foreground="#8a8a8a"
+                 HorizontalAlignment="Center"/>
+    </StackPanel>
+  </Border>
+</Window>

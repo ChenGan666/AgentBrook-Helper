@@ -187,6 +187,26 @@ public sealed class SkillStore
         return (null, dirName);
     }
 
+    /// <summary>删除指定技能（按名称，不区分大小写），成功返回 true。</summary>
+    public bool DeleteSkill(string name)
+    {
+        var skill = Current.FirstOrDefault(s =>
+            string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (skill is null)
+        {
+            return false;
+        }
+        try
+        {
+            Directory.Delete(skill.SkillDirectory, true);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     /// <summary>拉取技能市场索引（JSON：{"skills":[{"name","description","url"}]}），返回原始文本或 null。</summary>
     public async Task<string?> FetchMarketIndexAsync(string marketUrl)
     {

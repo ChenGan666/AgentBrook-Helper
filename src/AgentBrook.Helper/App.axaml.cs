@@ -165,4 +165,10 @@ public partial class App : Application
         }
         base.OnFrameworkInitializationCompleted();
     }
+
+    private void OnAboutClick(object? sender, System.EventArgs e)
+    {
+        var about = new AboutWindow();
+        about.Show();
+    }
 }

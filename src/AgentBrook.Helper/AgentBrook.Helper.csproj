@@ -29,6 +29,9 @@
 
   <ItemGroup>
     <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="release-notes.txt">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
     <None Update="scripts\stt.swift" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

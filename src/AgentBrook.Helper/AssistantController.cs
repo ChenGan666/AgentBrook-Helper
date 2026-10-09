@@ -388,6 +388,10 @@ public sealed class AssistantController : IBrookInteraction
     public string CurrentProvider => Ready ? Agent!.CurrentProvider : "";
     public IReadOnlyList<AgentBrook.Agent.Infrastructure.ProviderConfig> Providers => Ready ? Agent!.Providers : [];
 
+    public IReadOnlyList<AgentBrook.Agent.Skills.SkillInfo> GetSkills() => Ready ? Agent!.SkillStore.Current : [];
+
+    public bool DeleteSkill(string name) => Ready && Agent!.DeleteSkill(name);
+
     public Task SetProviderAsync(string name) => Agent!.SwitchProviderAsync(name);
 
     public Task SaveProvidersAsync(List<AgentBrook.Agent.Infrastructure.ProviderConfig> providers, string activeProvider)

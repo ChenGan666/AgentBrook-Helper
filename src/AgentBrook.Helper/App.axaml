@@ -1,7 +1,14 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="AgentBrook.Helper.App"
+             Name="AgentBrook"
              RequestedThemeVariant="Default">
+    <NativeMenu.Menu>
+        <NativeMenu>
+            <NativeMenuItem Header="关于 AgentBrook" Click="OnAboutClick" />
+        </NativeMenu>
+    </NativeMenu.Menu>
+
     <Application.Resources>
         <!-- 图标库：Fluent UI System Icons（MIT）矢量路径；可替换为 iconfont.cn 下载的同尺寸 SVG 路径 -->
         <ResourceDictionary>
