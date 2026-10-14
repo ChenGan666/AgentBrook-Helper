@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using Avalonia.Input;
 using System.Diagnostics;
 using Avalonia;
@@ -156,7 +156,7 @@ public static class MarkdownView
     {
         // 背景必须非 null 才能被鼠标命中，否则只能点击到文字本身、行间空白无法开始选择。
         tb.Background ??= Brushes.Transparent;
-        var item = new MenuItem { Header = I18n.T("复制") };
+        var item = new MenuItem { Header = I18n.T("ui.copy") };
         item.Click += async (_, _) =>
         {
             var text = string.IsNullOrEmpty(tb.SelectedText) ? tb.Text ?? "" : tb.SelectedText;
@@ -636,3 +636,4 @@ public static class MarkdownView
     }
 
 }
+

@@ -1,4 +1,4 @@
-using AgentBrook.Helper;
+﻿using AgentBrook.Helper;
 using AgentBrook.Agent;
 using AgentBrook.Agent.Configuration;
 using AgentBrook.Agent.Infrastructure;
@@ -150,9 +150,9 @@ public partial class MainWindow : Window
                     };
                     panel.Children.Add(b);
                 }
-                AddItem(I18n.T("每次询问（更安全）"), !_controller.FullAccess,
+                AddItem(I18n.T("ui.ask.every.time.safer"), !_controller.FullAccess,
                     () => { _controller.FullAccess = false; UpdateFullAccessVisual(); });
-                AddItem(I18n.T("完全访问（自动批准，重启复位）"), _controller.FullAccess,
+                AddItem(I18n.T("ui.full.access.auto.approve.resets.on.restart"), _controller.FullAccess,
                     () => { _controller.FullAccess = true; UpdateFullAccessVisual(); });
                 ShowDropdown(fullAccessBtn, panel, ref _fullPopup);
             };
@@ -169,7 +169,7 @@ public partial class MainWindow : Window
                 {
                     panel.Children.Add(new TextBlock
                     {
-                        Text = I18n.T("（启动中…）"),
+                        Text = I18n.T("ui.starting"),
                         Foreground = new SolidColorBrush(Color.Parse("#9a9a9a")),
                         FontSize = 13.5,
                         Margin = new Thickness(12, 8),
@@ -222,7 +222,7 @@ public partial class MainWindow : Window
                         Margin = new Thickness(8, 6),
                         Background = new SolidColorBrush(Color.Parse("#3f3f3f")),
                     });
-                    var manage = new Button { Classes = { "menuItem" }, Content = I18n.T("管理模型…") };
+                    var manage = new Button { Classes = { "menuItem" }, Content = I18n.T("ui.manage.models") };
                     manage.Click += (_, _) =>
                     {
                         _modelPopup?.IsOpen = false;
@@ -317,7 +317,7 @@ public partial class MainWindow : Window
             if (_chatPanel!.Children.Count == 0)
             {
                 var name = AssistantIdentity.Current;
-                AddAssistantBubble(I18n.T("你好，我是 {0}。\n点屏幕上的悬浮气泡打开这里，直接打字聊天。命令执行前我会先征求你的同意。", name));
+                AddAssistantBubble(I18n.T("ui.value.n", name));
             }
         };
     }
@@ -336,7 +336,7 @@ public partial class MainWindow : Window
         var sendBtn = this.FindControl<Button>("SendBtn");
         if (sendBtn is not null)
         {
-            ToolTip.SetTip(sendBtn, busy ? I18n.T("停止当前任务") : I18n.T("发送"));
+            ToolTip.SetTip(sendBtn, busy ? I18n.T("ui.stop.the.current.task") : I18n.T("ui.send"));
         }
     }
 
@@ -356,7 +356,7 @@ public partial class MainWindow : Window
         {
             panel.Children.Add(new TextBlock
             {
-                Text = I18n.T("任务进行中，结束后可切换会话"),
+                Text = I18n.T("ui.busy.switch.sessions.after.the.current.task"),
                 Foreground = new SolidColorBrush(Color.Parse("#9a9a9a")),
                 FontSize = 13,
                 Margin = new Thickness(12, 8),
@@ -425,7 +425,7 @@ public partial class MainWindow : Window
                         Foreground = new SolidColorBrush(Color.Parse("#7a7a7a")),
                     },
                 };
-                ToolTip.SetTip(delBtn, I18n.T("删除此会话"));
+                ToolTip.SetTip(delBtn, I18n.T("ui.message.4"));
                 Grid.SetColumn(delBtn, 2);
                 grid.Children.Add(delBtn);
                 delBtn.Click += async (_, _) =>
@@ -434,7 +434,7 @@ public partial class MainWindow : Window
                     {
                         delBtn.Tag = "armed";
                         ((PathIcon)delBtn.Content!).Foreground = new SolidColorBrush(Color.Parse("#ff6b6b"));
-                        ToolTip.SetTip(delBtn, I18n.T("再点一次确认删除"));
+                        ToolTip.SetTip(delBtn, I18n.T("ui.message.7"));
                         return;
                     }
                     _sessionPopup?.IsOpen = false;
@@ -451,7 +451,7 @@ public partial class MainWindow : Window
             {
                 listPanel.Children.Add(new TextBlock
                 {
-                    Text = I18n.T("（暂无历史会话）"),
+                    Text = I18n.T("ui.no.archived.sessions.yet"),
                     Foreground = new SolidColorBrush(Color.Parse("#9a9a9a")),
                     FontSize = 13,
                     Margin = new Thickness(12, 8),
@@ -469,7 +469,7 @@ public partial class MainWindow : Window
             var newItem = new Button
             {
                 Classes = { "menuItem" },
-                Content = "＋  " + I18n.T("开启新对话"),
+                Content = "＋  " + I18n.T("ui.new.chat"),
                 Foreground = new SolidColorBrush(Color.Parse("#c8c8c8")),
             };
             newItem.Click += async (_, _) =>
@@ -495,7 +495,7 @@ public partial class MainWindow : Window
             });
             ((StackPanel)distillItem.Content!).Children.Add(new TextBlock
             {
-                Text = I18n.T("把当前会话成果沉淀为技能"),
+                Text = I18n.T("ui.distill.this.session.into.a.skill"),
                 VerticalAlignment = VerticalAlignment.Center,
             });
             distillItem.Click += (_, _) =>
@@ -503,8 +503,8 @@ public partial class MainWindow : Window
                 _sessionPopup?.IsOpen = false;
                 var (name, error) = _controller.DistillSessionToSkill();
                 AddAssistantBubble(error is null
-                    ? I18n.T("✔ 当前会话成果已沉淀为技能「{0}」。其他会话中可直接让我 load_skill 调用这些成果。", name)
-                    : I18n.T("沉淀失败：{0}", error));
+                    ? I18n.T("ui.session.distilled.into.skill.value.in.any.other.session.just.ask.me.to.load.skill.it", name)
+                    : I18n.T("ui.distill.failed.value", error));
             };
             panel.Children.Add(distillItem);
         }
@@ -540,11 +540,11 @@ public partial class MainWindow : Window
 
         if (replayed > 0)
         {
-            AddAssistantBubble(I18n.T("已切换到会话「{0}」，以上是历史消息。上下文与摘要已载入，直接继续即可。", title));
+            AddAssistantBubble(I18n.T("ui.value.6", title));
         }
         else
         {
-            AddAssistantBubble(I18n.T("已切换到会话「{0}」。该会话的上下文与摘要已载入，直接继续即可。", title));
+            AddAssistantBubble(I18n.T("ui.switched.to.session.value.its.context.and.summary.are.loaded.just.continue", title));
         }
         ScrollToEnd();
     }
@@ -566,7 +566,7 @@ public partial class MainWindow : Window
         var text = this.FindControl<TextBlock>("QueueText");
         if (bar is null || text is null) return;
         bar.IsVisible = _queuedHintCount > 0;
-        text.Text = I18n.T("已排队 {0} 条，回合结束后自动发送", _queuedHintCount);
+        text.Text = I18n.T("ui.value.queued.will.send.after.the.current.turn", _queuedHintCount);
     }
     private int _queuedHintCount;
 
@@ -584,34 +584,34 @@ public partial class MainWindow : Window
         var fullText = this.FindControl<TextBlock>("FullAccessText");
         if (fullText is not null)
         {
-            fullText.Text = _controller.FullAccess ? I18n.T("完全访问") : I18n.T("每次询问");
+            fullText.Text = _controller.FullAccess ? I18n.T("ui.full.access") : I18n.T("ui.ask.every.time");
         }
         var send = this.FindControl<Button>("SendBtn");
         if (send is not null)
         {
-            ToolTip.SetTip(send, I18n.T("发送"));
+            ToolTip.SetTip(send, I18n.T("ui.send"));
         }
         var plus = this.FindControl<Button>("PlusBtn");
         if (plus is not null)
         {
-            ToolTip.SetTip(plus, I18n.T("添加附件（或直接粘贴图片）"));
+            ToolTip.SetTip(plus, I18n.T("ui.add.attachment.or.paste.image"));
         }
         var modelChip = this.FindControl<Button>("ModelChip");
         if (modelChip is not null)
         {
-            ToolTip.SetTip(modelChip, I18n.T("切换模型"));
+            ToolTip.SetTip(modelChip, I18n.T("ui.switch.model"));
         }
         var fullAccessBtn = this.FindControl<Button>("FullAccessBtn");
         if (fullAccessBtn is not null)
         {
             ToolTip.SetTip(fullAccessBtn, _controller.FullAccess
-                ? I18n.T("完全访问：操作自动批准（重启复位）")
-                : I18n.T("每次询问：执行前征求同意"));
+                ? I18n.T("ui.full.access.auto.approve.resets.on.restart.2")
+                : I18n.T("ui.ask.every.time.confirm.before.running"));
         }
         var newBtn = this.FindControl<Button>("NewBtn");
         if (newBtn is not null)
         {
-            ToolTip.SetTip(newBtn, I18n.T("开启新对话"));
+            ToolTip.SetTip(newBtn, I18n.T("ui.new.chat"));
         }
     }
 
@@ -619,7 +619,7 @@ public partial class MainWindow : Window
     public void ApplyIdentityUi()
     {
         var name = AssistantIdentity.Current;
-        Title = I18n.T("{0} 助手", name);
+        Title = I18n.T("ui.value.assistant", name);
         var t = this.FindControl<TextBlock>("AgentNameText");
         if (t is not null)
         {
@@ -636,7 +636,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            AddErrorBubble(I18n.T("切换供应商失败：{0}", ex.Message));
+            AddErrorBubble(I18n.T("ui.provider.switch.failed.value", ex.Message));
         }
     }
 
@@ -708,7 +708,7 @@ public partial class MainWindow : Window
             }
             catch (Exception ex)
             {
-                AddErrorBubble(I18n.T("界面渲染异常（已拦截）：{0}", ex.Message));
+                AddErrorBubble(I18n.T("ui.ui.render.error.intercepted.value", ex.Message));
             }
         });
     }
@@ -728,7 +728,7 @@ public partial class MainWindow : Window
                     _execHeader = null;
                     _execContent = null;
                     _execCount = 0;
-                    AddUserBubble(I18n.T("（已开启新对话）"));
+                    AddUserBubble(I18n.T("ui.new.conversation.started"));
                     return;
                 }
                 if (tool.Name.StartsWith("log:", StringComparison.Ordinal))
@@ -893,7 +893,7 @@ public partial class MainWindow : Window
     /// <summary>spawn_worker 审批提要：带能力授予时展示所授能力（用户批准的关注点）。</summary>
     private static string SpawnWorkerSummary(string? name, string? argsJson)
     {
-        var baseText = string.IsNullOrEmpty(name) ? I18n.T("派出一个工作助手") : I18n.T("派出工作助手「{0}」", Cut(name));
+        var baseText = string.IsNullOrEmpty(name) ? I18n.T("ui.spawn.a.worker.agent") : I18n.T("ui.spawn.worker.value", Cut(name));
         try
         {
             using var doc = System.Text.Json.JsonDocument.Parse(argsJson ?? "{}");
@@ -901,7 +901,7 @@ public partial class MainWindow : Window
                 && capsEl.ValueKind == System.Text.Json.JsonValueKind.String
                 && capsEl.GetString() is { Length: > 0 } capsDesc)
             {
-                baseText += I18n.T("（授予：{0}）", capsDesc);
+                baseText += I18n.T("ui.value", capsDesc);
             }
         }
         catch { }
@@ -914,25 +914,25 @@ public partial class MainWindow : Window
         return tool switch
         {
             "run_command" => DescribeCommand(primary),
-            "read_file" => string.IsNullOrEmpty(primary) ? I18n.T("查看工作区文件") : I18n.T("查看文件「{0}」的内容", Cut(primary)),
-            "append_file" => string.IsNullOrEmpty(primary) ? I18n.T("往文件追加内容") : I18n.T("往文件「{0}」末尾追加内容", Cut(primary)),
-            "write_file" => string.IsNullOrEmpty(primary) ? I18n.T("写入工作区文件") : I18n.T("写入文件「{0}」", Cut(primary)),
-            "list_dir" => string.IsNullOrEmpty(primary) || primary == "." ? I18n.T("查看工作区目录") : I18n.T("查看目录「{0}」", Cut(primary)),
-            "memory_read" => I18n.T("读取 {0} 的长期记忆", AssistantIdentity.Current),
-            "memory_write" or "memory_append" => I18n.T("更新 {0} 的长期记忆", AssistantIdentity.Current),
-            "create_skill" => string.IsNullOrEmpty(primary) ? I18n.T("创建一个新技能") : I18n.T("创建新技能「{0}」", Cut(primary)),
-            "install_skill" or "skill_market" => string.IsNullOrEmpty(primary) ? I18n.T("从技能市场安装技能") : I18n.T("安装技能「{0}」", Cut(primary)),
-            "load_skill" or "list_skills" => I18n.T("加载/查看可用技能"),
-            "mcp_add_server" => string.IsNullOrEmpty(primary) ? I18n.T("添加 MCP 插件") : I18n.T("添加 MCP 插件「{0}」", Cut(primary)),
-            "mcp_list_servers" => I18n.T("查看已安装的 MCP 插件"),
+            "read_file" => string.IsNullOrEmpty(primary) ? I18n.T("ui.view.a.workspace.file") : I18n.T("ui.view.contents.of.value", Cut(primary)),
+            "append_file" => string.IsNullOrEmpty(primary) ? I18n.T("ui.append.to.a.workspace.file") : I18n.T("ui.append.to.value", Cut(primary)),
+            "write_file" => string.IsNullOrEmpty(primary) ? I18n.T("ui.write.a.workspace.file") : I18n.T("ui.write.file.value", Cut(primary)),
+            "list_dir" => string.IsNullOrEmpty(primary) || primary == "." ? I18n.T("ui.list.the.workspace.directory") : I18n.T("ui.list.directory.value.2", Cut(primary)),
+            "memory_read" => I18n.T("ui.read.value.s.long.term.memory", AssistantIdentity.Current),
+            "memory_write" or "memory_append" => I18n.T("ui.update.value.s.long.term.memory", AssistantIdentity.Current),
+            "create_skill" => string.IsNullOrEmpty(primary) ? I18n.T("ui.create.a.new.skill") : I18n.T("ui.create.skill.value", Cut(primary)),
+            "install_skill" or "skill_market" => string.IsNullOrEmpty(primary) ? I18n.T("ui.install.a.skill.from.the.market") : I18n.T("ui.install.skill.value", Cut(primary)),
+            "load_skill" or "list_skills" => I18n.T("ui.load.list.available.skills"),
+            "mcp_add_server" => string.IsNullOrEmpty(primary) ? I18n.T("ui.add.an.mcp.plugin") : I18n.T("ui.add.mcp.plugin.value", Cut(primary)),
+            "mcp_list_servers" => I18n.T("ui.list.installed.mcp.plugins"),
             "spawn_worker" => SpawnWorkerSummary(primary, argsJson),
-            "assign_task" => I18n.T("给工作助手分派任务"),
-            "send_message" or "send_to_worker" => I18n.T("给工作助手发消息"),
-            "broadcast_to_workers" => I18n.T("给所有工作助手广播消息"),
-            "check_messages" or "read_shared" or "start_project" or "list_workers" => I18n.T("查看协作状态"),
-            "open_url" => string.IsNullOrEmpty(primary) ? I18n.T("打开网页") : I18n.T("打开网页 {0}", Cut(primary, 60)),
-            "ask_user" => I18n.T("向你提问"),
-            _ => string.IsNullOrEmpty(primary) ? I18n.T("调用 {0}", tool) : I18n.T("调用 {0}（{1}）", tool, Cut(primary, 40)),
+            "assign_task" => I18n.T("ui.assign.a.task.to.a.worker"),
+            "send_message" or "send_to_worker" => I18n.T("ui.message.a.worker"),
+            "broadcast_to_workers" => I18n.T("ui.broadcast.to.all.workers"),
+            "check_messages" or "read_shared" or "start_project" or "list_workers" => I18n.T("ui.check.team.status"),
+            "open_url" => string.IsNullOrEmpty(primary) ? I18n.T("ui.open.a.web.page") : I18n.T("ui.open.web.page.value", Cut(primary, 60)),
+            "ask_user" => I18n.T("ui.ask.you.a.question"),
+            _ => string.IsNullOrEmpty(primary) ? I18n.T("ui.invoke.value", tool) : I18n.T("ui.invoke.value.value", tool, Cut(primary, 40)),
         };
     }
 
@@ -942,7 +942,7 @@ public partial class MainWindow : Window
         var c = (cmd ?? "").Trim();
         if (c.Length == 0)
         {
-            return I18n.T("在终端执行命令");
+            return I18n.T("ui.run.a.terminal.command");
         }
         // 多段命令（&& / ;）：只翻译第一段，并提示后面还有步骤
         var segments = System.Text.RegularExpressions.Regex.Split(c, @"\s*(?:&&|\|\||;)\s*");
@@ -953,33 +953,33 @@ public partial class MainWindow : Window
         var arg = parts.Skip(1).FirstOrDefault(a => !a.StartsWith('-')) ?? "";
         string? body = verb switch
         {
-            "open" => I18n.T("打开 {0}", Cut(arg)),
-            "ls" => I18n.T("查看目录 {0}", Cut(arg)),
-            "cat" or "head" or "tail" or "less" or "more" => I18n.T("查看文件 {0}", Cut(arg)),
-            "mkdir" => I18n.T("创建文件夹 {0}", Cut(arg)),
-            "touch" => I18n.T("新建文件 {0}", Cut(arg)),
-            "rm" => I18n.T("删除 {0}", Cut(arg)),
-            "mv" => I18n.T("移动/重命名 {0}", Cut(arg)),
-            "cp" => I18n.T("复制 {0}", Cut(arg)),
-            "date" => I18n.T("查看当前时间"),
-            "pwd" => I18n.T("查看当前目录"),
-            "echo" => I18n.T("输出一段文字"),
-            "curl" or "wget" => I18n.T("从网络获取 {0}", Cut(arg, 50)),
-            "git" => I18n.T("执行 git {0}", parts.Skip(1).FirstOrDefault() ?? I18n.T("操作")),
-            "python" or "python3" or "node" => I18n.T("运行脚本 {0}", Cut(arg)),
+            "open" => I18n.T("ui.open.value", Cut(arg)),
+            "ls" => I18n.T("ui.list.directory.value", Cut(arg)),
+            "cat" or "head" or "tail" or "less" or "more" => I18n.T("ui.view.file.value", Cut(arg)),
+            "mkdir" => I18n.T("ui.create.folder.value", Cut(arg)),
+            "touch" => I18n.T("ui.create.file.value", Cut(arg)),
+            "rm" => I18n.T("ui.delete.value", Cut(arg)),
+            "mv" => I18n.T("ui.move.rename.value", Cut(arg)),
+            "cp" => I18n.T("ui.copy.value", Cut(arg)),
+            "date" => I18n.T("ui.check.the.current.time"),
+            "pwd" => I18n.T("ui.show.current.directory"),
+            "echo" => I18n.T("ui.print.a.piece.of.text"),
+            "curl" or "wget" => I18n.T("ui.fetch.from.the.web.value", Cut(arg, 50)),
+            "git" => I18n.T("ui.run.git.value", parts.Skip(1).FirstOrDefault() ?? I18n.T("ui.action")),
+            "python" or "python3" or "node" => I18n.T("ui.run.script.value", Cut(arg)),
             "dotnet" => $"运行 dotnet {parts.Skip(1).FirstOrDefault() ?? ""}",
-            "grep" or "rg" => I18n.T("搜索 {0}", Cut(arg)),
-            "cd" => I18n.T("切换目录 {0}", Cut(arg)),
-            "chmod" => I18n.T("修改文件权限 {0}", Cut(arg)),
+            "grep" or "rg" => I18n.T("ui.search.for.value", Cut(arg)),
+            "cd" => I18n.T("ui.change.directory.to.value", Cut(arg)),
+            "chmod" => I18n.T("ui.change.permissions.of.value", Cut(arg)),
             _ => null,
         };
         if (body is null)
         {
-            return I18n.T("在终端执行：{0}", Cut(c, 70));
+            return I18n.T("ui.in.terminal.value", Cut(c, 70));
         }
         return more
-            ? I18n.T("在终端开始执行：{0}（之后还有后续步骤）", body)
-            : I18n.T("在终端执行：{0}", body);
+            ? I18n.T("ui.in.terminal.starting.with.value.more.steps.follow", body)
+            : I18n.T("ui.in.terminal.value", body);
     }
 
     /// <summary>从参数 JSON 里取第一个字符串值（通常是主参数：路径/命令/问题等）。</summary>
@@ -1042,7 +1042,7 @@ public partial class MainWindow : Window
         var stack = new StackPanel { Spacing = 8 };
         stack.Children.Add(new TextBlock
         {
-            Text = $"{AssistantIdentity.Current} {I18n.T("想执行一个操作，需要你批准")}",
+            Text = $"{AssistantIdentity.Current} {I18n.T("ui.wants.to.perform.an.action.and.needs.your.approval")}",
             FontWeight = FontWeight.SemiBold,
             FontSize = 14,
             Foreground = new SolidColorBrush(Color.Parse("#9a9a9a")),
@@ -1058,7 +1058,7 @@ public partial class MainWindow : Window
         });
         stack.Children.Add(new TextBlock
         {
-            Text = I18n.T("操作类型：{0}", tool),
+            Text = I18n.T("ui.action.type.value", tool),
             FontSize = 12,
             Foreground = new SolidColorBrush(Color.Parse("#8a8a8a")),
         });
@@ -1069,7 +1069,7 @@ public partial class MainWindow : Window
             argsExpander = new Expander
             {
                 Classes = { "execGroup" },
-                Header = new TextBlock { Text = I18n.T("查看原始指令"), FontSize = 12.5, Foreground = new SolidColorBrush(Color.Parse("#9a9a9a")) },
+                Header = new TextBlock { Text = I18n.T("ui.view.raw.command"), FontSize = 12.5, Foreground = new SolidColorBrush(Color.Parse("#9a9a9a")) },
                 Content = new Border
                 {
                     Background = new SolidColorBrush(Color.Parse("#333333")),
@@ -1091,17 +1091,17 @@ public partial class MainWindow : Window
             stack.Children.Add(argsExpander);
         }
 
-        var reasonBox = new TextBox { Watermark = I18n.T("拒绝的话可以写理由（可选）"), FontSize = 13.5 };
-        var ok = new Button { Content = I18n.T("✓ 批准"), Classes = { "actionOk" } };
-        var full = new Button { Content = I18n.T("完全访问"), Classes = { "actionFull" } };
-        var no = new Button { Content = I18n.T("✗ 拒绝"), Classes = { "actionNo" } };
+        var reasonBox = new TextBox { Watermark = I18n.T("ui.reason.for.rejection.optional"), FontSize = 13.5 };
+        var ok = new Button { Content = I18n.T("ui.approve"), Classes = { "actionOk" } };
+        var full = new Button { Content = I18n.T("ui.full.access"), Classes = { "actionFull" } };
+        var no = new Button { Content = I18n.T("ui.reject"), Classes = { "actionNo" } };
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         row.Children.Add(ok);
         row.Children.Add(full);
         row.Children.Add(no);
         var hint = new TextBlock
         {
-            Text = I18n.T("批准后 {0} 才会真正执行这个操作。", AssistantIdentity.Current),
+            Text = I18n.T("ui.value.will.only.run.this.after.your.approval", AssistantIdentity.Current),
             FontSize = 12,
             Foreground = new SolidColorBrush(Color.Parse("#8a8a8a")),
         };
@@ -1123,14 +1123,14 @@ public partial class MainWindow : Window
         {
             FoldCard();
             card.Classes.Add("resolved");
-            hint.Text = I18n.T("✔ 已批准");
+            hint.Text = I18n.T("ui.approved");
             tcs.TrySetResult(ApprovalDecision.Approve());
         };
         full.Click += (_, _) =>
         {
             FoldCard();
             card.Classes.Add("resolved");
-            hint.Text = I18n.T("已开启完全访问：本次及后续操作自动批准（重启后复位）");
+            hint.Text = I18n.T("ui.full.access.granted.actions.auto.approved.this.session.resets.on.restart");
             _controller.FullAccess = true;
             UpdateFullAccessVisual();   // 芯片与 tooltip 同步
             tcs.TrySetResult(ApprovalDecision.Approve());
@@ -1140,7 +1140,7 @@ public partial class MainWindow : Window
             FoldCard();
             var reason = reasonBox.Text?.Trim();
             card.Classes.Add("resolved");
-            hint.Text = I18n.T("✘ 已拒绝{0}", string.IsNullOrEmpty(reason) ? "" : $"：{reason}");
+            hint.Text = I18n.T("ui.value.2", string.IsNullOrEmpty(reason) ? "" : $"：{reason}");
             tcs.TrySetResult(ApprovalDecision.Reject(reason));
         };
         // 回合被用户停止时：卡片作废标注（TrySetCanceled 由控制器触发）
@@ -1151,7 +1151,7 @@ public partial class MainWindow : Window
             {
                 FoldCard();
                 card.Classes.Add("resolved");
-                hint.Text = I18n.T("⏹ 任务已停止，此操作未执行");
+                hint.Text = I18n.T("ui.message.2");
             });
         }, TaskScheduler.Default);
         // 在气泡快捷卡上被决议（外部 TrySetResult）时：同步锁定并标注本卡状态
@@ -1164,8 +1164,8 @@ public partial class MainWindow : Window
                 FoldCard();
                 card.Classes.Add("resolved");
                 hint.Text = d.Approved
-                    ? I18n.T("✔ 已批准")
-                    : I18n.T("✘ 已拒绝：{0}", d.Reason ?? "");
+                    ? I18n.T("ui.approved")
+                    : I18n.T("ui.rejected.value", d.Reason ?? "");
             });
         }, TaskScheduler.Default);
 
@@ -1185,7 +1185,7 @@ public partial class MainWindow : Window
         var stack = new StackPanel { Spacing = 8 };
         stack.Children.Add(new TextBlock
         {
-            Text = $"{AssistantIdentity.Current} {I18n.T("有问题想问你")}",
+            Text = $"{AssistantIdentity.Current} {I18n.T("ui.has.a.question.for.you")}",
             FontWeight = FontWeight.SemiBold,
             FontSize = 14,
             Foreground = new SolidColorBrush(Color.Parse("#d29922")),
@@ -1199,8 +1199,8 @@ public partial class MainWindow : Window
             Foreground = new SolidColorBrush(Color.Parse("#f0f0f0")),
         });
 
-        var answerBox = new TextBox { Watermark = I18n.T("输入你的回答…"), FontSize = 15 };
-        var answerBtn = new Button { Content = I18n.T("回答"), Classes = { "actionOk" } };
+        var answerBox = new TextBox { Watermark = I18n.T("ui.type.your.answer"), FontSize = 15 };
+        var answerBtn = new Button { Content = I18n.T("ui.answer"), Classes = { "actionOk" } };
         var choicesRow = new WrapPanel { Orientation = Orientation.Horizontal };
 
         void Submit(string text)
@@ -1212,7 +1212,7 @@ public partial class MainWindow : Window
             card.Classes.Add("resolved");
             stack.Children.Add(new TextBlock
             {
-                Text = I18n.T("你回答了：{0}", text),
+                Text = I18n.T("ui.you.answered.value", text),
                 FontSize = 12.5,
                 Foreground = new SolidColorBrush(Color.Parse("#8a8a8a")),
             });
@@ -1271,7 +1271,7 @@ public partial class MainWindow : Window
         _thinkLine = new TextBlock
         {
             Classes = { "procLine" },
-            Text = I18n.T("思考"),
+            Text = I18n.T("ui.thinking"),
         };
         _chatPanel!.Children.Add(_thinkLine);
         ScrollToEnd();
@@ -1280,7 +1280,7 @@ public partial class MainWindow : Window
         _thinkTimer.Tick += (_, _) =>
         {
             var secs = (int)(DateTime.Now - _thinkStart).TotalSeconds;
-            _thinkLine!.Text = I18n.T("思考 · 持续了 {0} 秒", secs);
+            _thinkLine!.Text = I18n.T("ui.thinking.values", secs);
         };
         _thinkTimer.Start();
     }
@@ -1290,10 +1290,10 @@ public partial class MainWindow : Window
     {
         _thinkTimer?.Stop();
         _thinkTimer = null;
-        if (_thinkLine is not null && _thinkLine.Text.StartsWith(I18n.T("思考"), StringComparison.Ordinal))
+        if (_thinkLine is not null && _thinkLine.Text.StartsWith(I18n.T("ui.thinking"), StringComparison.Ordinal))
         {
             var secs = (int)(DateTime.Now - _thinkStart).TotalSeconds;
-            _thinkLine.Text = I18n.T("思考 · 持续了 {0} 秒", secs);
+            _thinkLine.Text = I18n.T("ui.thinking.values", secs);
         }
         _thinkLine = null;
     }
@@ -1316,7 +1316,7 @@ public partial class MainWindow : Window
         var line = new TextBlock
         {
             Classes = { "procLine" },
-            Text = I18n.T("Token 本轮 输入 {0} / 输出 {1} / 合计 {2} ｜ 应用累计 {3}",
+            Text = I18n.T("ui.tokens.this.turn.in.value.out.value.total.value.app.total.value",
                 u.In.ToString("N0"), u.Out.ToString("N0"), u.Total.ToString("N0"), _cumTokens.ToString("N0")),
         };
         _chatPanel!.Children.Add(line);
@@ -1354,7 +1354,7 @@ public partial class MainWindow : Window
                 {
                     stack.Children.Add(new TextBlock
                     {
-                        Text = I18n.T("附件：{0}", a.Name),
+                        Text = I18n.T("ui.attachment.value", a.Name),
                         FontSize = 12.5,
                         Foreground = new SolidColorBrush(Color.Parse("#9a9a9a")),
                     });
@@ -1476,14 +1476,14 @@ public partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Left,
             Margin = new Thickness(0, 6, 0, 2),
         };
-        var copyBtn = CreateIconButton("Icon.Copy", I18n.T("复制"));
+        var copyBtn = CreateIconButton("Icon.Copy", I18n.T("ui.copy"));
         copyBtn.Click += async (_, _) =>
         {
             var clip = TopLevel.GetTopLevel(this)?.Clipboard;
             if (clip is null) return;
             await clip.SetTextAsync(MarkdownView.ToPlainText(answer));
         };
-        var retryBtn = CreateIconButton("Icon.Refresh", I18n.T("重试"));
+        var retryBtn = CreateIconButton("Icon.Refresh", I18n.T("ui.retry"));
         retryBtn.Click += async (_, _) =>
         {
             if (_controller.Busy || _lastUserMessage is null) return;
@@ -1570,7 +1570,7 @@ public partial class MainWindow : Window
             HorizontalAlignment = HorizontalAlignment.Center,
             Child = new TextBlock
             {
-                Text = I18n.T("出错了：{0}", message),
+                Text = I18n.T("ui.error.value", message),
                 FontSize = 13.5,
                 Foreground = new SolidColorBrush(Color.Parse("#b3261e")),
                 TextWrapping = TextWrapping.Wrap,
@@ -1585,7 +1585,7 @@ public partial class MainWindow : Window
     {
         BeginExecGroupIfNeeded();
         _execCount++;
-        _execHeader!.Text = I18n.T("执行过程 · {0} 步", _execCount);
+        _execHeader!.Text = I18n.T("ui.process.value.steps", _execCount);
 
         var line = new TextBlock
         {
@@ -1603,7 +1603,7 @@ public partial class MainWindow : Window
         {
             return;
         }
-        _execHeader = new TextBlock { Text = I18n.T("执行过程") };
+        _execHeader = new TextBlock { Text = I18n.T("ui.process") };
         _execContent = new StackPanel { Spacing = 3 };
         _execGroup = new Expander
         {
@@ -1674,11 +1674,11 @@ public partial class MainWindow : Window
         }
         try
         {
-            chip.Text = _controller.Ready ? _controller.Agent!.CurrentModel : I18n.T("模型");
+            chip.Text = _controller.Ready ? _controller.Agent!.CurrentModel : I18n.T("ui.model");
         }
         catch
         {
-            chip.Text = I18n.T("模型");
+            chip.Text = I18n.T("ui.model");
         }
     }
 
@@ -1693,7 +1693,7 @@ public partial class MainWindow : Window
         var icon = this.FindControl<PathIcon>("FullAccessIcon");
         if (text is not null)
         {
-            text.Text = on ? I18n.T("完全访问") : I18n.T("每次询问");   // 胶囊显示当前选中的模式
+            text.Text = on ? I18n.T("ui.full.access") : I18n.T("ui.ask.every.time");   // 胶囊显示当前选中的模式
             text.Foreground = brush;
         }
         if (icon is not null)
@@ -1704,8 +1704,8 @@ public partial class MainWindow : Window
         if (btn is not null)
         {
             ToolTip.SetTip(btn, on
-                ? I18n.T("完全访问：操作自动批准（重启复位）")
-                : I18n.T("每次询问：执行前征求同意"));
+                ? I18n.T("ui.full.access.auto.approve.resets.on.restart.2")
+                : I18n.T("ui.ask.every.time.confirm.before.running"));
         }
     }
 
@@ -1724,16 +1724,16 @@ public partial class MainWindow : Window
         {
             var count = System.Text.RegularExpressions.Regex.Match(line, @"工具 (\d+)");
             ShowPillOverride(count.Success
-                ? I18n.T("就绪 · {0} 工具", count.Groups[1].Value)
-                : I18n.T("就绪"), autoClearSeconds: 6);
+                ? I18n.T("ui.ready.value.tools", count.Groups[1].Value)
+                : I18n.T("ui.ready"), autoClearSeconds: 6);
         }
         else if (line.Contains("连接 MCP"))
         {
-            ShowPillOverride(I18n.T("启动中 · 连接 MCP…"));
+            ShowPillOverride(I18n.T("ui.starting.connecting.mcp"));
         }
         else if (line.Contains("恢复上次会话"))
         {
-            ShowPillOverride(I18n.T("启动中 · 恢复会话…"));
+            ShowPillOverride(I18n.T("ui.starting.restoring.session"));
         }
         // 其余行（MCP 已连接、工具清单等）太细碎，不占用胶囊
     }
@@ -1766,13 +1766,13 @@ public partial class MainWindow : Window
         var text = state switch
         {
             BrookRunState.Idle => withModel && _controller.Ready
-                ? I18n.T("空闲 · {0}", _controller.Agent!.CurrentModel)
-                : _controller.Ready ? I18n.T("空闲") : I18n.T("启动中…"),
-            BrookRunState.Thinking => I18n.T("思考中…"),
-            BrookRunState.CallingTool => I18n.T("干活中 · {0}", detail),
-            BrookRunState.AwaitingApproval => I18n.T("等你批准 · {0}", detail),
-            BrookRunState.AwaitingUserAnswer => I18n.T("等你回答"),
-            _ => I18n.T("空闲"),
+                ? I18n.T("ui.idle.value", _controller.Agent!.CurrentModel)
+                : _controller.Ready ? I18n.T("ui.idle") : I18n.T("ui.starting.2"),
+            BrookRunState.Thinking => I18n.T("ui.thinking.2"),
+            BrookRunState.CallingTool => I18n.T("ui.working.value", detail),
+            BrookRunState.AwaitingApproval => I18n.T("ui.awaiting.approval.value", detail),
+            BrookRunState.AwaitingUserAnswer => I18n.T("ui.awaiting.your.answer"),
+            _ => I18n.T("ui.idle"),
         };
         if (_pillOverride is not null)
         {
@@ -2177,7 +2177,7 @@ public partial class MainWindow : Window
     {
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = I18n.T("添加附件"),
+            Title = I18n.T("ui.add.attachments"),
             AllowMultiple = true,
         });
         foreach (var f in files)
@@ -2303,3 +2303,4 @@ public partial class MainWindow : Window
         base.OnClosing(e);
     }
 }
+

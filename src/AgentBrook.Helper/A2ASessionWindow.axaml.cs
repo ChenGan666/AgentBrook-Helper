@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Data;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -37,6 +38,8 @@ public partial class A2ASessionWindow : Window
         InitializeComponent();
         _viewModel = new A2ASessionViewModel(App.A2A.Controller);
         DataContext = _viewModel;
+        ApplyWindowLanguage();
+        I18n.LanguageChanged += ApplyWindowLanguage;
         var peerList = this.FindControl<ListBox>("PeerList")!;
         _peerSessionList = this.FindControl<ListBox>("PeerSessionList")!;
         _groupSessionList = this.FindControl<ListBox>("GroupSessionList")!;
@@ -169,14 +172,80 @@ public partial class A2ASessionWindow : Window
         _timer.Tick += async (_, _) => await _viewModel.RefreshAsync();
         Opened += async (_, _) =>
         {
+            ApplyWindowLanguage();
             await _viewModel.RefreshAsync();
             _timer.Start();
         };
         Closed += (_, _) =>
         {
             _timer.Stop();
+            I18n.LanguageChanged -= ApplyWindowLanguage;
             _viewModel.Dispose();
         };
+    }
+
+    /// <summary>刷新 A2A 窗口中的静态文案；列表模板中的按钮在虚拟化后也会被覆盖。</summary>
+    private void ApplyWindowLanguage()
+    {
+        Title = I18n.T("a2a.window.title");
+        void Text(string name, string key) => this.FindControl<TextBlock>(name)?.SetCurrentValue(TextBlock.TextProperty, I18n.T(key));
+        Text("LocalHelperText", "a2a.local.helper");
+        Text("PeersHeading", "a2a.peers");
+        Text("PeerSessionsHeading", "a2a.peer.sessions");
+        Text("GroupSessionsHeading", "a2a.group.sessions");
+        Text("MembersHeading", "a2a.members");
+        Text("TasksHeading", "a2a.tasks");
+        Text("FilesHeading", "a2a.files");
+        Text("AuditHeading", "a2a.audit.summary");
+        Text("GroupSummaryHeading", "a2a.group.summary.title");
+        Text("SummaryDescription", "a2a.summary.description");
+        Text("RuntimeHeading", "a2a.runtime.config");
+        this.FindControl<TabItem>("DetailsTab")?.SetCurrentValue(TabItem.HeaderProperty, I18n.T("a2a.details"));
+        this.FindControl<TabItem>("InboxTab")?.SetCurrentValue(TabItem.HeaderProperty, I18n.T("a2a.inbox"));
+        this.FindControl<TabItem>("SummaryTab")?.SetCurrentValue(TabItem.HeaderProperty, I18n.T("a2a.summary"));
+        this.FindControl<TabItem>("NodeTab")?.SetCurrentValue(TabItem.HeaderProperty, I18n.T("a2a.node"));
+        void Rebind(string name, string path, string format, string fallback)
+        {
+            var block = this.FindControl<TextBlock>(name);
+            block?.Bind(TextBlock.TextProperty, new Binding(path)
+            {
+                StringFormat = format,
+                FallbackValue = fallback,
+                TargetNullValue = fallback,
+            });
+        }
+        Rebind("HeaderTitleText", "SelectedSession.Title", "{0}", I18n.T("a2a.event.stream"));
+        Rebind("GroupSummaryText", "SelectedGroupSummary", "{0}", I18n.T("a2a.no.summary"));
+        Rebind("NodeNameText", "DisplayName", I18n.T("a2a.name.format"), "");
+        Rebind("NodeEnabledText", "Enabled", I18n.T("a2a.enabled.format"), "");
+        Rebind("NodeConfiguredPortText", "ListenPort", I18n.T("a2a.configured.port.format"), "");
+        Rebind("NodeActualPortText", "ActualPort", I18n.T("a2a.actual.port.format"), "");
+        Rebind("NodeIdText", "NodeId", I18n.T("a2a.node.id.format"), "");
+        var send = this.FindControl<Button>("SendBtn");
+        if (send is not null) send.Content = I18n.T("a2a.send");
+        var message = this.FindControl<TextBox>("MessageBox");
+        if (message is not null) message.Watermark = I18n.T("a2a.message.watermark");
+        var autoTalk = this.GetVisualDescendants().OfType<CheckBox>().FirstOrDefault(c => c.Content is string s && (s == "自动交流" || s == "Auto conversation"));
+        if (autoTalk is not null)
+        {
+            autoTalk.Content = I18n.T("a2a.auto.talk");
+            ToolTip.SetTip(autoTalk, I18n.T("a2a.auto.talk.tooltip"));
+        }
+        foreach (var button in this.GetVisualDescendants().OfType<Button>())
+        {
+            switch (button.Tag as string)
+            {
+                case "peer-pair": button.Content = I18n.T("a2a.pair"); break;
+                case "peer-unpair": button.Content = I18n.T("a2a.unpair"); break;
+                case "accept": button.Content = I18n.T("a2a.accept"); break;
+                case "reject": button.Content = I18n.T("a2a.reject"); break;
+                case "member-kick": button.Content = I18n.T("a2a.kick"); ToolTip.SetTip(button, I18n.T("a2a.kick.tooltip")); break;
+                case "event-attachment": ToolTip.SetTip(button, I18n.T("a2a.open.attachment")); break;
+                case "session-delete": ToolTip.SetTip(button, I18n.T("a2a.delete.session")); break;
+                case "group-rename": ToolTip.SetTip(button, I18n.T("a2a.rename.group")); break;
+                case "group-close": ToolTip.SetTip(button, I18n.T("a2a.close.group")); break;
+            }
+        }
     }
 
     /// <summary>把两个会话列表的选中项恢复到 VM 当前会话（修复周期性重建导致的高亮丢失）。</summary>
@@ -327,7 +396,7 @@ public partial class A2ASessionWindow : Window
         var path = item.AttachmentPath;
         if (string.IsNullOrEmpty(path) || !File.Exists(path))
         {
-            _ = ShowNoticeAsync("附件文件在本机已不存在（可能尚未接收完成或已被清理）。");
+            _ = ShowNoticeAsync(I18n.T("a2a.attachment.missing"));
             return;
         }
         try
@@ -518,7 +587,7 @@ public partial class A2ASessionWindow : Window
     {
         var dialog = new Window
         {
-            Title = "A2A 提示",
+            Title = I18n.T("a2a.notice.title"),
             Width = 420,
             Height = 170,
             CanResize = false,

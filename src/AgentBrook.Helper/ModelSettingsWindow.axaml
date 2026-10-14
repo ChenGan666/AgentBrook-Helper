@@ -185,12 +185,14 @@
                 <ComboBox x:Name="LanguageBox" FontSize="13.5" Width="160" HorizontalAlignment="Left" SelectedIndex="0">
                     <ComboBoxItem Content="中文" Tag="zh"/>
                     <ComboBoxItem Content="English" Tag="en"/>
+                    <ComboBoxItem Content="Bahasa Indonesia" Tag="id"/>
                 </ComboBox>
                 <TextBlock x:Name="LabelUiLang" Text="界面语言（UI 显示；切换后重启应用完全生效）" Classes="formLabel"/>
                 <ComboBox x:Name="UiLanguageBox" FontSize="13.5" Width="160" HorizontalAlignment="Left" SelectedIndex="0">
                     <ComboBoxItem Content="跟随系统" Tag="auto"/>
                     <ComboBoxItem Content="中文" Tag="zh"/>
                     <ComboBoxItem Content="English" Tag="en"/>
+                    <ComboBoxItem Content="Bahasa Indonesia" Tag="id"/>
                 </ComboBox>
                 <TextBlock x:Name="LabelCustomPrompt" Text="默认提示词（附加到系统指令，每轮生效）" Classes="formLabel"/>
                 <TextBox x:Name="CustomPromptBox" Watermark="例如：回答尽量简短；优先用表格展示数据…" FontSize="13.5"

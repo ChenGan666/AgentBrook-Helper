@@ -1,4 +1,4 @@
-using AgentBrook.Agent;
+﻿using AgentBrook.Agent;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Markup.Xaml;
@@ -89,10 +89,10 @@ public partial class BubbleWindow : Window
 
         root.ContextRequested += (_, e) =>
         {
-            var openItem = new MenuItem { Header = I18n.T("打开对话") };
-            var modelItem = new MenuItem { Header = I18n.T("切换模型") };
-            var settingsItem = new MenuItem { Header = I18n.T("打开设置") };
-            var exitItem = new MenuItem { Header = I18n.T("退出 {0}", AssistantIdentity.Current) };
+            var openItem = new MenuItem { Header = I18n.T("ui.open.chat") };
+            var modelItem = new MenuItem { Header = I18n.T("ui.switch.model") };
+            var settingsItem = new MenuItem { Header = I18n.T("ui.open.settings") };
+            var exitItem = new MenuItem { Header = I18n.T("ui.quit.value", AssistantIdentity.Current) };
 
             openItem.Click += (_, _) => _controller.ShowConversation();
             modelItem.Click += (_, _) => _controller.CycleModel();
@@ -389,13 +389,13 @@ public partial class BubbleWindow : Window
         var summary = _controller.Conversation.SummarizeApprovalPublic(toolName, argsJson);
         ShowToast(summary, "#ffb340", autoClose: null,
         [
-            (I18n.T("批准"), () => tcs.TrySetResult(ApprovalDecision.Approve())),
-            (I18n.T("完全访问"), () =>
+            (I18n.T("ui.approve.2"), () => tcs.TrySetResult(ApprovalDecision.Approve())),
+            (I18n.T("ui.full.access"), () =>
             {
                 _controller.FullAccess = true;   // 与审批卡"完全访问"同逻辑：本次及后续自动批准，重启复位
                 tcs.TrySetResult(ApprovalDecision.Approve());
             }),
-            (I18n.T("拒绝"), () => tcs.TrySetResult(ApprovalDecision.Reject())),
+            (I18n.T("ui.reject.2"), () => tcs.TrySetResult(ApprovalDecision.Reject())),
         ]);
     }
 
@@ -404,13 +404,13 @@ public partial class BubbleWindow : Window
     {
         ShowToast(summary, "#ffb340", autoClose: null,
         [
-            (I18n.T("批准"), () => tcs.TrySetResult(ApprovalDecision.Approve())),
-            (I18n.T("完全访问"), () =>
+            (I18n.T("ui.approve.2"), () => tcs.TrySetResult(ApprovalDecision.Approve())),
+            (I18n.T("ui.full.access"), () =>
             {
                 _controller.FullAccess = true;
                 tcs.TrySetResult(ApprovalDecision.Approve());
             }),
-            (I18n.T("拒绝"), () => tcs.TrySetResult(ApprovalDecision.Reject("本机用户拒绝该操作"))),
+            (I18n.T("ui.reject.2"), () => tcs.TrySetResult(ApprovalDecision.Reject("本机用户拒绝该操作"))),
         ]);
     }
 
@@ -419,8 +419,8 @@ public partial class BubbleWindow : Window
     {
         ShowToast(summary, "#ffb340", autoClose: null,
         [
-            (I18n.T("批准"), () => tcs.TrySetResult(true)),
-            (I18n.T("拒绝"), () => tcs.TrySetResult(false)),
+            (I18n.T("ui.approve.2"), () => tcs.TrySetResult(true)),
+            (I18n.T("ui.reject.2"), () => tcs.TrySetResult(false)),
         ]);
     }
 
@@ -429,8 +429,8 @@ public partial class BubbleWindow : Window
     {
         ShowToast($"{peerIcon} {peerDisplayName} 请求配对 · 验证码 {shortCode}", "#ffb340", autoClose: null,
         [
-            (I18n.T("同意"), () => tcs.TrySetResult(true)),
-            (I18n.T("拒绝"), () => tcs.TrySetResult(false)),
+            (I18n.T("ui.message.5"), () => tcs.TrySetResult(true)),
+            (I18n.T("ui.reject.2"), () => tcs.TrySetResult(false)),
         ]);
     }
 
@@ -440,7 +440,7 @@ public partial class BubbleWindow : Window
         var preview = question.Length > 80 ? question[..80] + "…" : question;
         ShowToast(preview, "#ffb340", autoClose: null,
         [
-            (I18n.T("去回答"), () => _controller.ShowConversation()),
+            (I18n.T("ui.answer.2"), () => _controller.ShowConversation()),
         ]);
     }
 
@@ -958,3 +958,4 @@ public partial class BubbleWindow : Window
 
     private const int RGN_OR = 2;
 }
+

@@ -52,7 +52,7 @@ public partial class ModelSettingsWindow : Window
         var currentVersionText = this.FindControl<TextBlock>("CurrentVersionText");
         if (currentVersionText is not null)
         {
-            currentVersionText.Text = I18n.T("当前版本：{0}", AutoUpdater.CurrentVersion.ToString());
+            currentVersionText.Text = I18n.T("ui.current.version.value", AutoUpdater.CurrentVersion.ToString());
         }
         var checkUpdateBtn = this.FindControl<Button>("CheckUpdateBtn");
         if (checkUpdateBtn is not null) checkUpdateBtn.Click += async (_, _) => await CheckUpdateAsync();
@@ -65,7 +65,6 @@ public partial class ModelSettingsWindow : Window
         var saveUpdateUrlBtn = this.FindControl<Button>("SaveUpdateUrlBtn");
         if (saveUpdateUrlBtn is not null) saveUpdateUrlBtn.Click += (_, _) => SaveUpdateServiceUrl();
 
-        ApplyWindowLanguage();
         I18n.LanguageChanged += ApplyWindowLanguage;
         this.FindControl<ComboBox>("UiLanguageBox")!.SelectionChanged += (_, _) =>
         {
@@ -80,6 +79,8 @@ public partial class ModelSettingsWindow : Window
         this.FindControl<Button>("AddBtn")!.Click += (_, _) => AddProvider();
         BuildIconPicker();
         LoadPersonal();
+        // 所有静态控件和个人设置均初始化后再统一刷新，避免 AXAML fallback 覆盖已翻译文案。
+        ApplyWindowLanguage();
         this.FindControl<Button>("SavePersonalBtn")!.Click += async (_, _) => await SavePersonalAsync();
         this.FindControl<Button>("ResetPosBtn")!.Click += (_, _) => ResetBubblePosition();
 
@@ -95,7 +96,7 @@ public partial class ModelSettingsWindow : Window
             {
                 var folders = await StorageProvider.OpenFolderPickerAsync(new Avalonia.Platform.Storage.FolderPickerOpenOptions
                 {
-                    Title = I18n.T("选择主工作空间目录"),
+                    Title = I18n.T("ui.choose.the.main.workspace.folder"),
                     AllowMultiple = false,
                 });
                 if (folders.Count > 0)
@@ -109,15 +110,15 @@ public partial class ModelSettingsWindow : Window
                 var path = (wsBox.Text ?? "").Trim();
                 if (path.Length == 0)
                 {
-                    if (hint is not null) hint.Text = I18n.T("请输入或选择工作空间目录");
+                    if (hint is not null) hint.Text = I18n.T("ui.enter.or.choose.a.workspace.folder");
                     return;
                 }
                 var err = WorkspacePrefs.SaveOverride(path);
                 if (hint is not null)
                 {
                     hint.Text = err is null
-                        ? I18n.T("✔ 已保存，重启应用后生效")
-                        : I18n.T("保存失败：{0}", err);
+                        ? I18n.T("ui.saved.takes.effect.after.app.restart")
+                        : I18n.T("ui.save.failed.value", err);
                 }
             };
             wsReset.Click += (_, _) =>
@@ -128,8 +129,8 @@ public partial class ModelSettingsWindow : Window
                 if (hint is not null)
                 {
                     hint.Text = err is null
-                        ? I18n.T("已恢复默认工作空间，重启应用后生效")
-                        : I18n.T("保存失败：{0}", err);
+                        ? I18n.T("ui.default.workspace.restored.takes.effect.after.app.restart")
+                        : I18n.T("ui.save.failed.value", err);
                 }
             };
         }
@@ -148,8 +149,8 @@ public partial class ModelSettingsWindow : Window
                 if (hint is not null)
                 {
                     hint.Text = err is null
-                        ? I18n.T(on ? "✔ 已开启：下次登录自动启动" : "已关闭开机自启动")
-                        : I18n.T("设置失败：{0}", err);
+                        ? I18n.T(on ? "ui.enabled.will.start.on.next.login" : "ui.auto.start.disabled")
+                        : I18n.T("ui.failed.to.apply.value", err);
                 }
             };
         }
@@ -200,7 +201,7 @@ public partial class ModelSettingsWindow : Window
         {
             if (_dirty)
             {
-                Hint(I18n.T("有未保存的修改已丢弃（可重新打开编辑）。"));
+                Hint(I18n.T("ui.unsaved.changes.were.discarded"));
             }
         };
     }
@@ -317,11 +318,11 @@ public partial class ModelSettingsWindow : Window
         try
         {
             await controller.ApplyIconAsync(icon);
-            Hint(I18n.T("Helper 图标已更新：{0}（对端将在资料刷新后显示）", icon));
+            Hint(I18n.T("ui.helper.value.2", icon));
         }
         catch (Exception ex)
         {
-            Hint(I18n.T("Helper 图标已保存；热更新失败（未启动或对端离线）：{0}", ex.Message));
+            Hint(I18n.T("ui.helper.value", ex.Message));
         }
     }
 
@@ -333,11 +334,17 @@ public partial class ModelSettingsWindow : Window
         var uiLangBox = this.FindControl<ComboBox>("UiLanguageBox")!;
         nameBox.Text = AssistantIdentity.Current == "Brook" ? "" : AssistantIdentity.Current;
         promptBox.Text = AssistantIdentity.CustomPrompt;
-        langBox.SelectedIndex = AssistantIdentity.Language == "en" ? 1 : 0;
+        langBox.SelectedIndex = AssistantIdentity.Language switch
+        {
+            "en" => 1,
+            "id" => 2,
+            _ => 0,
+        };
         uiLangBox.SelectedIndex = AssistantIdentity.UiLanguage switch
         {
             "zh" => 1,
             "en" => 2,
+            "id" => 3,
             _ => 0,
         };
         _selectedIcon = AssistantIdentity.BubbleIcon;
@@ -392,11 +399,11 @@ public partial class ModelSettingsWindow : Window
         try
         {
             await App.Controller.ApplyAssistantSettingsAsync(name, lang, prompt);
-            Hint(I18n.T("个性化已保存并生效（模型指令已热更新，对话上下文保留）。"));
+            Hint(I18n.T("ui.personalization.saved.applied.model.instructions.hot.updated.conversation.preserved"));
         }
         catch (Exception ex)
         {
-            Hint(I18n.T("个性化已应用到界面；模型指令应用失败：{0}", ex.Message));
+            Hint(I18n.T("ui.personalization.applied.to.ui.failed.to.update.model.instructions.value", ex.Message));
         }
     }
 
@@ -437,7 +444,7 @@ public partial class ModelSettingsWindow : Window
         {
             bubble.ResetPositionToDefault();
         }
-        Hint(I18n.T("气泡位置已重置。"));
+        Hint(I18n.T("ui.bubble.position.has.been.reset"));
     }
 
     // ───────────────────────── Skill 管理 ─────────────────────────
@@ -450,7 +457,7 @@ public partial class ModelSettingsWindow : Window
         {
             SkillsListPanel.Children.Add(new TextBlock
             {
-                Text = I18n.T("暂无已安装的技能。"),
+                Text = I18n.T("ui.no.installed.skills"),
                 FontSize = 13,
                 Foreground = new SolidColorBrush(Color.Parse("#8a8a8a")),
             });
@@ -486,7 +493,7 @@ public partial class ModelSettingsWindow : Window
             Grid.SetColumn(textPanel, 0);
             var delBtn = new Button
             {
-                Content = I18n.T("删除技能"),
+                Content = I18n.T("ui.delete.skill"),
                 Classes = { "dangerBtn" },
                 VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
             };
@@ -506,17 +513,17 @@ public partial class ModelSettingsWindow : Window
         {
             if (App.Controller.DeleteSkill(name))
             {
-                if (_skillsHint is not null) _skillsHint.Text = I18n.T("已删除技能「{0}」", name);
+                if (_skillsHint is not null) _skillsHint.Text = I18n.T("ui.deleted.skill.value", name);
                 BuildSkillsList();
             }
             else
             {
-                if (_skillsHint is not null) _skillsHint.Text = I18n.T("删除失败：{0}", I18n.T("未找到该技能"));
+                if (_skillsHint is not null) _skillsHint.Text = I18n.T("ui.delete.failed.value", I18n.T("ui.skill.not.found"));
             }
         }
         catch (Exception ex)
         {
-            if (_skillsHint is not null) _skillsHint.Text = I18n.T("删除失败：{0}", ex.Message);
+            if (_skillsHint is not null) _skillsHint.Text = I18n.T("ui.delete.failed.value", ex.Message);
         }
     }
 
@@ -547,7 +554,7 @@ public partial class ModelSettingsWindow : Window
             url = "http://helper.agentbrook.com";
         }
         UiPrefs.Save("update-service-url.json", url.TrimEnd('/'));
-        Hint(I18n.T("地址已保存"));
+        Hint(I18n.T("ui.address.saved"));
     }
 
     /// <summary>协作（A2A/群组）与更新偏好：加载配置并即时保存（改动即写配置文件，无需保存按钮）。</summary>
@@ -590,14 +597,14 @@ public partial class ModelSettingsWindow : Window
                 UiPrefs.Save("update-prefs.json", new UpdatePrefs(daily?.IsChecked != false, autoDownload.IsChecked == true));
         }
 
-        ShowCollabHint(hint, a2a.Config.Enabled ? I18n.T("A2A 协作已启用") : I18n.T("A2A 协作已关闭"));
+        ShowCollabHint(hint, a2a.Config.Enabled ? I18n.T("ui.a2a.collaboration.enabled") : I18n.T("ui.a2a.collaboration.disabled"));
 
         enabled.IsCheckedChanged += async (_, _) =>
         {
             var on = enabled.IsChecked == true;
             a2a.Config.Enabled = on;
             a2a.SaveConfig();
-            ShowCollabHint(hint, on ? I18n.T("已启用，正在启动 A2A…") : I18n.T("已关闭，正在断开 A2A…"));
+            ShowCollabHint(hint, on ? I18n.T("ui.enabled.starting.a2a") : I18n.T("ui.disabled.disconnecting.a2a"));
             try
             {
                 if (on)
@@ -608,11 +615,11 @@ public partial class ModelSettingsWindow : Window
                 {
                     await a2a.StopAsync();
                 }
-                ShowCollabHint(hint, on ? I18n.T("已启用，A2A 在线") : I18n.T("已关闭，A2A 已断开（重新勾选即可恢复）"));
+                ShowCollabHint(hint, on ? I18n.T("ui.enabled.a2a.online") : I18n.T("ui.disabled.a2a.disconnected.tick.again.to.restore"));
             }
             catch (Exception ex)
             {
-                ShowCollabHint(hint, I18n.T("操作失败：{0}", ex.Message));
+                ShowCollabHint(hint, I18n.T("ui.operation.failed.value", ex.Message));
             }
         };
         peerAuto.IsCheckedChanged += (_, _) =>
@@ -664,7 +671,7 @@ public partial class ModelSettingsWindow : Window
     {
         var updateHint = this.FindControl<TextBlock>("UpdateHint");
         var upgradeBtn = this.FindControl<Button>("UpgradeBtn");
-        if (updateHint is not null) updateHint.Text = I18n.T("正在检查更新…");
+        if (updateHint is not null) updateHint.Text = I18n.T("ui.checking.for.updates");
         if (upgradeBtn is not null) upgradeBtn.IsVisible = false;
         ShowDownloadLink(null);
         ShowUpdateDetails(null);
@@ -677,18 +684,18 @@ public partial class ModelSettingsWindow : Window
         var info = await AutoUpdater.CheckAsync(versionUrl);
         if (info is null)
         {
-            if (updateHint is not null) updateHint.Text = I18n.T("无法连接更新服务，请确认服务已启动。");
+            if (updateHint is not null) updateHint.Text = I18n.T("ui.cannot.connect.to.update.service.please.make.sure.the.service.is.running");
             return;
         }
 
         if (!AutoUpdater.IsNewer(info.Version))
         {
-            if (updateHint is not null) updateHint.Text = I18n.T("已是最新版本。");
+            if (updateHint is not null) updateHint.Text = I18n.T("ui.you.are.using.the.latest.version");
             return;
         }
 
         _pendingUpdate = info;
-        if (updateHint is not null) updateHint.Text = I18n.T("发现新版本：{0}", info.Version);
+        if (updateHint is not null) updateHint.Text = I18n.T("ui.new.version.available.value", info.Version);
         if (upgradeBtn is not null) upgradeBtn.IsVisible = true;
         ShowUpdateDetails(info);
     }
@@ -700,19 +707,19 @@ public partial class ModelSettingsWindow : Window
         if (info is null) return;
 
         var platformText = this.FindControl<TextBlock>("UpdatePlatformText");
-        if (platformText is not null) platformText.Text = I18n.T("目标平台：{0}", info.Platform);
+        if (platformText is not null) platformText.Text = I18n.T("ui.target.platform.value", info.Platform);
 
         var fileInfoText = this.FindControl<TextBlock>("UpdateFileInfoText");
         if (fileInfoText is not null)
         {
-            fileInfoText.Text = I18n.T("文件：{0}，大小：{1:F2} MB", info.FileName, info.Size / (1024.0 * 1024.0));
+            fileInfoText.Text = I18n.T("ui.file.value.size.value.mb", info.FileName, info.Size / (1024.0 * 1024.0));
         }
 
         var notesText = this.FindControl<TextBlock>("UpdateReleaseNotesText");
         if (notesText is not null)
         {
             notesText.Text = string.IsNullOrWhiteSpace(info.ReleaseNotes)
-                ? I18n.T("（发布方未提供本次更新的说明）")
+                ? I18n.T("ui.no.release.notes")
                 : info.ReleaseNotes;
         }
     }
@@ -734,13 +741,13 @@ public partial class ModelSettingsWindow : Window
         {
             if (hint is not null)
             {
-                hint.Text = I18n.T("发现新版本：{0}，点击「立即升级」开始更新。", info.Version);
+                hint.Text = I18n.T("ui.new.version.value.available.click.upgrade.now.to.start", info.Version);
             }
             return;
         }
         if (hint is not null)
         {
-            hint.Text = I18n.T("发现新版本：{0}，正在自动更新…", info.Version);
+            hint.Text = I18n.T("ui.new.version.value.updating.automatically", info.Version);
         }
         if (upgradeBtn is not null)
         {
@@ -758,7 +765,7 @@ public partial class ModelSettingsWindow : Window
         var progressBar = this.FindControl<ProgressBar>("UpdateProgressBar");
         var progressText = this.FindControl<TextBlock>("UpdateProgressText");
 
-        if (updateHint is not null) updateHint.Text = I18n.T("正在下载更新…");
+        if (updateHint is not null) updateHint.Text = I18n.T("ui.downloading.update");
         if (upgradeBtn is not null) upgradeBtn.IsVisible = false;
         if (progressPanel is not null) progressPanel.IsVisible = true;
         if (progressBar is not null) progressBar.Value = 0;
@@ -774,13 +781,13 @@ public partial class ModelSettingsWindow : Window
         var error = await AutoUpdater.UpgradeAsync(_pendingUpdate, progress);
         if (!string.IsNullOrEmpty(error))
         {
-            if (updateHint is not null) updateHint.Text = I18n.T("升级失败：{0}", error);
+            if (updateHint is not null) updateHint.Text = I18n.T("ui.upgrade.failed.value", error);
             if (progressPanel is not null) progressPanel.IsVisible = false;
             ShowDownloadLink(_pendingUpdate.DownloadUrl);
             return;
         }
 
-        if (updateHint is not null) updateHint.Text = I18n.T("下载完成，即将关闭并升级。");
+        if (updateHint is not null) updateHint.Text = I18n.T("ui.download.complete.the.app.will.close.to.upgrade");
         if (progressText is not null) progressText.Text = "100%";
         await Task.Delay(800);
         Environment.Exit(0);
@@ -805,7 +812,7 @@ public partial class ModelSettingsWindow : Window
         }
         catch (Exception ex)
         {
-            Hint(I18n.T("无法打开浏览器：{0}", ex.Message));
+            Hint(I18n.T("ui.value.4", ex.Message));
         }
     }
 
@@ -814,33 +821,33 @@ public partial class ModelSettingsWindow : Window
     {
         try
         {
-        Title = I18n.T("设置");
+        Title = I18n.T("ui.settings");
         var ngb = this.FindControl<TextBlock>("NavGroupBasic");
-        if (ngb is not null) ngb.Text = I18n.T("基础设置");
+        if (ngb is not null) ngb.Text = I18n.T("ui.basic");
         var ngm = this.FindControl<TextBlock>("NavGroupModels");
-        if (ngm is not null) ngm.Text = I18n.T("模型");
+        if (ngm is not null) ngm.Text = I18n.T("ui.model");
         var nga = this.FindControl<TextBlock>("NavGroupAgent");
-        if (nga is not null) nga.Text = I18n.T("智能体");
+        if (nga is not null) nga.Text = I18n.T("ui.agent");
         var nst = this.FindControl<TextBlock>("NavSkillsText");
-        if (nst is not null) nst.Text = I18n.T("Skill管理");
+        if (nst is not null) nst.Text = I18n.T("ui.skill.management");
         var pt = this.FindControl<TextBlock>("PersonalTitle");
-        if (pt is not null) pt.Text = I18n.T("个性化");
+        if (pt is not null) pt.Text = I18n.T("ui.personalization");
         var ph = this.FindControl<TextBlock>("PresetHeader");
-        if (ph is not null) ph.Text = I18n.T("快速添加（点选模板）");
+        if (ph is not null) ph.Text = I18n.T("ui.quick.add.templates");
         var ng = this.FindControl<TextBlock>("NavGeneralText");
-        if (ng is not null) ng.Text = I18n.T("常规");
+        if (ng is not null) ng.Text = I18n.T("ui.general");
         var na = this.FindControl<TextBlock>("NavAppearanceText");
-        if (na is not null) na.Text = I18n.T("外观");
+        if (na is not null) na.Text = I18n.T("ui.appearance");
         var nm = this.FindControl<TextBlock>("NavModelsText");
-        if (nm is not null) nm.Text = I18n.T("模型设置");
+        if (nm is not null) nm.Text = I18n.T("ui.models");
         var ngs = this.FindControl<TextBlock>("NavGroupSystem");
-        if (ngs is not null) ngs.Text = I18n.T("系统");
+        if (ngs is not null) ngs.Text = I18n.T("ui.system");
         var nenv = this.FindControl<TextBlock>("NavEnvironmentText");
-        if (nenv is not null) nenv.Text = I18n.T("运行环境检测");
+        if (nenv is not null) nenv.Text = I18n.T("ui.environment");
         var saveBtn = this.FindControl<Button>("SavePersonalBtn");
-        if (saveBtn is not null) saveBtn.Content = I18n.T("保存常规设置");
+        if (saveBtn is not null) saveBtn.Content = I18n.T("ui.save.general");
         var promptBox2 = this.FindControl<TextBox>("CustomPromptBox");
-        if (promptBox2 is not null) promptBox2.Watermark = I18n.T("例如：回答尽量简短；优先用表格展示数据…");
+        if (promptBox2 is not null) promptBox2.Watermark = I18n.T("ui.e.g.keep.answers.brief.prefer.tables.for.data");
         // 提示音偏好：开关/音色切换即保存并试听（不经过"保存"按钮）
         var notifySwitch = this.FindControl<ToggleSwitch>("NotifySoundSwitch");
         var notifyBox = this.FindControl<ComboBox>("NotifySoundBox");
@@ -873,105 +880,102 @@ public partial class ModelSettingsWindow : Window
         }
 
         var saveApply = this.FindControl<Button>("SaveApplyBtn");
-        if (saveApply is not null) saveApply.Content = I18n.T("保存并应用");
+        if (saveApply is not null) saveApply.Content = I18n.T("ui.save.apply");
         var closeBtn = this.FindControl<Button>("CloseBtn");
-        if (closeBtn is not null) closeBtn.Content = I18n.T("关闭");
+        if (closeBtn is not null) closeBtn.Content = I18n.T("ui.off");
         var addBtn = this.FindControl<Button>("AddBtn");
-        if (addBtn is not null) addBtn.Content = I18n.T("＋ 添加供应商");
+        if (addBtn is not null) addBtn.Content = I18n.T("ui.add.provider");
         var delBtn = this.FindControl<Button>("DeleteBtn");
-        if (delBtn is not null) delBtn.Content = I18n.T("删除此供应商");
+        if (delBtn is not null) delBtn.Content = I18n.T("ui.delete.this.provider");
         // 页面元素（空安全，缺 x:Name 的跳过）
         void SetT(string name, string key)
         {
-            var c = this.FindControl<TextBlock>(name);
+            var c = this.FindControl<Control>(name) as TextBlock;
             if (c is not null) c.Text = I18n.T(key);
         }
-        SetT("GeneralTitle", "常规");
-        SetT("GeneralDesc", "助手身份与交流偏好。");
-        SetT("LabelAssistantName", "助手名字");
-        SetT("LabelReplyLang", "交流语言（影响模型回复语言）");
-        SetT("LabelCustomPrompt", "默认提示词（附加到系统指令，每轮生效）");
-        SetT("LabelUiLang", "界面语言（UI 显示；切换后重启应用完全生效）");
-        SetT("LabelAutoStart", "开机自启动");
-        SetT("AutoStartDesc", "登录系统后自动启动，气泡常驻待命");
-        SetT("LabelWorkspace", "主工作空间");
-        SetT("WorkspaceDesc", "智能体的文件、脚本与记忆所在目录；修改保存后重启应用生效，助手设置随工作空间保存");
+        SetT("GeneralTitle", "ui.general");
+        SetT("GeneralDesc", "ui.assistant.identity.reply.preferences");
+        SetT("LabelAssistantName", "ui.assistant.name");
+        SetT("LabelReplyLang", "ui.reply.language.affects.model.output");
+        SetT("LabelCustomPrompt", "ui.custom.prompt.appended.to.system.instructions.applies.every.turn");
+        SetT("LabelUiLang", "ui.ui.language.full.effect.after.app.restart");
+        SetT("LabelAutoStart", "ui.launch.at.login");
+        SetT("AutoStartDesc", "ui.start.automatically.after.login.the.bubble.stays.resident");
+        SetT("LabelWorkspace", "ui.main.workspace");
+        SetT("WorkspaceDesc", "ui.message.8");
         var wsPickBtn = this.FindControl<Button>("WorkspacePickBtn");
-        if (wsPickBtn is not null) wsPickBtn.Content = I18n.T("选择目录…");
+        if (wsPickBtn is not null) wsPickBtn.Content = I18n.T("ui.choose.folder");
         var wsSaveBtn = this.FindControl<Button>("WorkspaceSaveBtn");
-        if (wsSaveBtn is not null) wsSaveBtn.Content = I18n.T("保存工作空间");
+        if (wsSaveBtn is not null) wsSaveBtn.Content = I18n.T("ui.save.workspace");
         var wsResetBtn = this.FindControl<Button>("WorkspaceResetBtn");
-        if (wsResetBtn is not null) wsResetBtn.Content = I18n.T("恢复默认");
-        SetT("LabelNotifySound", "提示音");
-        SetT("NotifySoundDesc", "任务完成且对话窗不在前台时播放");
+        if (wsResetBtn is not null) wsResetBtn.Content = I18n.T("ui.reset.to.default");
+        SetT("LabelNotifySound", "ui.notification.sound");
+        SetT("NotifySoundDesc", "ui.plays.when.a.task.finishes.while.the.chat.window.is.in.the.background");
         var nsBox = this.FindControl<ComboBox>("NotifySoundBox");
         if (nsBox is not null)
         {
             var items = nsBox.Items.OfType<ComboBoxItem>().ToList();
-            var names = new[] { I18n.T("叮"), I18n.T("玻璃"), I18n.T("和弦") };
+            var names = new[] { I18n.T("ui.ding"), I18n.T("ui.glass"), I18n.T("ui.chord") };
             for (var k = 0; k < items.Count && k < names.Length; k++)
             {
                 items[k].Content = names[k];
             }
         }
-        SetT("AppearanceTitle", "外观");
-        SetT("AppearanceDesc", "悬浮气泡的个性化显示。");
-        SetT("LabelBubbleIcon", "气泡图标");
-        SetT("LabelBubblePos", "气泡位置");
+        SetT("AppearanceTitle", "ui.appearance");
+        SetT("AppearanceDesc", "ui.personalize.the.floating.bubble");
+        SetT("LabelBubbleIcon", "ui.bubble.icon");
+        SetT("LabelBubblePos", "ui.bubble.position");
         var resetPosBtn = this.FindControl<Button>("ResetPosBtn");
-        if (resetPosBtn is not null) resetPosBtn.Content = I18n.T("重置到默认位置（右上角）");
-        SetT("ModelsTitle", "模型设置");
-        SetT("ModelsDesc", "管理模型供应商，配置后即可在底部切换使用。");
+        if (resetPosBtn is not null) resetPosBtn.Content = I18n.T("ui.reset.to.default.position.top.right");
+        SetT("ModelsTitle", "ui.models");
+        SetT("ModelsDesc", "ui.manage.model.providers.switch.from.the.bottom.bar");
         var checkUpdateBtn = this.FindControl<Button>("CheckUpdateBtn");
-        if (checkUpdateBtn is not null) checkUpdateBtn.Content = I18n.T("检查更新");
+        if (checkUpdateBtn is not null) checkUpdateBtn.Content = I18n.T("ui.check.for.updates");
         var upgradeBtn = this.FindControl<Button>("UpgradeBtn");
-        if (upgradeBtn is not null) upgradeBtn.Content = I18n.T("立即升级");
-        SetT("LabelUpdate", "版本更新");
+        if (upgradeBtn is not null) upgradeBtn.Content = I18n.T("ui.upgrade.now");
+        SetT("LabelUpdate", "ui.version.update");
         var currentVersionText = this.FindControl<TextBlock>("CurrentVersionText");
-        if (currentVersionText is not null) currentVersionText.Text = I18n.T("当前版本：{0}", AutoUpdater.CurrentVersion.ToString());
-        SetT("LabelUpdateServiceUrl", "更新服务地址");
-        SetT("LabelCollab", "协作（A2A 局域网）");
-        SetT("A2aEnabledDesc", "启用 A2A 局域网协作（关闭即断开发现/配对/群组，开启即时恢复）");
-        SetT("PeerAutoProcessDesc", "自动处理其他 Helper 发来的点对点消息（关闭后仅存 Inbox 等人工处理）");
-        SetT("GroupAutoTalkDesc", "群组自动交流（默认；可在 A2A 会话中心按群单独关闭）");
-        SetT("ContextCompressDesc", "群上下文自动压缩，每");
-        SetT("CompressRoundsSuffix", "轮一次并同步全群");
-        SetT("LabelGroupNotify", "群消息提醒");
-        SetT("GroupNotifyDesc", "群内有新消息时气泡提醒，点击打开 A2A 会话中心");
-        SetT("GroupNotifyOff", "关闭");
-        SetT("GroupNotifyMention", "仅 @我");
-        SetT("GroupNotifyAll", "所有消息");
-        SetT("DailyUpdateCheckDesc", "每日首次启动自动检查更新");
-        SetT("AutoDownloadUpdateDesc", "提醒后自动下载并安装");
+        if (currentVersionText is not null) currentVersionText.Text = I18n.T("ui.current.version.value", AutoUpdater.CurrentVersion.ToString());
+        SetT("LabelUpdateServiceUrl", "ui.update.service.url");
+        SetT("LabelCollab", "ui.collaboration.a2a.lan");
+        SetT("A2aEnabledDesc", "ui.enable.a2a.lan.collaboration.off.disconnects.discovery.pairing.groups.on.reconnects.immedi");
+        SetT("PeerAutoProcessDesc", "ui.auto.process.direct.messages.from.other.helpers.off.keeps.them.in.inbox.for.manual.handlin");
+        SetT("GroupAutoTalkDesc", "ui.group.auto.talk.default.can.be.disabled.per.group.in.the.a2a.session.center");
+        SetT("ContextCompressDesc", "ui.auto.compress.group.context.every");
+        SetT("CompressRoundsSuffix", "ui.rounds.and.sync.to.the.whole.group");
+        SetT("LabelGroupNotify", "ui.group.message.alerts");
+        SetT("GroupNotifyDesc", "ui.bubble.alert.on.new.group.messages.click.to.open.the.a2a.session.center");
+        SetT("DailyUpdateCheckDesc", "ui.check.for.updates.on.the.first.launch.each.day");
+        SetT("AutoDownloadUpdateDesc", "ui.download.and.install.automatically.after.the.reminder");
         // ComboBox 下拉项不是 TextBlock，SetT 覆盖不到，逐项设置 Content
         var notifyOff = this.FindControl<ComboBoxItem>("GroupNotifyOff");
-        if (notifyOff is not null) notifyOff.Content = I18n.T("关闭");
+        if (notifyOff is not null) notifyOff.Content = I18n.T("ui.off");
         var notifyMention = this.FindControl<ComboBoxItem>("GroupNotifyMention");
-        if (notifyMention is not null) notifyMention.Content = I18n.T("仅 @我");
+        if (notifyMention is not null) notifyMention.Content = I18n.T("ui.only.me");
         var notifyAll = this.FindControl<ComboBoxItem>("GroupNotifyAll");
-        if (notifyAll is not null) notifyAll.Content = I18n.T("所有消息");
+        if (notifyAll is not null) notifyAll.Content = I18n.T("ui.all.messages");
         var soundDing = this.FindControl<ComboBoxItem>("NotifySoundDing");
-        if (soundDing is not null) soundDing.Content = I18n.T("叮");
+        if (soundDing is not null) soundDing.Content = I18n.T("ui.ding");
         var soundGlass = this.FindControl<ComboBoxItem>("NotifySoundGlass");
-        if (soundGlass is not null) soundGlass.Content = I18n.T("玻璃");
+        if (soundGlass is not null) soundGlass.Content = I18n.T("ui.glass");
         var soundChord = this.FindControl<ComboBoxItem>("NotifySoundChord");
-        if (soundChord is not null) soundChord.Content = I18n.T("和弦");
+        if (soundChord is not null) soundChord.Content = I18n.T("ui.chord");
         var saveUrlBtn = this.FindControl<Button>("SaveUpdateUrlBtn");
-        if (saveUrlBtn is not null) saveUrlBtn.Content = I18n.T("保存地址");
+        if (saveUrlBtn is not null) saveUrlBtn.Content = I18n.T("ui.save.address");
         var releaseNotesTitle = this.FindControl<TextBlock>("UpdateReleaseNotesTitle");
-        if (releaseNotesTitle is not null) releaseNotesTitle.Text = I18n.T("更新说明");
-        SetT("SkillsTitle", "Skill管理");
-        SetT("SkillsDesc", "管理已安装的技能，删除后立即生效。");
-        SetT("EnvironmentTitle", "环境检测");
-        SetT("EnvironmentDesc", "检查系统环境是否满足 AgentBrook Helper 正常运行。");
+        if (releaseNotesTitle is not null) releaseNotesTitle.Text = I18n.T("ui.release.notes");
+        SetT("SkillsTitle", "ui.skill.management");
+        SetT("SkillsDesc", "ui.message.9");
+        SetT("EnvironmentTitle", "ui.environment.check");
+        SetT("EnvironmentDesc", "ui.check.whether.the.system.environment.is.ready.for.agentbrook.helper");
         var checkEnvBtn = this.FindControl<Button>("CheckEnvironmentBtn");
-        if (checkEnvBtn is not null) checkEnvBtn.Content = I18n.T("重新检测");
+        if (checkEnvBtn is not null) checkEnvBtn.Content = I18n.T("ui.recheck");
         var repairAllBtn = this.FindControl<Button>("RepairAllBtn");
-        if (repairAllBtn is not null) repairAllBtn.Content = I18n.T("一键修复");
-        SetT("LabelProviderName", "供应商名称");
-        SetT("LabelApiEndpoint", "API 地址（OpenAI 兼容端点）");
-        SetT("LabelApiKey", "API Key");
-        SetT("LabelModelsCsv", "模型清单（逗号分隔，第一个为默认）");
+        if (repairAllBtn is not null) repairAllBtn.Content = I18n.T("ui.repair.all");
+        SetT("LabelProviderName", "ui.provider.name");
+        SetT("LabelApiEndpoint", "ui.api.endpoint.openai.compatible");
+        SetT("LabelApiKey", "ui.api.key");
+        SetT("LabelModelsCsv", "ui.models.comma.separated.first.is.default");
         }
         catch (Exception ex)
         {
@@ -982,7 +986,7 @@ public partial class ModelSettingsWindow : Window
     /// <summary>测试入口：程序化选择界面语言（触发真实 SelectionChanged → 热切换链路）。</summary>
     public void DebugSelectUiLanguage(string lang)
     {
-        UiLanguageBox.SelectedIndex = lang == "en" ? 2 : lang == "zh" ? 1 : 0;
+        UiLanguageBox.SelectedIndex = lang switch { "zh" => 1, "en" => 2, "id" => 3, _ => 0 };
     }
 
     private void LoadFromController()
@@ -1014,7 +1018,7 @@ public partial class ModelSettingsWindow : Window
             var displayName = p.Name == "默认" && I18n.Lang == "en" ? "Default" : p.Name;
             panel.Children.Add(new TextBlock
             {
-                Text = displayName + (p.Name == _activeName ? I18n.T("（使用中）") : ""),
+                Text = displayName + (p.Name == _activeName ? I18n.T("ui.in.use") : ""),
                 FontSize = 13.5,
                 VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
             });
@@ -1036,7 +1040,7 @@ public partial class ModelSettingsWindow : Window
             var b = new Button
             {
                 Classes = { "presetBtn" },
-                Content = name == "自定义" ? I18n.T("＋ 创建自定义供应商") : name,
+                Content = name == "自定义" ? I18n.T("ui.create.custom.provider") : name,
             };
             b.Click += (_, _) => AddProvider(presetName, baseUrl, models);
             PresetPanel.Children.Add(b);
@@ -1061,7 +1065,7 @@ public partial class ModelSettingsWindow : Window
         });
         _selectedIndex = _working.Count - 1;
         BuildProviderList();
-        Hint(I18n.T("已添加「{0}」，填写 API Key 后点「保存并应用」。（模型管理功能不校验端点可用性，配置错误会在对话时报错）", name));
+        Hint(I18n.T("ui.added.value.fill.in.the.api.key.and.click.save.apply.endpoint.availability.is.not.verified", name));
     }
 
     private void LoadSelectedIntoForm()
@@ -1105,12 +1109,12 @@ public partial class ModelSettingsWindow : Window
         var dup = _working.GroupBy(p => p.Name.Trim(), StringComparer.OrdinalIgnoreCase).FirstOrDefault(g => g.Count() > 1);
         if (dup is not null)
         {
-            Hint(I18n.T("供应商名称「{0}」重复，请改名后再保存。", dup.Key));
+            Hint(I18n.T("ui.provider.name.value.is.duplicated.rename.it.before.saving", dup.Key));
             return;
         }
         if (_working.Any(p => p.Name.Length == 0))
         {
-            Hint(I18n.T("存在未命名的供应商。"));
+            Hint(I18n.T("ui.there.is.an.unnamed.provider"));
             return;
         }
         var active = _activeName;
@@ -1124,11 +1128,11 @@ public partial class ModelSettingsWindow : Window
             _activeName = App.Controller.CurrentProvider;
             _dirty = false;
             BuildProviderList();
-            Hint(I18n.T("已保存并热应用：当前对话上下文已迁移到新的模型客户端。"));
+            Hint(I18n.T("ui.saved.applied.conversation.migrated.to.the.new.model.client"));
         }
         catch (Exception ex)
         {
-            Hint(I18n.T("保存失败：{0}", ex.Message));
+            Hint(I18n.T("ui.save.failed.value", ex.Message));
         }
     }
 
@@ -1140,7 +1144,7 @@ public partial class ModelSettingsWindow : Window
         }
         if (_working.Count == 1)
         {
-            Hint(I18n.T("至少保留一个供应商（可改为编辑现有项）。"));
+            Hint(I18n.T("ui.keep.at.least.one.provider.edit.the.existing.one.instead"));
             return;
         }
         var removedName = _working[_selectedIndex].Name;
@@ -1152,7 +1156,7 @@ public partial class ModelSettingsWindow : Window
         _selectedIndex = Math.Min(_selectedIndex, _working.Count - 1);
         _dirty = true;
         BuildProviderList();
-        Hint(I18n.T("已删除「{0}」（点「保存并应用」生效）。", removedName));
+        Hint(I18n.T("ui.deleted.value.takes.effect.when.you.click.save.apply", removedName));
     }
 
     private void Hint(string text)
@@ -1171,7 +1175,7 @@ public partial class ModelSettingsWindow : Window
 
         if (checkBtn is not null) checkBtn.IsEnabled = false;
         list.Children.Clear();
-        if (summary is not null) summary.Text = I18n.T("正在检测…");
+        if (summary is not null) summary.Text = I18n.T("ui.checking");
         if (hint is not null) hint.Text = "";
 
         var agent = App.Controller.Ready ? App.Controller.Agent : null;
@@ -1183,8 +1187,8 @@ public partial class ModelSettingsWindow : Window
         if (summary is not null)
         {
             summary.Text = errorCount == 0 && warningCount == 0
-                ? I18n.T("✔ 全部通过")
-                : I18n.T("检测完成：{0} 项异常，{1} 项警告", errorCount, warningCount);
+                ? I18n.T("ui.all.passed")
+                : I18n.T("ui.check.complete.value.error.s.value.warning.s", errorCount, warningCount);
         }
         if (_repairAllBtn is not null) _repairAllBtn.IsEnabled = errorCount > 0 || warningCount > 0;
         if (checkBtn is not null) checkBtn.IsEnabled = true;
@@ -1197,7 +1201,7 @@ public partial class ModelSettingsWindow : Window
         var summary = this.FindControl<TextBlock>("EnvironmentSummary");
         var hint = this.FindControl<TextBlock>("EnvironmentHint");
         if (_repairAllBtn is not null) _repairAllBtn.IsEnabled = false;
-        if (hint is not null) hint.Text = I18n.T("正在修复…");
+        if (hint is not null) hint.Text = I18n.T("ui.repairing");
 
         var repaired = new List<EnvironmentCheckResult>();
         foreach (var item in _environmentResults.Where(r => r.CanRepair))
@@ -1221,22 +1225,22 @@ public partial class ModelSettingsWindow : Window
         if (summary is not null)
         {
             summary.Text = stillError == 0 && stillWarning == 0
-                ? I18n.T("✔ 修复后全部通过")
-                : I18n.T("修复后：{0} 项异常，{1} 项警告", stillError, stillWarning);
+                ? I18n.T("ui.all.passed.after.repair")
+                : I18n.T("ui.after.repair.value.error.s.value.warning.s", stillError, stillWarning);
         }
         if (hint is not null)
         {
             if (repaired.Count > 0)
             {
-                hint.Text = I18n.T("已尝试修复 {0} 项，若仍异常请按提示手动处理。", repaired.Count);
+                hint.Text = I18n.T("ui.tried.to.repair.value.item.s.please.follow.the.tips.if.issues.remain", repaired.Count);
             }
             else if (stillError > 0 || stillWarning > 0)
             {
-                hint.Text = I18n.T("没有可自动修复的项，请按上方提示手动处理。");
+                hint.Text = I18n.T("ui.no.auto.repairable.items.please.follow.the.tips.above.to.fix.manually");
             }
             else
             {
-                hint.Text = I18n.T("没有可自动修复的项。");
+                hint.Text = I18n.T("ui.no.auto.repairable.items");
             }
         }
         if (_repairAllBtn is not null) _repairAllBtn.IsEnabled = stillError > 0 || stillWarning > 0;
@@ -1252,10 +1256,10 @@ public partial class ModelSettingsWindow : Window
         {
             var (dotColor, statusText) = r.Status switch
             {
-                CheckStatus.Ok => ("#4cc38a", I18n.T("正常")),
-                CheckStatus.Warning => ("#e0a030", I18n.T("警告")),
-                CheckStatus.Error => ("#ff6b6b", I18n.T("异常")),
-                _ => ("#8a8a8a", I18n.T("未知")),
+                CheckStatus.Ok => ("#4cc38a", I18n.T("ui.ok")),
+                CheckStatus.Warning => ("#e0a030", I18n.T("ui.warning")),
+                CheckStatus.Error => ("#ff6b6b", I18n.T("ui.error")),
+                _ => ("#8a8a8a", I18n.T("ui.unknown")),
             };
 
             var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
@@ -1290,7 +1294,7 @@ public partial class ModelSettingsWindow : Window
             {
                 content.Children.Add(new TextBlock
                 {
-                    Text = I18n.T("解决方案：{0}", r.Solution),
+                    Text = I18n.T("ui.solution.value", r.Solution),
                     FontSize = 11.5,
                     Foreground = new SolidColorBrush(Color.Parse("#d29922")),
                     TextWrapping = TextWrapping.Wrap,
@@ -1303,7 +1307,7 @@ public partial class ModelSettingsWindow : Window
                 var repairBtn = new Button
                 {
                     Classes = { "ghostBtn" },
-                    Content = I18n.T("修复"),
+                    Content = I18n.T("ui.repair"),
                     Margin = new Thickness(8, 0, 0, 0),
                     VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
                 };
@@ -1316,7 +1320,7 @@ public partial class ModelSettingsWindow : Window
                 var mcpRepairBtn = new Button
                 {
                     Classes = { "ghostBtn" },
-                    Content = I18n.T("修复"),
+                    Content = I18n.T("ui.repair"),
                     Margin = new Thickness(8, 0, 0, 0),
                     VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
                 };
@@ -1329,7 +1333,7 @@ public partial class ModelSettingsWindow : Window
                 var cmdRepairBtn = new Button
                 {
                     Classes = { "ghostBtn" },
-                    Content = I18n.T("修复"),
+                    Content = I18n.T("ui.repair"),
                     Margin = new Thickness(8, 0, 0, 0),
                     VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
                 };
@@ -1356,8 +1360,8 @@ public partial class ModelSettingsWindow : Window
         if (summary is not null)
         {
             summary.Text = errorCount == 0 && warningCount == 0
-                ? I18n.T("✔ 全部通过")
-                : I18n.T("检测完成：{0} 项异常，{1} 项警告", errorCount, warningCount);
+                ? I18n.T("ui.all.passed")
+                : I18n.T("ui.check.complete.value.error.s.value.warning.s", errorCount, warningCount);
         }
         if (_repairAllBtn is not null) _repairAllBtn.IsEnabled = errorCount > 0 || warningCount > 0;
     }
@@ -1367,12 +1371,12 @@ public partial class ModelSettingsWindow : Window
         var main = App.Controller.ConversationWindow;
         if (main is null || !App.Controller.Ready)
         {
-            Hint(I18n.T("Agent 尚未就绪，请稍后再试。"));
+            Hint(I18n.T("ui.agent.is.not.ready.yet.please.try.again.later"));
             return;
         }
 
         var serverName = title.StartsWith("MCP: ", StringComparison.OrdinalIgnoreCase) ? title[5..] : title;
-        var prompt = I18n.T("请帮我修复 MCP 服务器 {0} 的连接。启动命令是：{1}。当前连接失败，请检查配置、依赖、工作目录并尝试修复。", serverName, command ?? "");
+        var prompt = I18n.T("ui.please.fix.the.connection.of.mcp.server.value.the.start.command.is.value.it.failed.to.conn", serverName, command ?? "");
         await ShowConversationAndSendAsync(main, prompt);
         Close();
     }
@@ -1382,11 +1386,11 @@ public partial class ModelSettingsWindow : Window
         var main = App.Controller.ConversationWindow;
         if (main is null || !App.Controller.Ready)
         {
-            Hint(I18n.T("Agent 尚未就绪，请稍后再试。"));
+            Hint(I18n.T("ui.agent.is.not.ready.yet.please.try.again.later"));
             return;
         }
 
-        var prompt = I18n.T("请帮我修复外部命令执行环境。检测项：{0}。探针命令：{1}。错误信息：{2}。请检查系统 PATH 与进程权限，并尝试修复。", title, command ?? "", message);
+        var prompt = I18n.T("ui.please.fix.the.external.command.execution.environment.check.item.value.probe.command.value", title, command ?? "", message);
         await ShowConversationAndSendAsync(main, prompt);
         Close();
     }

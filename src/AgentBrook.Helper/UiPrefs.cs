@@ -100,7 +100,7 @@ internal static class AssistantIdentity
     public static string Current { get; private set; } = "Brook";
     public static string BubbleIcon { get; private set; } = "Icon.Sparkle";
     public static string Language { get; private set; } = "zh";        // 模型回复语言
-    public static string UiLanguage { get; private set; } = "auto";    // 界面语言（auto/zh/en）
+    public static string UiLanguage { get; private set; } = "auto";    // 界面语言（auto/zh/en/id）
     public static string CustomPrompt { get; private set; } = "";
     public static bool NotifySoundOn { get; private set; } = true;      // 任务完成提示音（会话窗非活动时）
     public static string NotifySoundId { get; private set; } = "ding";  // 音色

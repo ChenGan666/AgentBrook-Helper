@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using AgentBrook.Agent;
 using AgentBrook.Agent.Configuration;
 using AgentBrook.Agent.Infrastructure;
@@ -45,7 +45,7 @@ public static class EnvironmentChecker
 
     private static async Task<EnvironmentCheckResult> CheckAppDataWriteAsync()
     {
-        var result = Base("AppDataWrite", I18n.T("应用数据目录可写"));
+        var result = Base("AppDataWrite", I18n.T("ui.app.data.directory.writable"));
         try
         {
             var dir = Workspace.LocateAppRoot();
@@ -57,21 +57,21 @@ public static class EnvironmentChecker
             if (read == "ok")
             {
                 result.Status = CheckStatus.Ok;
-                result.Message = I18n.T("目录可读写：{0}", dir);
+                result.Message = I18n.T("ui.directory.readable.and.writable.value", dir);
             }
             else
             {
                 result.Status = CheckStatus.Error;
-                result.Message = I18n.T("读取探针内容与写入不一致");
-                result.Solution = I18n.T("尝试创建/修复应用数据目录权限");
+                result.Message = I18n.T("ui.probe.read.does.not.match.write");
+                result.Solution = I18n.T("ui.try.creating.fixing.app.data.directory.permissions");
                 result.CanRepair = true;
             }
         }
         catch (Exception ex)
         {
             result.Status = CheckStatus.Error;
-            result.Message = I18n.T("无法读写：{0}", ex.Message);
-            result.Solution = I18n.T("尝试创建/修复应用数据目录权限");
+            result.Message = I18n.T("ui.cannot.read.or.write.value", ex.Message);
+            result.Solution = I18n.T("ui.try.creating.fixing.app.data.directory.permissions");
             result.CanRepair = true;
         }
         return result;
@@ -79,7 +79,7 @@ public static class EnvironmentChecker
 
     private static async Task<EnvironmentCheckResult> CheckWorkspaceWriteAsync()
     {
-        var result = Base("WorkspaceWrite", I18n.T("工作空间目录可写"));
+        var result = Base("WorkspaceWrite", I18n.T("ui.workspace.directory.writable"));
         try
         {
             var dir = UiPrefs.WorkspaceDir();
@@ -91,21 +91,21 @@ public static class EnvironmentChecker
             if (read == "ok")
             {
                 result.Status = CheckStatus.Ok;
-                result.Message = I18n.T("工作空间可读写：{0}", dir);
+                result.Message = I18n.T("ui.value.3", dir);
             }
             else
             {
                 result.Status = CheckStatus.Error;
-                result.Message = I18n.T("工作空间读取探针内容与写入不一致");
-                result.Solution = I18n.T("在设置中更换可写的工作空间目录");
+                result.Message = I18n.T("ui.workspace.probe.read.does.not.match.write");
+                result.Solution = I18n.T("ui.choose.a.writable.workspace.directory.in.settings");
                 result.CanRepair = true;
             }
         }
         catch (Exception ex)
         {
             result.Status = CheckStatus.Error;
-            result.Message = I18n.T("工作空间无法读写：{0}", ex.Message);
-            result.Solution = I18n.T("在设置中更换可写的工作空间目录");
+            result.Message = I18n.T("ui.workspace.cannot.read.or.write.value", ex.Message);
+            result.Solution = I18n.T("ui.choose.a.writable.workspace.directory.in.settings");
             result.CanRepair = true;
         }
         return result;
@@ -113,15 +113,15 @@ public static class EnvironmentChecker
 
     private static Task<EnvironmentCheckResult> CheckWorkspaceAuthorizationAsync()
     {
-        var result = Base("WorkspaceAuthorization", I18n.T("工作空间已授权"));
+        var result = Base("WorkspaceAuthorization", I18n.T("ui.workspace.authorized"));
         try
         {
             var dir = UiPrefs.WorkspaceDir();
             if (!Directory.Exists(dir))
             {
                 result.Status = CheckStatus.Warning;
-                result.Message = I18n.T("工作空间目录不存在，将自动创建");
-                result.Solution = I18n.T("尝试创建工作空间目录");
+                result.Message = I18n.T("ui.workspace.directory.does.not.exist.it.will.be.created.automatically");
+                result.Solution = I18n.T("ui.message.3");
                 result.CanRepair = true;
                 return Task.FromResult(result);
             }
@@ -129,20 +129,20 @@ public static class EnvironmentChecker
             // 尝试列出目录内容：macOS/Windows 沙盒化应用需要显式授权
             var _ = Directory.GetFiles(dir).Length;
             result.Status = CheckStatus.Ok;
-            result.Message = I18n.T("工作空间已可访问：{0}", dir);
+            result.Message = I18n.T("ui.workspace.accessible.value", dir);
         }
         catch (UnauthorizedAccessException ex)
         {
             result.Status = CheckStatus.Error;
-            result.Message = I18n.T("没有访问工作空间的权限：{0}", ex.Message);
-            result.Solution = I18n.T("在设置中更换有访问权限的工作空间目录");
+            result.Message = I18n.T("ui.no.permission.to.access.workspace.value", ex.Message);
+            result.Solution = I18n.T("ui.choose.a.workspace.directory.with.access.permission.in.settings");
             result.CanRepair = true;
         }
         catch (Exception ex)
         {
             result.Status = CheckStatus.Warning;
-            result.Message = I18n.T("访问工作空间受限：{0}", ex.Message);
-            result.Solution = I18n.T("在设置中更换工作空间目录");
+            result.Message = I18n.T("ui.workspace.access.restricted.value", ex.Message);
+            result.Solution = I18n.T("ui.choose.another.workspace.directory.in.settings");
             result.CanRepair = true;
         }
         return Task.FromResult(result);
@@ -150,7 +150,7 @@ public static class EnvironmentChecker
 
     private static async Task<EnvironmentCheckResult> CheckCommandExecutionAsync()
     {
-        var result = Base("CommandExecution", I18n.T("外部命令可执行"));
+        var result = Base("CommandExecution", I18n.T("ui.external.commands.executable"));
         string program = "";
         var args = new List<string>();
         try
@@ -179,8 +179,8 @@ public static class EnvironmentChecker
             if (proc is null)
             {
                 result.Status = CheckStatus.Error;
-                result.Message = I18n.T("无法启动子进程");
-                result.Solution = I18n.T("检查系统 PATH 与进程权限");
+                result.Message = I18n.T("ui.message.6");
+                result.Solution = I18n.T("ui.check.system.path.and.process.permissions");
                 result.Extra = $"{program} {string.Join(' ', args)}";
                 return result;
             }
@@ -190,22 +190,22 @@ public static class EnvironmentChecker
             if (proc.ExitCode == 0 && stdout.Trim() == "AgentBrook-Probe")
             {
                 result.Status = CheckStatus.Ok;
-                result.Message = I18n.T("可以执行外部命令");
+                result.Message = I18n.T("ui.external.commands.can.be.executed");
             }
             else
             {
                 result.Status = CheckStatus.Error;
                 var detail = string.IsNullOrWhiteSpace(stderr) ? stdout : stderr;
-                result.Message = I18n.T("命令返回异常：{0}", string.IsNullOrWhiteSpace(detail) ? I18n.T("无输出") : detail);
-                result.Solution = I18n.T("检查系统 PATH 与进程权限");
+                result.Message = I18n.T("ui.command.returned.an.exception.value", string.IsNullOrWhiteSpace(detail) ? I18n.T("ui.no.output") : detail);
+                result.Solution = I18n.T("ui.check.system.path.and.process.permissions");
                 result.Extra = $"{program} {string.Join(' ', args)}";
             }
         }
         catch (Exception ex)
         {
             result.Status = CheckStatus.Error;
-            result.Message = I18n.T("命令执行失败：{0}", ex.Message);
-            result.Solution = I18n.T("检查系统 PATH 与进程权限");
+            result.Message = I18n.T("ui.command.execution.failed.value", ex.Message);
+            result.Solution = I18n.T("ui.check.system.path.and.process.permissions");
             result.Extra = $"{program} {string.Join(' ', args)}";
         }
         return result;
@@ -213,7 +213,7 @@ public static class EnvironmentChecker
 
     private static async Task<EnvironmentCheckResult> CheckNetworkAsync()
     {
-        var result = Base("Network", I18n.T("网络连接"));
+        var result = Base("Network", I18n.T("ui.network.connection"));
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -226,13 +226,13 @@ public static class EnvironmentChecker
             result.Status = response.IsSuccessStatusCode || (int)response.StatusCode < 500
                 ? CheckStatus.Ok
                 : CheckStatus.Warning;
-            result.Message = I18n.T("网络可连接（HTTP {0}）", (int)response.StatusCode);
+            result.Message = I18n.T("ui.network.reachable.http.value", (int)response.StatusCode);
         }
         catch (Exception ex)
         {
             result.Status = CheckStatus.Warning;
-            result.Message = I18n.T("网络连接受限：{0}", ex.Message);
-            result.Solution = I18n.T("检查网络或代理设置");
+            result.Message = I18n.T("ui.network.restricted.value", ex.Message);
+            result.Solution = I18n.T("ui.check.network.or.proxy.settings");
         }
         return result;
     }
@@ -248,9 +248,9 @@ public static class EnvironmentChecker
             results.Add(new()
             {
                 Id = "Mcp-None",
-                Title = I18n.T("MCP 服务器"),
+                Title = I18n.T("ui.mcp.servers"),
                 Status = CheckStatus.Ok,
-                Message = I18n.T("未配置 MCP 服务器"),
+                Message = I18n.T("ui.no.mcp.servers.configured"),
                 CanRepair = false,
             });
             return Task.FromResult(results);
@@ -267,7 +267,7 @@ public static class EnvironmentChecker
                     Id = id,
                     Title = $"MCP: {server.Name}",
                     Status = CheckStatus.Ok,
-                    Message = I18n.T("已连接，{0} 个工具", conn.Tools.Count),
+                    Message = I18n.T("ui.connected.value.tool.s", conn.Tools.Count),
                     CanRepair = false,
                 });
                 continue;
@@ -282,8 +282,8 @@ public static class EnvironmentChecker
                     Id = id,
                     Title = $"MCP: {server.Name}",
                     Status = CheckStatus.Error,
-                    Message = I18n.T("未找到启动命令：{0}", server.Command),
-                    Solution = I18n.T("安装对应运行时（如 Node.js）并加入 PATH，然后重启应用"),
+                    Message = I18n.T("ui.start.command.not.found.value", server.Command),
+                    Solution = I18n.T("ui.install.the.required.runtime.e.g.node.js.add.it.to.path.then.restart.the.app"),
                     Extra = server.Command,
                     CanRepair = false,
                 });
@@ -295,8 +295,8 @@ public static class EnvironmentChecker
                     Id = id,
                     Title = $"MCP: {server.Name}",
                     Status = CheckStatus.Error,
-                    Message = I18n.T("命令存在但连接失败：{0}", resolved),
-                    Solution = I18n.T("检查 MCP 配置、依赖包及工作目录，然后重启应用"),
+                    Message = I18n.T("ui.command.exists.but.connection.failed.value", resolved),
+                    Solution = I18n.T("ui.check.mcp.config.dependencies.working.directory.then.restart.the.app"),
                     Extra = server.Command,
                     CanRepair = false,
                 });
@@ -323,8 +323,8 @@ public static class EnvironmentChecker
                 Id = original.Id,
                 Title = original.Title,
                 Status = read == "ok" ? CheckStatus.Ok : CheckStatus.Error,
-                Message = read == "ok" ? I18n.T("已修复，目录可读写：{0}", dir) : I18n.T("修复后仍无法读写"),
-                Solution = read == "ok" ? "" : I18n.T("请手动检查目录权限或更换安装位置"),
+                Message = read == "ok" ? I18n.T("ui.repaired.directory.readable.and.writable.value", dir) : I18n.T("ui.still.cannot.read.or.write.after.repair"),
+                Solution = read == "ok" ? "" : I18n.T("ui.please.check.directory.permissions.or.change.install.location"),
                 CanRepair = read != "ok",
             };
         }
@@ -335,8 +335,8 @@ public static class EnvironmentChecker
                 Id = original.Id,
                 Title = original.Title,
                 Status = CheckStatus.Error,
-                Message = I18n.T("修复失败：{0}", ex.Message),
-                Solution = I18n.T("请手动检查目录权限或更换安装位置"),
+                Message = I18n.T("ui.value.5", ex.Message),
+                Solution = I18n.T("ui.please.check.directory.permissions.or.change.install.location"),
                 CanRepair = false,
             };
         }
@@ -357,8 +357,8 @@ public static class EnvironmentChecker
                 Id = original.Id,
                 Title = original.Title,
                 Status = read == "ok" ? CheckStatus.Ok : CheckStatus.Error,
-                Message = read == "ok" ? I18n.T("已修复，工作空间可读写：{0}", dir) : I18n.T("修复后仍无法读写"),
-                Solution = read == "ok" ? "" : I18n.T("请手动选择可写目录"),
+                Message = read == "ok" ? I18n.T("ui.repaired.workspace.readable.and.writable.value", dir) : I18n.T("ui.still.cannot.read.or.write.after.repair"),
+                Solution = read == "ok" ? "" : I18n.T("ui.please.choose.a.writable.directory"),
                 CanRepair = read != "ok",
             };
         }
@@ -369,8 +369,8 @@ public static class EnvironmentChecker
                 Id = original.Id,
                 Title = original.Title,
                 Status = CheckStatus.Error,
-                Message = I18n.T("修复失败：{0}", ex.Message),
-                Solution = I18n.T("请手动选择可写目录"),
+                Message = I18n.T("ui.value.5", ex.Message),
+                Solution = I18n.T("ui.please.choose.a.writable.directory"),
                 CanRepair = false,
             };
         }
@@ -379,3 +379,4 @@ public static class EnvironmentChecker
     private static EnvironmentCheckResult Base(string id, string title)
         => new() { Id = id, Title = title, Status = CheckStatus.Unknown };
 }
+

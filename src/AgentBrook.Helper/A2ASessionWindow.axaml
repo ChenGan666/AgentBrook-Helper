@@ -48,13 +48,13 @@
         <Grid x:Name="LeftPanelGrid" RowDefinitions="Auto,*,2,*,2,*">
           <Border Background="#292929" CornerRadius="9" Padding="10">
             <StackPanel Spacing="3">
-              <TextBlock Text="本机 Helper" FontWeight="SemiBold" Foreground="#eeeeee"/>
+              <TextBlock x:Name="LocalHelperText" Text="本机 Helper" FontWeight="SemiBold" Foreground="#eeeeee"/>
               <TextBlock FontSize="20" HorizontalAlignment="Left">🤖 <Run Text="{Binding DisplayName}"/></TextBlock>
               <TextBlock Text="{Binding NodeId}" FontSize="10" Foreground="#777777" TextTrimming="CharacterEllipsis"/>
             </StackPanel>
           </Border>
           <Grid Grid.Row="1" RowDefinitions="Auto,*">
-            <TextBlock Classes="heading" Text="PEERS"/>
+            <TextBlock x:Name="PeersHeading" Classes="heading" Text="PEERS"/>
             <ListBox Grid.Row="1" x:Name="PeerList" ItemsSource="{Binding Peers}">
               <ListBox.ItemTemplate><DataTemplate x:DataType="local:A2APeerItem">
                 <Grid ColumnDefinitions="*,Auto">
@@ -73,7 +73,7 @@
           </Grid>
           <GridSplitter Grid.Row="2"/>
           <Grid Grid.Row="3" RowDefinitions="Auto,*">
-            <TextBlock Classes="heading" Text="PEER SESSIONS"/>
+            <TextBlock x:Name="PeerSessionsHeading" Classes="heading" Text="PEER SESSIONS"/>
             <ListBox Grid.Row="1" x:Name="PeerSessionList" ItemsSource="{Binding PeerSessions}">
               <ListBox.ItemTemplate><DataTemplate x:DataType="local:A2ASessionItem">
                 <Grid ColumnDefinitions="*,Auto">
@@ -87,7 +87,7 @@
           </Grid>
           <GridSplitter Grid.Row="4"/>
           <Grid Grid.Row="5" RowDefinitions="Auto,*">
-            <TextBlock Classes="heading" Text="GROUP SESSIONS"/>
+            <TextBlock x:Name="GroupSessionsHeading" Classes="heading" Text="GROUP SESSIONS"/>
             <ListBox Grid.Row="1" x:Name="GroupSessionList" ItemsSource="{Binding GroupSessions}">
               <ListBox.ItemTemplate><DataTemplate x:DataType="local:A2ASessionItem">
                 <Grid ColumnDefinitions="*,Auto">
@@ -117,7 +117,7 @@
             <Button x:Name="HeaderTitle" Background="Transparent" BorderThickness="0" Padding="0"
                     HorizontalContentAlignment="Left" Cursor="Hand" Click="OnHeaderTitleClick"
                     ToolTip.Tip="群主可点击群名修改">
-              <TextBlock Text="{Binding SelectedSession.Title, FallbackValue=事件流, TargetNullValue=事件流}"
+              <TextBlock x:Name="HeaderTitleText" Text="{Binding SelectedSession.Title, FallbackValue=事件流, TargetNullValue=事件流}"
                          FontWeight="SemiBold" Foreground="#dddddd"/>
             </Button>
             <TextBox x:Name="HeaderEdit" IsVisible="False" Background="#303030" BorderThickness="0"
@@ -159,9 +159,9 @@
       </Grid>
       <Border Grid.Column="2" Background="#202020" BorderBrush="#343434" BorderThickness="1,0,0,0" Padding="13">
         <TabControl>
-          <TabItem Header="详情">
+          <TabItem x:Name="DetailsTab" Header="详情">
             <ScrollViewer><StackPanel Spacing="5">
-              <TextBlock Classes="heading" Text="成员"/>
+              <TextBlock x:Name="MembersHeading" Classes="heading" Text="成员"/>
               <ListBox x:Name="MemberList" ItemsSource="{Binding Members}">
                 <ListBox.ItemTemplate>
                   <DataTemplate x:DataType="local:A2AMemberItem">
@@ -183,12 +183,12 @@
                   </DataTemplate>
                 </ListBox.ItemTemplate>
               </ListBox>
-              <TextBlock Classes="heading" Text="任务"/><ItemsControl ItemsSource="{Binding Tasks}"/>
-              <TextBlock Classes="heading" Text="文件 / ARTIFACT"/><ItemsControl ItemsSource="{Binding Artifacts}"/>
-              <TextBlock Classes="heading" Text="审计摘要"/><ItemsControl ItemsSource="{Binding Audit}"/>
+              <TextBlock x:Name="TasksHeading" Classes="heading" Text="任务"/><ItemsControl ItemsSource="{Binding Tasks}"/>
+              <TextBlock x:Name="FilesHeading" Classes="heading" Text="文件 / ARTIFACT"/><ItemsControl ItemsSource="{Binding Artifacts}"/>
+              <TextBlock x:Name="AuditHeading" Classes="heading" Text="审计摘要"/><ItemsControl ItemsSource="{Binding Audit}"/>
             </StackPanel></ScrollViewer>
           </TabItem>
-          <TabItem Header="Inbox">
+          <TabItem x:Name="InboxTab" Header="Inbox">
             <ListBox x:Name="InboxList" ItemsSource="{Binding Inbox}">
               <ListBox.ItemTemplate><DataTemplate x:DataType="local:A2AInteraction">
                 <Border Background="#292929" CornerRadius="8" Padding="10" Margin="0,3">
@@ -206,25 +206,25 @@
             </ListBox.ItemTemplate>
           </ListBox>
           </TabItem>
-          <TabItem Header="摘要" IsVisible="{Binding IsGroupSessionSelected}">
+          <TabItem x:Name="SummaryTab" Header="摘要" IsVisible="{Binding IsGroupSessionSelected}">
             <ScrollViewer>
               <StackPanel Spacing="5">
-                <TextBlock Classes="heading" Text="群共享摘要（每 10 轮自动压缩）"/>
-                <TextBlock Text="{Binding SelectedGroupSummary, FallbackValue=暂无摘要, TargetNullValue=暂无摘要}"
+                <TextBlock x:Name="GroupSummaryHeading" Classes="heading" Text="群共享摘要（每 10 轮自动压缩）"/>
+                <TextBlock x:Name="GroupSummaryText" Text="{Binding SelectedGroupSummary, FallbackValue=暂无摘要, TargetNullValue=暂无摘要}"
                            TextWrapping="Wrap" Foreground="#e2e2e2" FontSize="12.5"/>
-                <TextBlock Text="摘要由群主 Helper 自动生成并同步给所有成员，供各端推理使用；寒暄类闲聊不进入摘要。"
+                <TextBlock x:Name="SummaryDescription" Text="摘要由群主 Helper 自动生成并同步给所有成员，供各端推理使用；寒暄类闲聊不进入摘要。"
                            TextWrapping="Wrap" FontSize="11" Foreground="#6f7b88" Margin="0,8,0,0"/>
               </StackPanel>
             </ScrollViewer>
           </TabItem>
-          <TabItem Header="节点">
+          <TabItem x:Name="NodeTab" Header="节点">
             <StackPanel Spacing="7">
-              <TextBlock Classes="heading" Text="运行配置"/>
-              <TextBlock Text="{Binding DisplayName, StringFormat='名称：{0}'}"/>
-              <TextBlock Text="{Binding Enabled, StringFormat='启用：{0}'}"/>
-              <TextBlock Text="{Binding ListenPort, StringFormat='配置端口：{0}'}"/>
-              <TextBlock Text="{Binding ActualPort, StringFormat='实际端口：{0}'}"/>
-              <TextBlock Text="{Binding NodeId, StringFormat='NodeId：{0}'}" TextWrapping="Wrap"/>
+              <TextBlock x:Name="RuntimeHeading" Classes="heading" Text="运行配置"/>
+              <TextBlock x:Name="NodeNameText" Text="{Binding DisplayName, StringFormat='名称：{0}'}"/>
+              <TextBlock x:Name="NodeEnabledText" Text="{Binding Enabled, StringFormat='启用：{0}'}"/>
+              <TextBlock x:Name="NodeConfiguredPortText" Text="{Binding ListenPort, StringFormat='配置端口：{0}'}"/>
+              <TextBlock x:Name="NodeActualPortText" Text="{Binding ActualPort, StringFormat='实际端口：{0}'}"/>
+              <TextBlock x:Name="NodeIdText" Text="{Binding NodeId, StringFormat='NodeId：{0}'}" TextWrapping="Wrap"/>
               <TextBlock Text="高风险配对、任务与文件操作始终进入 Inbox，不会自动执行。" TextWrapping="Wrap" Foreground="#d29922" Margin="0,12,0,0"/>
             </StackPanel>
           </TabItem>

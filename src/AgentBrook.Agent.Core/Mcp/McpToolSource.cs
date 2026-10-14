@@ -41,7 +41,8 @@ public static class McpToolSource
                 {
                     log(Infrastructure.CoreStrings.L(
                         $"✖ MCP 服务器 {server.Name} 连接失败（已跳过）：未找到命令「{server.Command}」。请安装对应运行时（如 Node.js：https://nodejs.org）或将安装目录加入 PATH，然后重启应用。",
-                        $"✖ MCP server {server.Name} connection failed (skipped): command \"{server.Command}\" not found. Install the runtime (e.g. Node.js from https://nodejs.org) or add its dir to PATH, then restart."));
+                        $"✖ MCP server {server.Name} connection failed (skipped): command \"{server.Command}\" not found. Install the runtime (e.g. Node.js from https://nodejs.org) or add its dir to PATH, then restart.",
+                        $"✖ Koneksi server MCP {server.Name} gagal (dilewati): perintah \"{server.Command}\" tidak ditemukan. Instal runtime yang diperlukan (mis. Node.js dari https://nodejs.org) atau tambahkan direktorinya ke PATH, lalu mulai ulang."));
                     continue;
                 }
 
@@ -107,7 +108,8 @@ public static class McpToolSource
 
                 log(Infrastructure.CoreStrings.L(
                     $"⟳ 连接 MCP 服务器 {server.Name}（{transportCommand}）…",
-                    $"⟳ Connecting MCP server {server.Name} ({transportCommand})…"));
+                    $"⟳ Connecting MCP server {server.Name} ({transportCommand})…",
+                    $"⟳ Menghubungkan server MCP {server.Name} ({transportCommand})…"));
 
                 // 注意：transport 由 McpClient 管理生命周期，这里不能提前释放。
                 var transport = new StdioClientTransport(new StdioClientTransportOptions
@@ -131,7 +133,8 @@ public static class McpToolSource
 
                 log(Infrastructure.CoreStrings.L(
                     $"✔ MCP {server.Name} 已连接，{tools.Count} 个工具：{string.Join("、", tools.Select(t => t.Name))}",
-                    $"✔ MCP {server.Name} connected, {tools.Count} tools: {string.Join(", ", tools.Select(t => t.Name))}"));
+                    $"✔ MCP {server.Name} connected, {tools.Count} tools: {string.Join(", ", tools.Select(t => t.Name))}",
+                    $"✔ MCP {server.Name} terhubung, {tools.Count} alat: {string.Join(", ", tools.Select(t => t.Name))}"));
             }
             catch (Exception ex)
             {
@@ -139,7 +142,8 @@ public static class McpToolSource
                 var cmdLine = transportCommand + " " + string.Join(" ", transportArgs);
                 log(Infrastructure.CoreStrings.L(
                     $"✖ MCP 服务器 {server.Name} 连接失败（已跳过）：{ex.Message}\n启动命令：{cmdLine}\n工作目录：{workspace.Root}",
-                    $"✖ MCP server {server.Name} connection failed (skipped): {ex.Message}\nCommand: {cmdLine}\nWorking dir: {workspace.Root}"));
+                    $"✖ MCP server {server.Name} connection failed (skipped): {ex.Message}\nCommand: {cmdLine}\nWorking dir: {workspace.Root}",
+                    $"✖ Koneksi server MCP {server.Name} gagal (dilewati): {ex.Message}\nPerintah: {cmdLine}\nDirektori kerja: {workspace.Root}"));
             }
         }
 

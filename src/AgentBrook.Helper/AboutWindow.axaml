@@ -23,19 +23,19 @@
                  Foreground="#9a9a9a"
                  HorizontalAlignment="Center"/>
 
-      <TextBlock Text="AgentBrook 是跨平台 AI 助手，支持语音交互、多模型切换、工具调用与技能管理。"
+      <TextBlock x:Name="DescriptionText" Text="AgentBrook 是跨平台 AI 助手，支持语音交互、多模型切换、工具调用与技能管理。"
                  FontSize="13.5"
                  Foreground="#c8c8c8"
                  TextWrapping="Wrap"
                  TextAlignment="Center"
                  MaxWidth="320"/>
 
-      <Button Content="了解更多"
+      <Button x:Name="LearnMoreButton" Content="了解更多"
               Classes="primaryBtn"
               HorizontalAlignment="Center"
               Click="OnLearnMoreClick"/>
 
-      <Button Content="关闭"
+      <Button x:Name="CloseButton" Content="关闭"
               Classes="ghostBtn"
               HorizontalAlignment="Center"
               Click="OnCloseClick"/>

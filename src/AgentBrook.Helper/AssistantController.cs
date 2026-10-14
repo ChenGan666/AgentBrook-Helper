@@ -1,4 +1,4 @@
-using AgentBrook.Helper;
+﻿using AgentBrook.Helper;
 using AgentBrook.Agent;
 using AgentBrook.Agent.Configuration;
 using AgentBrook.Agent.Infrastructure;
@@ -121,8 +121,8 @@ public sealed class AssistantController : IBrookInteraction
                     autoClose: TimeSpan.FromMinutes(10),
                     actions: new[]
                     {
-                        (I18n.T("立即更新"), (Action)(() => approval.TrySetResult(true))),
-                        (I18n.T("稍后"), (Action)(() => approval.TrySetResult(false)))
+                        (I18n.T("ui.update.now"), (Action)(() => approval.TrySetResult(true))),
+                        (I18n.T("ui.later"), (Action)(() => approval.TrySetResult(false)))
                     },
                     openConversationOnClick: false);
             });
@@ -211,7 +211,7 @@ public sealed class AssistantController : IBrookInteraction
             // ── 环境自检与自动初始化（此前打包到新机器后静默失败，卡在"启动中"） ──
             // 1) 应用数据目录可写性探针（打包发布后 appRoot 落在用户数据目录；开发期为源码目录）
             StartupStatus?.Invoke(AgentBrook.Agent.Infrastructure.CoreStrings.L(
-                "检查应用环境…", "Checking environment…"));
+                "检查应用环境…", "Checking environment…", "Memeriksa lingkungan aplikasi…"));
             Directory.CreateDirectory(appRoot);
             var probe = Path.Combine(appRoot, ".write-probe");
             File.WriteAllText(probe, "ok");
@@ -263,7 +263,7 @@ public sealed class AssistantController : IBrookInteraction
             // 启动失败必须可见：此前异常被丢弃，应用会永远停在"启动中"
             Console.Error.WriteLine($"[init] ✖ 启动失败：{ex}");
             var msg = AgentBrook.Agent.Infrastructure.CoreStrings.L(
-                $"✖ 启动失败：{ex.Message}", $"✖ Startup failed: {ex.Message}");
+                $"✖ 启动失败：{ex.Message}", $"✖ Startup failed: {ex.Message}", $"✖ Startup gagal: {ex.Message}");
             StartupStatus?.Invoke(msg);
             EventRaised?.Invoke(new BrookEvent.ToolStarted("log:" + msg, null));
         }
@@ -394,7 +394,8 @@ public sealed class AssistantController : IBrookInteraction
             EventRaised?.Invoke(new BrookEvent.ToolStarted("log:" +
                 AgentBrook.Agent.Infrastructure.CoreStrings.L(
                     "⏹ 已按你的要求停止当前任务。",
-                    "⏹ Stopped the current task at your request."), null));
+                    "⏹ Stopped the current task at your request.",
+                    "⏹ Tugas dihentikan sesuai permintaan Anda."), null));
         }
         catch (Exception ex)
         {
@@ -509,6 +510,10 @@ public sealed class AssistantController : IBrookInteraction
         if (FullAccess)
         {
             return ApprovalDecision.Approve();
+        }
+        if (Bubble is null)
+        {
+            return ApprovalDecision.Reject("本机审批界面不可用");
         }
         var tcs = new TaskCompletionSource<ApprovalDecision>(TaskCreationOptions.RunContinuationsAsynchronously);
         RaiseRemoteApproval(tcs, toolName, argumentsJson);
@@ -641,3 +646,4 @@ public sealed class AssistantController : IBrookInteraction
         tcs.Task.ContinueWith(_ => reg.Dispose(), TaskScheduler.Default);
     }
 }
+

@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Text.Json;
 using AgentBrook.Agent;
 using AgentBrook.A2A.Core.Peers;
@@ -163,13 +163,25 @@ public sealed class GroupAutoTalkProcessor
                 autoClose: TimeSpan.FromSeconds(8),
                 actions: new[]
                 {
-                    (I18n.T("查看"), (Action)(() => approval.TrySetResult(true)))
+                    (I18n.T("ui.view"), (Action)(() => approval.TrySetResult(true)))
                 },
                 openConversationOnClick: false);
             _ = approval.Task.ContinueWith(_ =>
                 Avalonia.Threading.Dispatcher.UIThread.Post(() => App.ShowA2AWindow()),
                 TaskScheduler.Default);
         });
+    }
+
+    private async Task PublishGroupStatusAsync(A2AExtensionController c, A2ASession session, string message)
+    {
+        try
+        {
+            await c.SendGroupMessageAsync(session, message, auto: true);
+        }
+        catch (Exception ex)
+        {
+            Trace($"群状态消息发送失败：{ex.Message}");
+        }
     }
 
     /// <summary>自动交流回合：每群串行；出队后闸门复检（排队期间态势可能已变），单轮 LLM 生成回复。</summary>
@@ -204,10 +216,26 @@ public sealed class GroupAutoTalkProcessor
                 Reasoning = new ReasoningOptions { Effort = ReasoningEffort.None },
                 Instructions = $"""
                     你是群组「{session.Name ?? session.SessionId[..Math.Min(8, session.SessionId.Length)]}」中的 Helper「{selfName}」（成员：{members}）。
+
+                    # 主 Agent 能力与技能上下文
+                    以下内容是本机主 Agent 当前生效的能力边界、技能索引、MCP 目录及工具使用规则。群组自动交流使用独立会话，但能力必须与主 Agent 一致；需要天气、报告、数据查询等技能时，先按技能索引调用 load_skill，再按照技能说明执行，不要因为当前群会话没有历史记录就声称没有该能力。
+                    {_assistant.Agent!.Instructions}
+
+                    {_assistant.Agent!.CapabilityInstructions}
+
+                    # 本轮群聊任务
                     这是一个群聊自动应答回合：群内成员在消息中 @ 了你（或 @全部 点名全群）。基于下方群上下文给出简短、实质性的回复。
 
                     {context}
-                    你拥有的工具与能力同主对话完全一致；涉及高风险操作时，本机用户会收到审批请求，批准后你才能继续执行。
+
+                    # 工具与技能执行纪律（必须遵守）
+                    - 群成员 @ 你的请求就是交给你在本机执行的任务，不要把任务转回群里，也不要在没有检查工具和技能前声称没有能力。
+                    - 需要天气、报告、数据查询或其他专用能力时，先调用 load_skill 加载匹配技能，再按技能说明执行；不要仅凭记忆回答。
+                    - 需要文件、命令、MCP 或其他工具时，直接调用对应工具；高风险工具会触发本机审批，等待审批期间不要结束回合。
+                    - 工具执行失败时，说明真实失败原因和可行替代方案；只有确认工具、技能和数据源都不可用后，才能说明无法完成。
+                    - 你拥有的工具与能力同主对话完全一致；涉及高风险操作时，本机用户会收到审批请求，批准后你才能继续执行。
+                    - 本回合禁止调用 a2a_group_send、a2a_send_message、a2a_send_all 或其他主动发送 A2A 消息的工具；群组处理器会统一把你的最终文本发送一次，避免重复回复。
+                    - 不要输出“已发送到群里”“Data confirmed. Sending to the group”等发送过程说明，只输出最终结果正文。
 
                     # 回复纪律（防无休止交流，必须遵守）
                     - 第一行直接输出将作为群消息发送的正文（简体中文，2-4 句为宜），不要输出内部思考或工具语法
@@ -302,8 +330,9 @@ public sealed class GroupAutoTalkProcessor
                         }
                         else
                         {
-                            _assistant.PublishRemoteActivity(BrookRunState.AwaitingApproval, call?.Name);
-                            decision = await _assistant.GetRemoteApprovalAsync(call?.Name ?? request.ToolCall.CallId, argsJson, timeoutCts.Token);
+                            var approvalTool = call?.Name ?? request.ToolCall.CallId;
+                            _assistant.PublishRemoteActivity(BrookRunState.AwaitingApproval, approvalTool);
+                            decision = await _assistant.GetRemoteApprovalAsync(approvalTool, argsJson, timeoutCts.Token);
                             if (decision.Approved)
                             {
                                 approvedCallsThisTurn.Add(callKey);
@@ -344,7 +373,8 @@ public sealed class GroupAutoTalkProcessor
         }
         catch (Exception ex)
         {
-            Trace($"自动应答失败：{ex.Message}");
+            Trace($"自动应答失败：{ex}");
+            await PublishGroupStatusAsync(c, session, I18n.T("ui.operation.failed.value", ex.Message));
         }
         finally
         {
@@ -643,3 +673,4 @@ public sealed class GroupAutoTalkProcessor
         }
     }
 }
+

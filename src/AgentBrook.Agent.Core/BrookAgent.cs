@@ -130,6 +130,12 @@ public sealed class BrookAgent : IAsyncDisposable
     /// </summary>
     public IReadOnlyList<Microsoft.Extensions.AI.AITool> ToolSet => _tools;
 
+    /// <summary>主 Agent 当前生效的基础指令（含个性化提示和回复语言规则）。</summary>
+    public string Instructions => _config.Agent.Instructions;
+
+    /// <summary>主 Agent 当前生效的能力上下文（技能摘要、MCP 目录、委派/团队/A2A 指令）。</summary>
+    public string CapabilityInstructions => _skillInstructions;
+
     public IReadOnlyList<ToolInfo> ToolCatalog { get; }
     public IReadOnlyList<SkillInfo> Skills => _skills;
     public SkillStore SkillStore => _skillStore;
@@ -341,7 +347,8 @@ public sealed class BrookAgent : IAsyncDisposable
 
         log(CoreStrings.L(
             $"就绪。直接可用工具 {tools.Count} 个，MCP {mcpCount} 个已按需调度（mcp_call 调用）｜技能 {skills.Count} 个",
-            $"Ready. {tools.Count} direct tools, {mcpCount} MCP tools gated on demand (mcp_call) | skills {skills.Count}"));
+            $"Ready. {tools.Count} direct tools, {mcpCount} MCP tools gated on demand (mcp_call) | skills {skills.Count}",
+            $"Siap. {tools.Count} alat langsung, {mcpCount} alat MCP sesuai permintaan (mcp_call) | {skills.Count} skill"));
         var brook = new BrookAgent(config, workspace, chatClient, interaction, mcpConnections, memory, skills, toolCatalog, agent, session);
         brookRef = brook;
         brook._tools = tools;
@@ -433,12 +440,15 @@ public sealed class BrookAgent : IAsyncDisposable
         }
 
         // 2) 交流语言：整句强制替换（清除任何历史变形，且不留"除非用户…"的跟随漏洞）
-        var langRule = newLang == "en"
-            ? "5. Always reply in English, regardless of the language the user writes in. Do not mirror the user's language."
-            : "5. 始终用中文回复，无论用户使用什么语言书写，都不要跟随用户的语言。";
+        var langRule = newLang switch
+        {
+            "en" => "5. Always reply in English, regardless of the language the user writes in. Do not mirror the user's language.",
+            "id" => "5. Always reply in Bahasa Indonesia, regardless of the language the user writes in. Do not mirror the user's language.",
+            _ => "5. 始终用中文回复，无论用户使用什么语言书写，都不要跟随用户的语言。",
+        };
         instructions = System.Text.RegularExpressions.Regex.Replace(
             instructions,
-            @"5\.\s*用(中文|英文)与用户交流（除非用户使用其他语言）。|5\.\s*Always reply in English[^\n]*。",
+            @"5\.\s*用(中文|英文)与用户交流（除非用户使用其他语言）。|5\.\s*Always reply in (English|Bahasa Indonesia)[^\n]*。",
             langRule);
         _language = newLang;
         _config.Agent.ReplyLanguage = newLang;   // 供 AgentFactory 在重建时注入末尾语言强指令
@@ -1268,7 +1278,7 @@ public sealed class BrookAgent : IAsyncDisposable
             try
             {
                 var json = JsonDocument.Parse(File.ReadAllText(sessionFile)).RootElement;
-                log(CoreStrings.L("已从存档恢复上次会话。", "Session restored from archive."));
+                log(CoreStrings.L("已从存档恢复上次会话。", "Session restored from archive.", "Sesi dipulihkan dari arsip."));
                 var restored = await agent.DeserializeSessionAsync(json);
                 SanitizeOrphanApprovals(restored);
                 return restored;
@@ -1276,7 +1286,8 @@ public sealed class BrookAgent : IAsyncDisposable
             catch (Exception ex)
             {
                 log(CoreStrings.L($"会话存档无法恢复（{ex.Message}），已开启新会话。",
-                    $"Session archive unusable ({ex.Message}); started a new session."));
+                    $"Session archive unusable ({ex.Message}); started a new session.",
+                    $"Arsip sesi tidak dapat dipulihkan ({ex.Message}); sesi baru dimulai."));
             }
         }
         return await agent.CreateSessionAsync();
