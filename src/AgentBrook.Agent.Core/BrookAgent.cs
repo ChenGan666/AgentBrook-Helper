@@ -78,6 +78,12 @@ public sealed class BrookAgent : IAsyncDisposable
     public string CurrentProvider => _activeProvider.Name;
     public IReadOnlyList<ProviderConfig> Providers => _providers.Providers;
 
+    /// <summary>已连接的 MCP 服务器。</summary>
+    public IReadOnlyList<Mcp.McpConnection> McpConnections => _mcpConnections;
+
+    /// <summary>MCP 服务器配置。</summary>
+    public Configuration.McpOptions McpOptions => _config.MCP;
+
     /// <summary>
     /// 回合前置校验：活跃供应商的 Key 是否可用于发请求。
     /// 占位符 Key（含中文的"请填写"类）会导致 HTTP 头非 ASCII 的隐晦错误，这里转成可操作的明确提示。
@@ -109,6 +115,21 @@ public sealed class BrookAgent : IAsyncDisposable
     }
     public IReadOnlyList<string> Models => _activeProvider.Models;
     public string WorkspaceRoot => _workspace.Root;
+
+    /// <summary>为隔离执行上下文（子 Agent / A2A 远程消息处理）解析轻量模型客户端（分级用模）。</summary>
+    public (string Model, Microsoft.Extensions.AI.IChatClient Client) ResolveSubAgentClient() =>
+        _router.Resolve(ModelRouter.RoleSubAgent, _chatClient);
+
+    /// <summary>解析当前激活模型客户端：A2A 远程消息处理"等同用户下发指令"时使用主模型。</summary>
+    public (string Model, Microsoft.Extensions.AI.IChatClient Client) ResolveActiveClient() =>
+        (CurrentModel, _chatClient);
+
+    /// <summary>
+    /// 主对话的完整工具面（文件/shell/记忆/技能/MCP 等，已含审批包装）：
+    /// A2A 远程处理"等同用户下发指令"时复用，能力与主对话完全一致。
+    /// </summary>
+    public IReadOnlyList<Microsoft.Extensions.AI.AITool> ToolSet => _tools;
+
     public IReadOnlyList<ToolInfo> ToolCatalog { get; }
     public IReadOnlyList<SkillInfo> Skills => _skills;
     public SkillStore SkillStore => _skillStore;
@@ -130,7 +151,9 @@ public sealed class BrookAgent : IAsyncDisposable
         AppConfig config,
         string? appRootOverride = null,
         IBrookInteraction? interaction = null,
-        Action<string>? log = null)
+        Action<string>? log = null,
+        IEnumerable<Microsoft.Extensions.AI.AITool>? additionalTools = null,
+        string? additionalInstructions = null)
     {
         ArgumentNullException.ThrowIfNull(config);
         interaction ??= new NullInteraction();
@@ -264,6 +287,15 @@ public sealed class BrookAgent : IAsyncDisposable
         };
         toolCatalog.AddRange(tools.Select(t => new ToolInfo(t.Name, "内置")));
 
+        // 宿主注入的扩展工具（如 Helper 的 A2A 协作工具）：Agent.Core 不依赖扩展实现，
+        // 由宿主（引用双方）在创建时传入，依赖方向保持 Helper → Agent.Core + 扩展项目。
+        if (additionalTools is not null)
+        {
+            var extra = additionalTools.ToList();
+            tools.AddRange(extra);
+            toolCatalog.AddRange(extra.Select(t => new ToolInfo(t.Name, "宿主扩展")));
+        }
+
         // MCP 按需调度（渐进披露）：schema 不进系统提示词，主索引只列工具名+一句话用途，
         // 模型按需 mcp_tool_help 查参数、mcp_call 调用——固定 token 成本大幅下降
         var mcpGate = new Mcp.McpGateTools(mcpConnections, config.Agent.MaxToolOutputChars);
@@ -288,7 +320,8 @@ public sealed class BrookAgent : IAsyncDisposable
             t is AIFunction f && approvalSet.Contains(t.Name)
                 ? new ApprovalRequiredAIFunction(f)
                 : t)];;
-        var capabilityBlock = SkillRegistry.BuildSummary(skills) + "\n\n" + mcpGate.BuildCatalogBlock() + delegateInstructions + teamInstructions;
+        var capabilityBlock = SkillRegistry.BuildSummary(skills) + "\n\n" + mcpGate.BuildCatalogBlock() + delegateInstructions + teamInstructions
+            + (additionalInstructions is { Length: > 0 } ? "\n\n" + additionalInstructions : "");
         var agent = AgentFactory.CreateAgent(config, chatClient, tools, capabilityBlock, memory);
 
         // 启动即报告提示词规模（上下文效率度量：系统指令 + 工具 schema 字符数）

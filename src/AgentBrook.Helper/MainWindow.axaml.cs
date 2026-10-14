@@ -22,6 +22,28 @@ using Microsoft.Extensions.AI;
 
 namespace AgentBrook.Helper;
 
+public enum MentionItemKind
+{
+    Peer,   // 单个 Helper（@触发）
+    All,    // @全部
+    Group   // 群组（#触发）
+}
+
+/// <summary>提记弹层条目：InsertText 是写进输入框、供大模型识别路由的文本（@名称 / #群名）。</summary>
+public sealed record MentionItem(string Display, string InsertText, string Icon, MentionItemKind Kind, bool Online, string StatusText)
+{
+    public IBrush StatusBrush => Kind switch
+    {
+        MentionItemKind.All => AllBrush,
+        MentionItemKind.Group => GroupBrush,
+        _ => Online ? OnlineBrush : OfflineBrush
+    };
+    private static readonly IBrush OnlineBrush = new SolidColorBrush(Color.Parse("#34c759"));
+    private static readonly IBrush OfflineBrush = new SolidColorBrush(Color.Parse("#8e8e93"));
+    private static readonly IBrush AllBrush = new SolidColorBrush(Color.Parse("#af52de"));
+    private static readonly IBrush GroupBrush = new SolidColorBrush(Color.Parse("#5ac8fa"));
+}
+
 /// <summary>
 /// 对话窗体（默认隐藏，点击气泡打开；点关闭=隐藏）：
 /// 纯渲染层 —— 聊天流（含思考动态指示、Token 用量）、状态条与 HITL 卡片；
@@ -37,6 +59,12 @@ public partial class MainWindow : Window
     private TextBox? _inputBox;
     private Button? _sendBtn;
     private TextBlock? _tokenText;
+
+    // 输入框 @ 提记弹层：@ 后呼出已配对 Helper 列表（含 @全部），选中插入 LLM 可识别的 @名称
+    private Popup? _mentionPopup;
+    private ListBox? _mentionList;
+    private int _mentionStart = -1;     // 活跃 @ 记号在文本中的起点；-1 = 弹层未激活
+    private bool _suppressMentionUpdate; // 程序化改写输入框时暂停重算，避免闪烁
 
     private (long In, long Out, long Total)? _lastTurnUsage;
     private long _cumTokens;
@@ -63,6 +91,8 @@ public partial class MainWindow : Window
         _tokenText = this.FindControl<TextBlock>("TokenText");
 
         var newBtn = this.FindControl<Button>("NewBtn");
+        var a2aBtn = this.FindControl<Button>("A2ABtn");
+        if (a2aBtn is not null) a2aBtn.Click += (_, _) => App.ShowA2AWindow();
         var plusBtn = this.FindControl<Button>("PlusBtn");
         var fullAccessBtn = this.FindControl<Button>("FullAccessBtn");
         var modelChip = this.FindControl<Button>("ModelChip");
@@ -247,6 +277,22 @@ public partial class MainWindow : Window
         {
             _inputBox.AddHandler(InputElement.KeyDownEvent, OnInputKeyDownTunnel,
                 RoutingStrategies.Tunnel, handledEventsToo: true);
+
+            // @ 提记：文本/光标变化时重算弹层（输入、删改、光标移出记号都会收起）
+            _mentionPopup = this.FindControl<Popup>("MentionPopup");
+            _mentionList = this.FindControl<ListBox>("MentionList");
+            if (_mentionList is not null)
+            {
+                _mentionList.AddHandler(TappedEvent, OnMentionListTapped, RoutingStrategies.Bubble);
+            }
+            _inputBox.PropertyChanged += (_, e) =>
+            {
+                if (!_suppressMentionUpdate &&
+                    (e.Property == TextBox.TextProperty || e.Property == TextBox.CaretIndexProperty))
+                {
+                    UpdateMentionPopup();
+                }
+            };
         }
 
         // 窗口位置记忆：启动恢复上次位置/尺寸（带可见性校验），移动/缩放后防抖保存
@@ -530,7 +576,10 @@ public partial class MainWindow : Window
         var input = this.FindControl<TextBox>("InputBox");
         if (input is not null)
         {
-            input.Watermark = I18n.T("输入消息，回车发送");
+            var watermarkKey = OperatingSystem.IsMacOS()
+                ? "输入消息，Cmd+Enter 发送"
+                : "输入消息，Ctrl+Enter 发送";
+            input.Watermark = I18n.T(watermarkKey);
         }
         var fullText = this.FindControl<TextBlock>("FullAccessText");
         if (fullText is not null)
@@ -738,6 +787,14 @@ public partial class MainWindow : Window
     private BrookRunState _lastState = BrookRunState.Idle;
     private string? _lastDetail;
     private bool _lastWithModel;
+
+    /// <summary>从外部（如设置窗）向对话输入并发送一条消息。</summary>
+    public async Task SendMessageAsync(string text)
+    {
+        if (_inputBox is null) return;
+        _inputBox.Text = text;
+        await SendInputAsync();
+    }
 
     private async Task SendInputAsync()
     {
@@ -1006,9 +1063,10 @@ public partial class MainWindow : Window
             Foreground = new SolidColorBrush(Color.Parse("#8a8a8a")),
         });
         // 原始指令默认折叠：想看细节的用户再展开
+        Expander? argsExpander = null;
         if (!string.IsNullOrEmpty(argsJson))
         {
-            stack.Children.Add(new Expander
+            argsExpander = new Expander
             {
                 Classes = { "execGroup" },
                 Header = new TextBlock { Text = I18n.T("查看原始指令"), FontSize = 12.5, Foreground = new SolidColorBrush(Color.Parse("#9a9a9a")) },
@@ -1029,7 +1087,8 @@ public partial class MainWindow : Window
                 IsExpanded = false,
                 HorizontalAlignment = HorizontalAlignment.Stretch,
                 Margin = new Thickness(0, 2),
-            });
+            };
+            stack.Children.Add(argsExpander);
         }
 
         var reasonBox = new TextBox { Watermark = I18n.T("拒绝的话可以写理由（可选）"), FontSize = 13.5 };
@@ -1053,16 +1112,23 @@ public partial class MainWindow : Window
             full.IsEnabled = false;
             no.IsEnabled = false;
         }
-        ok.Click += (_, _) =>
+        void FoldCard()
         {
             LockButtons();
+            if (argsExpander is not null) argsExpander.IsExpanded = false;
+            reasonBox.IsVisible = false;
+            row.IsVisible = false;
+        }
+        ok.Click += (_, _) =>
+        {
+            FoldCard();
             card.Classes.Add("resolved");
             hint.Text = I18n.T("✔ 已批准");
             tcs.TrySetResult(ApprovalDecision.Approve());
         };
         full.Click += (_, _) =>
         {
-            LockButtons();
+            FoldCard();
             card.Classes.Add("resolved");
             hint.Text = I18n.T("已开启完全访问：本次及后续操作自动批准（重启后复位）");
             _controller.FullAccess = true;
@@ -1071,7 +1137,7 @@ public partial class MainWindow : Window
         };
         no.Click += (_, _) =>
         {
-            LockButtons();
+            FoldCard();
             var reason = reasonBox.Text?.Trim();
             card.Classes.Add("resolved");
             hint.Text = I18n.T("✘ 已拒绝{0}", string.IsNullOrEmpty(reason) ? "" : $"：{reason}");
@@ -1083,7 +1149,7 @@ public partial class MainWindow : Window
             if (!t.IsCanceled) return;
             Dispatcher.UIThread.Post(() =>
             {
-                LockButtons();
+                FoldCard();
                 card.Classes.Add("resolved");
                 hint.Text = I18n.T("⏹ 任务已停止，此操作未执行");
             });
@@ -1095,7 +1161,7 @@ public partial class MainWindow : Window
             var d = t.Result;
             Dispatcher.UIThread.Post(() =>
             {
-                LockButtons();
+                FoldCard();
                 card.Classes.Add("resolved");
                 hint.Text = d.Approved
                     ? I18n.T("✔ 已批准")
@@ -1728,7 +1794,7 @@ public partial class MainWindow : Window
 
     private void OnInputKeyDown(object? sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Enter)
+        if (e.Key == Key.Enter && (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta)))
         {
             e.Handled = true;
             _ = SendInputAsync();
@@ -1756,16 +1822,27 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 隧道阶段拦截 Ctrl/Cmd+V：必须用 Tunnel——输入框的类粘贴处理会把按键标记为已处理，
-    /// 冒泡阶段到达窗口时事件已被吞掉（图片粘贴此前从不触发的根因）。
+    /// 隧道阶段拦截 Ctrl/Cmd+V 与 Ctrl/Cmd+Enter：必须用 Tunnel——输入框的类处理（粘贴/回车换行）
+    /// 会把按键标记为已处理，冒泡阶段到达窗口时事件已被吞掉（图片粘贴和 Ctrl+Enter 发送失效的根因）。
     /// 剪贴板有图片/文件时异步转附件；纯文本时不做任何事，输入框默认粘贴不受影响。
     /// </summary>
     private void OnInputKeyDownTunnel(object? sender, KeyEventArgs e)
     {
+        // @ 提记弹层打开时优先消费导航/选中键（隧道阶段拦截，避免被输入框类处理如回车换行抢走）
+        if (_mentionPopup is { IsOpen: true } && HandleMentionKey(e))
+        {
+            e.Handled = true;
+            return;
+        }
         if (IsPasteCombo(e) && TryMarkPasteAttempt())
         {
             Console.Error.WriteLine("[paste-tunnel] 拦截到 Ctrl/Cmd+V");
             _ = TryAttachFromClipboardAsync();
+        }
+        else if (e.Key == Key.Enter && (e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta)))
+        {
+            e.Handled = true;
+            _ = SendInputAsync();
         }
     }
 
@@ -1781,6 +1858,176 @@ public partial class MainWindow : Window
         }
         _lastPasteAttempt = now;
         return true;
+    }
+
+    // ───────────────────────── 输入框 @ 提记（呼出已配对 Helper） ─────────────────────────
+    /// <summary>文本/光标变化后重算提记弹层：光标处于活跃 @/# 记号中则按触发符构建列表（@=Helper、#=群组）并弹出，否则收起。</summary>
+    private void UpdateMentionPopup()
+    {
+        if (_inputBox is null || _mentionPopup is null || _mentionList is null)
+        {
+            return;
+        }
+        var text = _inputBox.Text ?? "";
+        var caret = _inputBox.CaretIndex;
+        var start = FindMentionStart(text, caret);
+        if (start < 0)
+        {
+            CloseMentionPopup();
+            return;
+        }
+
+        var filter = text[(start + 1)..caret];
+        var items = new List<MentionItem>();
+        switch (text[start])
+        {
+            case '@':
+                if (filter.Length == 0 || "全部".StartsWith(filter, StringComparison.OrdinalIgnoreCase))
+                {
+                    items.Add(new MentionItem("@全部", "@全部", "📣", MentionItemKind.All, Online: true, "所有 Helper"));
+                }
+                items.AddRange(A2AAgentTools.GetMentionablePeers()
+                    .Where(p => p.Name.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(p => p.Online)
+                    .Select(p => new MentionItem($"@{p.Name}", $"@{p.Name}", p.Icon, MentionItemKind.Peer, p.Online, p.Online ? "在线" : "离线")));
+                break;
+
+            case '#':
+                items.AddRange(A2AAgentTools.GetGroups()
+                    .Where(g => g.Name.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                    .Select(g => new MentionItem($"#{g.Name}", $"#{g.Name}", "👥", MentionItemKind.Group, Online: true, $"{g.MemberCount} 人")));
+                break;
+        }
+        if (items.Count == 0)
+        {
+            CloseMentionPopup();
+            return;
+        }
+
+        _mentionStart = start;
+        _mentionList.ItemsSource = items;
+        _mentionList.SelectedIndex = 0;
+        if (!_mentionPopup.IsOpen)
+        {
+            _mentionPopup.Open();
+        }
+    }
+
+    /// <summary>从光标向前找活跃记号起点：@ 或 # 与光标之间无空白（限 25 字符）即有效，
+    /// 允许直接跟在文字后（如「你好@」）；找不到返回 -1。</summary>
+    private static int FindMentionStart(string text, int caret)
+    {
+        var end = Math.Min(caret, text.Length);
+        for (var i = end - 1; i >= 0; i--)
+        {
+            var ch = text[i];
+            if (ch is '@' or '#')
+            {
+                return end - i <= 25 ? i : -1;
+            }
+            if (char.IsWhiteSpace(ch))
+            {
+                return -1;
+            }
+        }
+        return -1;
+    }
+
+    /// <summary>弹层打开时的按键路由：↑↓ 选择、Enter/空格/Tab 选中插入、Esc 关闭。返回 true 表示已消费该键。</summary>
+    private bool HandleMentionKey(KeyEventArgs e)
+    {
+        if (_mentionList is null)
+        {
+            return false;
+        }
+        switch (e.Key)
+        {
+            case Key.Up:
+                MoveMentionSelection(-1);
+                return true;
+            case Key.Down:
+                MoveMentionSelection(1);
+                return true;
+            case Key.Enter when !e.KeyModifiers.HasFlag(KeyModifiers.Control)
+                             && !e.KeyModifiers.HasFlag(KeyModifiers.Meta):
+                AcceptMention();   // Ctrl/Cmd+Enter 不拦截：照常走发送
+                return true;
+            case Key.Space or Key.Tab:
+                AcceptMention();
+                return true;
+            case Key.Escape:
+                CloseMentionPopup();
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private void MoveMentionSelection(int delta)
+    {
+        if (_mentionList is null || _mentionList.ItemCount == 0)
+        {
+            return;
+        }
+        var next = Math.Max(0, Math.Min(_mentionList.ItemCount - 1, _mentionList.SelectedIndex + delta));
+        _mentionList.SelectedIndex = next;
+        _mentionList.ScrollIntoView(next);
+    }
+
+    /// <summary>选中项写回输入框：替换活跃 @ 记号段为「@名称 」，光标落在其后，弹层收起。
+    /// 「@名称」正是系统提示词约定的大模型路由指令（a2a_send_message / a2a_send_all）。</summary>
+    private void AcceptMention()
+    {
+        if (_inputBox is null || _mentionList?.SelectedItem is not MentionItem item || _mentionStart < 0)
+        {
+            return;
+        }
+        var text = _inputBox.Text ?? "";
+        var caret = Math.Min(_inputBox.CaretIndex, text.Length);
+        var head = text[.._mentionStart] + item.InsertText + " ";
+        var tail = text[caret..];
+        _suppressMentionUpdate = true;
+        try
+        {
+            _inputBox.Text = head + tail;
+            _inputBox.CaretIndex = head.Length;
+        }
+        finally
+        {
+            _suppressMentionUpdate = false;
+        }
+        CloseMentionPopup();
+    }
+
+    private void CloseMentionPopup()
+    {
+        _mentionStart = -1;
+        if (_mentionPopup is { IsOpen: true })
+        {
+            _mentionPopup.Close();
+        }
+    }
+
+    /// <summary>点击弹层项直接选中并插入。</summary>
+    private void OnMentionListTapped(object? sender, TappedEventArgs e)
+    {
+        if (_mentionList is null || e.Source is not Visual visual)
+        {
+            return;
+        }
+        var el = visual;
+        while (el is not null && el is not ListBoxItem)
+        {
+            el = el.GetVisualParent();
+        }
+        if (el is ListBoxItem { DataContext: MentionItem item })
+        {
+            if (_mentionList.SelectedItem != item)
+            {
+                _mentionList.SelectedItem = item;
+            }
+            AcceptMention();
+        }
     }
 
     // ───────────────────────── 附件 ─────────────────────────

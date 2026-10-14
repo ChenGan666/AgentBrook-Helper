@@ -7,11 +7,15 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.AI;
+using AgentBrook.Helper.Update;
 
 /// <summary>
 /// 气泡 + 对话窗双宿主共享的智能体控制器：
 /// 持有 BrookAgent，负责回合执行、全局状态广播与 HITL 卡片路由（需要人工介入时自动弹出对话窗）。
 /// </summary>
+/// <summary>更新偏好（update-prefs.json）。</summary>
+internal sealed record UpdatePrefs(bool DailyCheck = true, bool AutoDownload = true);
+
 public sealed class AssistantController : IBrookInteraction
 {
     private MainWindow? _conversation;
@@ -46,6 +50,105 @@ public sealed class AssistantController : IBrookInteraction
     /// <summary>悬浮气泡宿主（审批/提问在对话窗非活动时的快捷提示面）。</summary>
     public BubbleWindow? Bubble { get; private set; }
     public void AttachBubble(BubbleWindow bubble) => Bubble = bubble;
+
+    private sealed record UpdateCheckState(string LastCheckDate);
+
+
+    /// <summary>
+    /// 启动时每日一次检查更新（当天已检查过则跳过，标记持久化于工作区 update-check.json）。
+    /// 发现新版本 → 气泡提醒（新版本号 + 更新说明）；用户点「立即更新」→ 打开设置窗口
+    /// 定位到版本更新区并自动开始更新。检查失败不影响主流程。
+    /// </summary>
+    public async Task CheckUpdateOnStartupAsync()
+    {
+        try
+        {
+            var prefs = UiPrefs.Load<UpdatePrefs>("update-prefs.json") ?? new UpdatePrefs();
+            if (!prefs.DailyCheck)
+            {
+                return;   // 用户关闭了每日自动检查更新
+            }
+            var state = UiPrefs.Load<UpdateCheckState>("update-check.json");
+            var today = DateTime.Now.ToString("yyyy-MM-dd");
+            if (state?.LastCheckDate == today)
+            {
+                return;   // 今天已检查过：每日仅首次启动检查
+            }
+            UiPrefs.Save("update-check.json", new UpdateCheckState(today));
+
+            // 等待助手就绪（最长 2 分钟）；超时放弃本轮，明天再查
+            var waited = TimeSpan.Zero;
+            while (!Ready && waited < TimeSpan.FromMinutes(2))
+            {
+                await Task.Delay(1000);
+                waited += TimeSpan.FromSeconds(1);
+            }
+            if (!Ready)
+            {
+                return;
+            }
+
+            var info = await AutoUpdater.CheckAsync();
+            if (info is null || !AutoUpdater.IsNewer(info.Version))
+            {
+                return;
+            }
+
+            var notes = string.IsNullOrWhiteSpace(info.ReleaseNotes) ? "" : $"：{info.ReleaseNotes.Trim()}";
+            if (notes.Length > 120)
+            {
+                notes = notes[..120] + "…";
+            }
+            var approval = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            // 等气泡出现（启动初期可能尚未创建，最长 30 秒）
+            var bubbleWait = TimeSpan.Zero;
+            while (Bubble is null && bubbleWait < TimeSpan.FromSeconds(30))
+            {
+                await Task.Delay(1000);
+                bubbleWait += TimeSpan.FromSeconds(1);
+            }
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                if (Bubble is null)
+                {
+                    approval.TrySetResult(true);   // 气泡缺失：降级为直接打开设置更新
+                    return;
+                }
+                Bubble.ShowToast(
+                    $"发现新版本 {info.Version}{notes}",
+                    "#4a9eff",
+                    autoClose: TimeSpan.FromMinutes(10),
+                    actions: new[]
+                    {
+                        (I18n.T("立即更新"), (Action)(() => approval.TrySetResult(true))),
+                        (I18n.T("稍后"), (Action)(() => approval.TrySetResult(false)))
+                    },
+                    openConversationOnClick: false);
+            });
+            if (await approval.Task)
+            {
+                OpenSettingsForUpdate(info, prefs.AutoDownload);
+            }
+        }
+        catch
+        {
+            // 更新检查/提醒失败不影响主流程
+        }
+    }
+
+    /// <summary>打开设置窗口，定位到版本更新区并自动开始更新（气泡"立即更新"入口）。</summary>
+    internal void OpenSettingsForUpdate(UpdateInfo info, bool autoStart = true)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            var settings = new ModelSettingsWindow();
+            settings.Show();
+            settings.Activate();
+            _ = settings.StartUpdateFlowAsync(info, autoStart);
+        });
+    }
+
     public void AttachLifetime(IClassicDesktopStyleApplicationLifetime lifetime) => _lifetime = lifetime;
 
     public MainWindow Conversation => _conversation ?? throw new InvalidOperationException("对话窗未创建");
@@ -130,6 +233,9 @@ public sealed class AssistantController : IBrookInteraction
             }
             Console.Error.WriteLine($"[init] {DateTime.Now:HH:mm:ss.fff} config+workspace ok");
 
+            // A2A 协作工具（晚绑定 App.A2A：组合根先创建 Controller 再创建 A2A 宿主）
+            var a2aTools = new A2AAgentTools(() => App.A2A?.Controller);
+
             Agent = await BrookAgent.CreateAsync(config, appRoot, interaction: this,
                 log: line =>
                 {
@@ -140,7 +246,9 @@ public sealed class AssistantController : IBrookInteraction
                         // 失败必须在对话区可见（用户需要知道哪里坏了）；成功路径保持安静
                         EventRaised?.Invoke(new BrookEvent.ToolStarted("log:" + line, null));
                     }
-                });
+                },
+                additionalTools: a2aTools.BuildTools(),
+                additionalInstructions: A2AAgentTools.Instructions);
 
             Agent.SessionTitleChanged += _ => SessionsChanged?.Invoke();   // 自动命名等标题变化 → UI 刷新
 
@@ -367,6 +475,59 @@ public sealed class AssistantController : IBrookInteraction
 
     private void RaiseState(BrookRunState state, string? detail) =>
         Dispatcher.UIThread.Post(() => StateChanged?.Invoke(state, detail));
+
+    /// <summary>
+    /// A2A 远程自主处理的专用状态通道（用户补充要求：主会话界面只有用户使用，
+    /// 被调用过程不得出现在主会话；气泡延用原有旋转状态给出反馈）。
+    /// 只有 BubbleWindow 订阅这两个事件；MainWindow/执行过程面板不订阅。
+    /// </summary>
+    public event Action<BrookRunState, string?>? RemoteStateChanged;
+
+    public event Action<AgentBrook.Agent.BrookEvent>? RemoteEventRaised;
+
+    public void PublishRemoteActivity(BrookRunState state, string? detail) =>
+        Dispatcher.UIThread.Post(() => RemoteStateChanged?.Invoke(state, detail));
+
+    /// <summary>远程工具开始：气泡轨道添加图标（与本地 ToolStarted/ToolCompleted 按名字配对移除）。</summary>
+    public void PublishRemoteToolStarted(string toolName) =>
+        Dispatcher.UIThread.Post(() => RemoteEventRaised?.Invoke(new AgentBrook.Agent.BrookEvent.ToolStarted(toolName, null)));
+
+    /// <summary>远程工具完成：移除对应轨道图标。</summary>
+    public void PublishRemoteToolCompleted(string toolName) =>
+        Dispatcher.UIThread.Post(() => RemoteEventRaised?.Invoke(new AgentBrook.Agent.BrookEvent.ToolCompleted(toolName, null)));
+
+    /// <summary>远程回合结束：兜底清空全部轨道图标（本地 TurnCompleted 同语义）。</summary>
+    public void PublishRemoteTurnCompleted() =>
+        Dispatcher.UIThread.Post(() => RemoteEventRaised?.Invoke(new AgentBrook.Agent.BrookEvent.TurnCompleted()));
+
+    /// <summary>
+    /// 远程处理的工具审批：与本地审批同策略（FullAccess/RequireApprovalTools），
+    /// 但呈现走气泡 toast + 远程状态（不进主会话卡片）。
+    /// </summary>
+    public async Task<ApprovalDecision> GetRemoteApprovalAsync(string toolName, string? argumentsJson, CancellationToken cancellationToken = default)
+    {
+        if (FullAccess)
+        {
+            return ApprovalDecision.Approve();
+        }
+        var tcs = new TaskCompletionSource<ApprovalDecision>(TaskCreationOptions.RunContinuationsAsynchronously);
+        RaiseRemoteApproval(tcs, toolName, argumentsJson);
+        return await tcs.Task.WaitAsync(TimeSpan.FromMinutes(8), cancellationToken);
+    }
+
+    private void RaiseRemoteApproval(TaskCompletionSource<ApprovalDecision> tcs, string toolName, string? argsJson)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            RemoteStateChanged?.Invoke(BrookRunState.AwaitingApproval, toolName);
+            var summary = Conversation?.SummarizeApprovalPublic(toolName, argsJson) ?? toolName;
+            Bubble?.ShowRemoteApprovalToast(summary, tcs);
+            if (AssistantIdentity.NotifySoundOn)
+            {
+                NotifySound.Play(AssistantIdentity.NotifySoundId);
+            }
+        });
+    }
 
     // ───────────────────────── HITL：需要人工时自动弹出对话窗 ─────────────────────────
     /// <summary>完全访问模式：所有需审批的操作自动通过（会话内有效，重启后复位）。</summary>

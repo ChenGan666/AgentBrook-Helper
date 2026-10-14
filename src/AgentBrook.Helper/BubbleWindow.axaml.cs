@@ -67,6 +67,8 @@ public partial class BubbleWindow : Window
         DragDrop.AddDropHandler(this, OnDrop);
 
         _controller.StateChanged += OnStateChanged;
+        _controller.RemoteStateChanged += (state, detail) => Dispatcher.UIThread.Post(() => SetState(state, detail));
+        _controller.RemoteEventRaised += OnControllerEvent;   // 远程工具调用同样进轨道图标
         _controller.ReadyChanged += () => Dispatcher.UIThread.Post(
             () => SetState(BrookRunState.Idle, null));
         _controller.EventRaised += OnControllerEvent;   // 工具/子Agent 轨道图标的数据源
@@ -75,7 +77,11 @@ public partial class BubbleWindow : Window
         {
             PlaceBubble();
             ApplyIdentityUi();
-            Dispatcher.UIThread.Post(UpdateClickThroughRegion, DispatcherPriority.Background);
+            Dispatcher.UIThread.Post(() =>
+            {
+                UpdateWindowLayoutMode();
+                UpdateClickThroughRegion();
+            }, DispatcherPriority.Background);
         };   // Opened 在 Show 后确定触发
 
         ScalingChanged += (_, _) =>
@@ -160,6 +166,7 @@ public partial class BubbleWindow : Window
         _orbit.Add(new OrbitItem(tool, chip));
         _orbitLayer.Children.Add(chip);
         LayoutOrbit();
+        UpdateWindowLayoutMode();   // 有轨道时退出紧凑模式；必须在入列之后调用——退出判定基于"轨道非空"，放前面首个图标会拿到空轨道而留在紧凑窗口，轨道图标被窗口边缘裁剪
         StartOrbitTimer();
     }
 
@@ -175,6 +182,7 @@ public partial class BubbleWindow : Window
         LayoutOrbit();
         StopOrbitTimerIfEmpty();
         _ = FadeOutAndRemove(item.Chip, _orbitLayer);
+        UpdateWindowLayoutMode();   // 轨道清空后可回到紧凑模式
     }
 
     /// <summary>渐隐动画（320ms 透明度 1→0）结束后把芯片从轨道画布移除。
@@ -218,6 +226,7 @@ public partial class BubbleWindow : Window
         {
             _ = FadeOutAndRemove(chip, _orbitLayer);   // 回合结束同样渐隐收场
         }
+        UpdateWindowLayoutMode();   // 轨道清空后可回到紧凑模式
     }
 
     /// <summary>按启动顺序绕圆排布：相位 0 时第一个在正上方，后续顺时针均分。</summary>
@@ -353,8 +362,12 @@ public partial class BubbleWindow : Window
             };
             timer.Start();
         }
-        // 布局完成后再更新一次命中区域，确保新提示卡被纳入可点击范围
-        Dispatcher.UIThread.Post(UpdateClickThroughRegion, DispatcherPriority.Background);
+        // 布局完成后再更新窗口模式与命中区域，确保新提示卡被纳入可点击范围
+        Dispatcher.UIThread.Post(() =>
+        {
+            UpdateWindowLayoutMode();
+            UpdateClickThroughRegion();
+        }, DispatcherPriority.Background);
     }
 
     private void RemoveToast(Border card)
@@ -363,7 +376,11 @@ public partial class BubbleWindow : Window
         // 强制重新测量并收缩窗口，避免卡片移除后仍残留透明命中区
         _toastPanel.InvalidateMeasure();
         this.InvalidateMeasure();
-        Dispatcher.UIThread.Post(UpdateClickThroughRegion, DispatcherPriority.Background);
+        Dispatcher.UIThread.Post(() =>
+        {
+            UpdateWindowLayoutMode();
+            UpdateClickThroughRegion();
+        }, DispatcherPriority.Background);
     }
 
     /// <summary>审批快捷卡：不拉起对话窗，直接在气泡上批准/拒绝（对话流中的卡片状态会同步）。</summary>
@@ -373,7 +390,47 @@ public partial class BubbleWindow : Window
         ShowToast(summary, "#ffb340", autoClose: null,
         [
             (I18n.T("批准"), () => tcs.TrySetResult(ApprovalDecision.Approve())),
+            (I18n.T("完全访问"), () =>
+            {
+                _controller.FullAccess = true;   // 与审批卡"完全访问"同逻辑：本次及后续自动批准，重启复位
+                tcs.TrySetResult(ApprovalDecision.Approve());
+            }),
             (I18n.T("拒绝"), () => tcs.TrySetResult(ApprovalDecision.Reject())),
+        ]);
+    }
+
+    /// <summary>A2A 远程工具审批卡：批准 / 完全访问 / 拒绝（与本地审批同逻辑）。</summary>
+    public void ShowRemoteApprovalToast(string summary, TaskCompletionSource<ApprovalDecision> tcs)
+    {
+        ShowToast(summary, "#ffb340", autoClose: null,
+        [
+            (I18n.T("批准"), () => tcs.TrySetResult(ApprovalDecision.Approve())),
+            (I18n.T("完全访问"), () =>
+            {
+                _controller.FullAccess = true;
+                tcs.TrySetResult(ApprovalDecision.Approve());
+            }),
+            (I18n.T("拒绝"), () => tcs.TrySetResult(ApprovalDecision.Reject("本机用户拒绝该操作"))),
+        ]);
+    }
+
+    /// <summary>A2A 远程工具审批卡：气泡上直接批准/拒绝（远程处理不进主会话）。</summary>
+    public void ShowApprovalToast(string summary, TaskCompletionSource<bool> tcs)
+    {
+        ShowToast(summary, "#ffb340", autoClose: null,
+        [
+            (I18n.T("批准"), () => tcs.TrySetResult(true)),
+            (I18n.T("拒绝"), () => tcs.TrySetResult(false)),
+        ]);
+    }
+
+    /// <summary>A2A 配对确认卡：气泡上直接同意/拒绝（展示对方名称、图标与两端一致的验证码）。</summary>
+    public void ShowPairingToast(string peerDisplayName, string peerIcon, string shortCode, TaskCompletionSource<bool> tcs)
+    {
+        ShowToast($"{peerIcon} {peerDisplayName} 请求配对 · 验证码 {shortCode}", "#ffb340", autoClose: null,
+        [
+            (I18n.T("同意"), () => tcs.TrySetResult(true)),
+            (I18n.T("拒绝"), () => tcs.TrySetResult(false)),
         ]);
     }
 
@@ -425,7 +482,18 @@ public partial class BubbleWindow : Window
     /// <summary>把当前气泡位置写入偏好（拖动结束/退出时调用）。</summary>
     private void SavePosition()
     {
-        UiPrefs.Save("bubble-pos.json", new BubblePos(Position.X, Position.Y));
+        var x = Position.X;
+        var y = Position.Y;
+        if (OperatingSystem.IsMacOS() && _compactMode)
+        {
+            // 把紧凑窗口位置转换为等效的非紧凑窗口位置，保持 PlaceBubble 兼容
+            var scale = RenderScaling;
+            const double dxDip = (240.0 - 96.0) / 2.0 - (120.0 - 96.0) / 2.0;   // 60
+            const double dyDip = 24.0 - 12.0;                                   // 12
+            x -= (int)(dxDip * scale);
+            y -= (int)(dyDip * scale);
+        }
+        UiPrefs.Save("bubble-pos.json", new BubblePos(x, y));
     }
 
     // ───────────────────────── 状态 → 动画 ─────────────────────────
@@ -434,8 +502,24 @@ public partial class BubbleWindow : Window
         Dispatcher.UIThread.Post(() => SetState(state, detail));
     }
 
+    private BrookRunState? _lastVisualState;
+
     private void SetState(BrookRunState state, string? detail)
     {
+        // 处理中的 Thinking/CallingTool 共用同一视觉：远程回合里两者高频交替，
+        // 每次都 SetLook+重启齿轮会造成"不断重置"的卡顿——同视觉重复通知直接忽略。
+        var visual = state switch
+        {
+            BrookRunState.Thinking or BrookRunState.CallingTool => BrookRunState.Thinking,
+            BrookRunState.AwaitingApproval => BrookRunState.AwaitingApproval,
+            BrookRunState.AwaitingUserAnswer => BrookRunState.AwaitingUserAnswer,
+            _ => BrookRunState.Idle,
+        };
+        if (_lastVisualState == visual && state is BrookRunState.Thinking or BrookRunState.CallingTool)
+        {
+            return;   // 已处于处理中视觉，无需重启动画
+        }
+        _lastVisualState = visual;
         switch (state)
         {
             case BrookRunState.Thinking:
@@ -459,6 +543,59 @@ public partial class BubbleWindow : Window
                 SetLook(iconKey: "Icon.Sparkle", glow: "#4a9eff", bodyTop: "#6bb9ff", bodyBottom: "#2f7bff", ring: false);
                 StopGearSpin();
                 break;
+        }
+        UpdateWindowLayoutMode();
+    }
+
+    // ───────────────────────── macOS 紧凑模式：Idle 时窗口缩小到气泡大小 ─────────────────────────
+    private bool _compactMode;   // macOS 专用：当前是否处于气泡大小的紧凑窗口
+
+    /// <summary>
+    /// macOS 透明窗口没有 SetWindowRgn，Idle 且没有轨道/提示卡时把窗口缩小到气泡区域，
+    /// 避免 240×120 的矩形透明区拦截桌面点击并造成视觉占用。
+    /// 位置补偿保证切换前后气泡在屏幕上的位置不变。
+    /// </summary>
+    private void UpdateWindowLayoutMode()
+    {
+        if (!OperatingSystem.IsMacOS()) return;
+        var needCompact = _toastPanel.Children.Count == 0 && _orbit.Count == 0;
+        if (needCompact == _compactMode || !IsVisible) return;
+
+        var scale = RenderScaling;
+        const double compactSize = 120.0;
+        const double normalWidth = 240.0;
+        const double bubbleSize = 96.0;
+        // 非紧凑：气泡偏移 (72,24)；紧凑：气泡偏移 (12,12)
+        const double dxDip = (normalWidth - bubbleSize) / 2.0 - (compactSize - bubbleSize) / 2.0;
+        const double dyDip = 24.0 - 12.0;
+
+        var root = this.FindControl<Panel>("Root")!;
+        var orbit = this.FindControl<Canvas>("OrbitLayer")!;
+        if (needCompact)
+        {
+            // 左右边距必须对称：控件是 HorizontalAlignment=Center，非对称边距会把气泡中心
+            // 推到 (66,66) 而非下方位置补偿假设的 (60,60)，导致切模式时气泡跳动、贴边图标多裁 6px
+            root.Margin = new Thickness(12, 12, 12, 12);
+            orbit.Margin = new Thickness(12, 12, 12, 12);
+            Position = new PixelPoint(
+                Position.X + (int)(dxDip * scale),
+                Position.Y + (int)(dyDip * scale));
+            Width = compactSize;
+            Height = compactSize;
+            SizeToContent = SizeToContent.Manual;
+            _compactMode = true;
+        }
+        else
+        {
+            root.Margin = new Thickness(0, 24, 0, 0);
+            orbit.Margin = new Thickness(0, 24, 0, 0);
+            Position = new PixelPoint(
+                Position.X - (int)(dxDip * scale),
+                Position.Y - (int)(dyDip * scale));
+            Width = normalWidth;
+            ClearValue(HeightProperty);
+            SizeToContent = SizeToContent.Height;
+            _compactMode = false;
         }
     }
 

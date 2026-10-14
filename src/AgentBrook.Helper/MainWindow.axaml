@@ -1,5 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="using:AgentBrook.Helper"
         x:Class="AgentBrook.Helper.MainWindow"
         RequestedThemeVariant="Dark"
         Title="Brook 助手"
@@ -207,6 +208,7 @@
                 BorderBrush="#333333" BorderThickness="0,0,0,1">
             <DockPanel>
                 <StackPanel Orientation="Horizontal" Spacing="4" DockPanel.Dock="Right" VerticalAlignment="Center">
+                    <Button x:Name="A2ABtn" Classes="toolChip" Content="A2A" ToolTip.Tip="打开 A2A 协作会话"/>
                     <Button x:Name="NewBtn" Classes="iconBtn" ToolTip.Tip="开启新对话">
                         <PathIcon Data="{StaticResource Icon.Compose}" Width="16" Height="16"/>
                     </Button>
@@ -247,10 +249,10 @@
                             HorizontalAlignment="Left" Margin="0,0,0,4">
                         <TextBlock x:Name="QueueText" FontSize="12" Foreground="#d29922"/>
                     </Border>
-                    <TextBox Grid.Row="1" x:Name="InputBox" Classes="plainInput" Watermark="输入消息，回车发送"
+                    <TextBox Grid.Row="1" x:Name="InputBox" Classes="plainInput" Watermark="输入消息，@ 选 Helper、# 选群组，Ctrl+Enter 发送"
                              FontSize="14.5" Foreground="#e6e6e6" Background="Transparent"
-                             BorderThickness="0" MinHeight="40" Padding="4,6"
-                             TextWrapping="Wrap" AcceptsReturn="False" KeyDown="OnInputKeyDown"/>
+                             BorderThickness="0" MinHeight="40" MaxHeight="200" Padding="4,6"
+                             TextWrapping="Wrap" AcceptsReturn="True" KeyDown="OnInputKeyDown"/>
                     <Grid Grid.Row="2" ColumnDefinitions="Auto,Auto,*,Auto,Auto" ColumnSpacing="4">
                         <Button Grid.Column="0" x:Name="PlusBtn" Classes="toolChip" ToolTip.Tip="添加附件（或直接粘贴图片）">
                             <PathIcon Data="{StaticResource Icon.Plus}" Width="16" Height="16"/>
@@ -279,6 +281,47 @@
                 </Grid>
             </Border>
         </Border>
+
+        <!-- @ 提记弹层：输入框上方列出 @全部 与已配对 Helper（含在线/离线状态），
+             ↑↓ 选择、Enter/空格/点击 选中插入 @名称，Esc 关闭 -->
+        <Popup x:Name="MentionPopup" PlacementTarget="{Binding #InputBox}" Placement="Top"
+               IsLightDismissEnabled="False" HorizontalOffset="4">
+            <Border Background="#2b2b2b" BorderBrush="#3f3f3f" BorderThickness="1" CornerRadius="10"
+                    Padding="4" MinWidth="250" MaxWidth="330" Margin="0,0,0,6"
+                    BoxShadow="0 6 18 #55000000">
+                <ListBox x:Name="MentionList" MaxHeight="236" Background="Transparent"
+                         BorderThickness="0" Padding="2">
+                    <ListBox.Styles>
+                        <Style Selector="ListBoxItem">
+                            <Setter Property="Background" Value="Transparent"/>
+                            <Setter Property="MinHeight" Value="34"/>
+                            <Setter Property="Padding" Value="10,5"/>
+                            <Setter Property="CornerRadius" Value="7"/>
+                        </Style>
+                        <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
+                            <Setter Property="Background" Value="#26ffffff"/>
+                        </Style>
+                        <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+                            <Setter Property="Background" Value="#3d6bb9ff"/>
+                        </Style>
+                    </ListBox.Styles>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="local:MentionItem">
+                            <Panel>
+                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding Icon}" FontSize="15" VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding Display}" FontSize="13.5" Foreground="#e6e6e6" VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="5" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                    <Ellipse Width="7" Height="7" Fill="{Binding StatusBrush}"/>
+                                    <TextBlock Text="{Binding StatusText}" FontSize="11" Foreground="#9a9a9a" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Panel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Border>
+        </Popup>
 
     </Grid>
 </Window>

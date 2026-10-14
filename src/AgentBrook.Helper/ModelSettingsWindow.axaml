@@ -139,6 +139,13 @@
                             <TextBlock x:Name="NavSkillsText" Text="Skill管理"/>
                         </StackPanel>
                     </RadioButton>
+                    <TextBlock x:Name="NavGroupSystem" Text="系统" Classes="navGroup"/>
+                    <RadioButton x:Name="NavEnvironment" Classes="navItem" GroupName="nav">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <PathIcon Data="{StaticResource Icon.Shield}" Width="15" Height="15"/>
+                            <TextBlock x:Name="NavEnvironmentText" Text="环境检测"/>
+                        </StackPanel>
+                    </RadioButton>
                 </StackPanel>
             </ScrollViewer>
         </Border>
@@ -166,8 +173,14 @@
 
                 <Separator Margin="0,14,0,10" Background="#333333"/>
                 <TextBlock x:Name="LabelAssistantName" Text="助手名字" Classes="formLabel"/>
-                <TextBox x:Name="PersonalNameBox" Watermark="Brook" FontSize="14" MaxWidth="380"
-                         HorizontalAlignment="Left"/>
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Button x:Name="HelperIconPickerButton" Width="52" Height="40" FontSize="22"
+                            Content="🤖" HorizontalAlignment="Left"
+                            ToolTip.Tip="选择 Helper 图标（显示在对方 PEERS 列表中）"/>
+                    <TextBox x:Name="PersonalNameBox" Watermark="Brook" FontSize="14" MaxWidth="380"
+                             VerticalAlignment="Center"/>
+                </StackPanel>
+                <TextBlock x:Name="LabelHelperIconHint" Text="图标选择：点击左侧图标更换（显示在对方 Helper 的列表中）" FontSize="11.5" Foreground="#888888"/>
                 <TextBlock x:Name="LabelReplyLang" Text="交流语言（影响模型回复语言）" Classes="formLabel"/>
                 <ComboBox x:Name="LanguageBox" FontSize="13.5" Width="160" HorizontalAlignment="Left" SelectedIndex="0">
                     <ComboBoxItem Content="中文" Tag="zh"/>
@@ -202,13 +215,50 @@
                 <StackPanel Orientation="Horizontal" Spacing="10">
                     <ToggleSwitch x:Name="NotifySoundSwitch" MinWidth="0" OnContent="" OffContent=""/>
                     <ComboBox x:Name="NotifySoundBox" FontSize="13" Width="120" VerticalAlignment="Center">
-                        <ComboBoxItem Content="叮" Tag="ding"/>
-                        <ComboBoxItem Content="玻璃" Tag="glass"/>
-                        <ComboBoxItem Content="和弦" Tag="hero"/>
+                        <ComboBoxItem x:Name="NotifySoundDing" Content="叮" Tag="ding"/>
+                        <ComboBoxItem x:Name="NotifySoundGlass" Content="玻璃" Tag="glass"/>
+                        <ComboBoxItem x:Name="NotifySoundChord" Content="和弦" Tag="hero"/>
                     </ComboBox>
                     <TextBlock x:Name="NotifySoundDesc" Text="任务完成且对话窗不在前台时播放" FontSize="12.5"
                                Foreground="#8a8a8a" VerticalAlignment="Center"/>
                 </StackPanel>
+
+                <Separator Margin="0,16,0,8" Background="#333333"/>
+                <TextBlock x:Name="LabelCollab" Text="协作（A2A 局域网）" Classes="formLabel"/>
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <ToggleSwitch x:Name="A2aEnabledSwitch" MinWidth="0" OnContent="" OffContent=""/>
+                    <TextBlock x:Name="A2aEnabledDesc" Text="启用 A2A 局域网协作（关闭即断开发现/配对/群组，开启即时恢复）" FontSize="12.5"
+                               Foreground="#8a8a8a" VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,6,0,0">
+                    <ToggleSwitch x:Name="PeerAutoProcessSwitch" MinWidth="0" OnContent="" OffContent=""/>
+                    <TextBlock x:Name="PeerAutoProcessDesc" Text="自动处理其他 Helper 发来的点对点消息（关闭后仅存 Inbox 等人工处理）" FontSize="12.5"
+                               Foreground="#8a8a8a" VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,6,0,0">
+                    <ToggleSwitch x:Name="GroupAutoTalkDefaultSwitch" MinWidth="0" OnContent="" OffContent=""/>
+                    <TextBlock x:Name="GroupAutoTalkDesc" Text="群组自动交流（默认；可在 A2A 会话中心按群单独关闭）" FontSize="12.5"
+                               Foreground="#8a8a8a" VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,6,0,0">
+                    <ToggleSwitch x:Name="ContextCompressSwitch" MinWidth="0" OnContent="" OffContent=""/>
+                    <TextBlock x:Name="ContextCompressDesc" Text="群上下文自动压缩，每" FontSize="12.5" Foreground="#8a8a8a" VerticalAlignment="Center"/>
+                    <TextBox x:Name="CompressRoundsBox" Width="46" FontSize="13"/>
+                    <TextBlock x:Name="CompressRoundsSuffix" Text="轮一次并同步全群" FontSize="12.5" Foreground="#8a8a8a" VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,6,0,0">
+                    <TextBlock x:Name="LabelGroupNotify" Text="群消息提醒" Classes="formLabel" VerticalAlignment="Center"/>
+                    <ComboBox x:Name="GroupNotifyBox" FontSize="13" Width="130" VerticalAlignment="Center"
+                              SelectedIndex="1">
+                        <ComboBoxItem x:Name="GroupNotifyOff" Content="关闭" Tag="off"/>
+                        <ComboBoxItem x:Name="GroupNotifyMention" Content="仅 @我" Tag="mention"/>
+                        <ComboBoxItem x:Name="GroupNotifyAll" Content="所有消息" Tag="all"/>
+                    </ComboBox>
+                    <TextBlock x:Name="GroupNotifyDesc" Text="群内有新消息时气泡提醒，点击打开 A2A 会话中心" FontSize="12"
+                               Foreground="#8a8a8a" VerticalAlignment="Center"/>
+                </StackPanel>
+                <TextBlock x:Name="CollabHint" Text="" FontSize="12" Foreground="#8a8a8a"
+                           TextWrapping="Wrap" Margin="0,4,0,0"/>
 
                 <Separator Margin="0,16,0,8" Background="#333333"/>
                 <TextBlock x:Name="LabelUpdate" Text="版本更新" Classes="formLabel"/>
@@ -225,8 +275,20 @@
                     <Button x:Name="CheckUpdateBtn" Classes="ghostBtn" Content="检查更新"/>
                     <Button x:Name="UpgradeBtn" Classes="primaryBtn" Content="立即升级" IsVisible="False"/>
                 </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="14" Margin="0,6,0,0">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <ToggleSwitch x:Name="DailyUpdateCheckSwitch" MinWidth="0" OnContent="" OffContent=""/>
+                        <TextBlock x:Name="DailyUpdateCheckDesc" Text="每日首次启动自动检查更新" FontSize="12.5" Foreground="#8a8a8a" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <ToggleSwitch x:Name="AutoDownloadUpdateSwitch" MinWidth="0" OnContent="" OffContent=""/>
+                        <TextBlock x:Name="AutoDownloadUpdateDesc" Text="提醒后自动下载并安装" FontSize="12.5" Foreground="#8a8a8a" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </StackPanel>
                 <TextBlock x:Name="UpdateHint" Text="" FontSize="12" Foreground="#8a8a8a"
                            TextWrapping="Wrap" Margin="0,4,0,0"/>
+                <Button x:Name="UpdateDownloadLinkBtn" Classes="ghostBtn" Content="在浏览器中打开下载链接"
+                        IsVisible="False" HorizontalAlignment="Left" Margin="0,4,0,0"/>
                 <StackPanel x:Name="UpdateProgressPanel" Orientation="Horizontal" Spacing="10" IsVisible="False"
                             Margin="0,4,0,0">
                     <ProgressBar x:Name="UpdateProgressBar" Minimum="0" Maximum="100" Value="0" Width="200"
@@ -319,6 +381,27 @@
                     </ScrollViewer>
                 </Border>
                 <TextBlock x:Name="SkillsHint" Text="" FontSize="12.5" Foreground="#8a8a8a"
+                           TextWrapping="Wrap" Margin="0,6,0,0"/>
+            </StackPanel>
+
+            <!-- 环境检测 -->
+            <StackPanel x:Name="PageEnvironment" IsVisible="False" Spacing="8">
+                <TextBlock x:Name="EnvironmentTitle" Text="环境检测" Classes="pageTitle"/>
+                <TextBlock x:Name="EnvironmentDesc" Text="检查系统环境是否满足 AgentBrook Helper 正常运行。"
+                           Classes="pageDesc" Margin="0,2,0,8" TextWrapping="Wrap"/>
+                <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,0,0,8">
+                    <Button x:Name="CheckEnvironmentBtn" Classes="primaryBtn" Content="重新检测"/>
+                    <Button x:Name="RepairAllBtn" Classes="ghostBtn" Content="一键修复"/>
+                </StackPanel>
+                <TextBlock x:Name="EnvironmentSummary" Text="" FontSize="12.5" Foreground="#8a8a8a"
+                           TextWrapping="Wrap" Margin="0,0,0,4"/>
+                <Border Background="#252525" CornerRadius="12" Padding="12"
+                        BorderBrush="#333333" BorderThickness="1">
+                    <ScrollViewer MaxHeight="440">
+                        <StackPanel x:Name="EnvironmentListPanel" Spacing="10"/>
+                    </ScrollViewer>
+                </Border>
+                <TextBlock x:Name="EnvironmentHint" Text="" FontSize="12" Foreground="#8a8a8a"
                            TextWrapping="Wrap" Margin="0,6,0,0"/>
             </StackPanel>
         </Panel>

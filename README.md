@@ -65,6 +65,14 @@ While a turn is running, the send button turns into a stop button (Esc works too
 
 The fixed token cost is deliberately kept low: MCP tool JSON Schemas are not loaded wholesale — the master index lists one line per tool, and the model calls them via `mcp_call` / inspects them via `mcp_tool_help` on demand. Heavy subtasks (research, long reports, bulk filing) can be delegated to a sub-agent with its own isolated context via `delegate_task`; only the conclusion returns to the main conversation. Sub-agents and session summarization run on the lightest model in your model list (tiered routing, configurable in appsettings). When history exceeds budget, older turns are condensed into a rolling summary injected at the head — long sessions and restarts stay lean.
 
+### Group sessions with multi-Helper auto-talk
+
+The A2A session center discovers Helper nodes on your LAN, pairs with them, and puts them into group chats. Creating a group is one click — join is automatic and the group name is generated for you. Type `@` in the send box to pick a member for a directed answer, `@all` for the whole room — every Helper answers from the shared group context. Six anti-loop gates (consecutive auto-reply cap, ping-pong detection, rate quota, busy yielding, cooldown, idempotency) keep discussions from running forever; long threads are compressed every 10 rounds into a structured summary (conclusions, artifacts, process — minus the small talk) that is synced to the whole room, keeping token cost bounded. Offline members catch up automatically when they return; the group owner can rename, close, or remove members inline; a dedicated Summary tab shows the shared summary anytime. Helpers inside a group carry the same tool surface as the main conversation — high-risk actions still require local approval.
+
+### Automatic self-update
+
+On the first launch of each day the Helper checks for a new version (once per day). When one is found, the bubble announces it (version + release notes); clicking "Update now" jumps to Settings, locates the version section, and runs the download-and-apply flow by itself. Both the daily check and auto-download can be turned off in Settings.
+
 ## How it works
 
 Three hosts share one core. `AgentBrook.Agent.Core` exposes `BrookAgent.RunAsync`, which yields a stream of events — status changes, text deltas, tool started/completed, token usage, turn completion. Hosts consume that stream and render it however they like.
@@ -76,6 +84,8 @@ Anything requiring a human is routed through the `IBrookInteraction` interface: 
 | `AgentBrook.Agent.Core` | Agent, tools, memory, skills, MCP, team orchestration |
 | `AgentBrook.Agent` | Console host (REPL) |
 | `AgentBrook.Helper` | Desktop host (Avalonia) — packaged on macOS, runs as-is on Windows |
+| `AgentBrook.A2A.Core` | A2A protocol core: Peer/Group sessions, event ledger, node identity |
+| `AgentBrook.A2A.Transport` | A2A transport: signed auth, pairing, discovery, message & group sync |
 
 ## Quick start
 
@@ -99,8 +109,8 @@ dotnet build AgentBrook.slnx
 
 ```bash
 cd AgentBrook.Helper
-./build-mac-app.sh        # produces and signs macos/AgentBrook.Helper.app
-open macos/AgentBrook.Helper.app
+./build-mac-app.sh        # publishes, signs and packages per-platform .app + zip
+open ../publish/updated/osx-arm64/AgentBrook.Helper-*.app
 ```
 
 **Windows** — run the desktop client directly (no packaging script involved):
@@ -164,6 +174,7 @@ Around 55 tools ship with the core, grouped by surface:
 | **MCP** | `mcp_list_servers` `mcp_add_server` — plus every tool the configured servers expose |
 | **Team** | `start_project` `spawn_worker` `assign_task` `send_message` `broadcast_to_workers` `list_workers` `read_shared` `check_messages` |
 | **Interaction** | `ask_user` — suspends the turn for a real answer |
+| **A2A** | `a2a_status` `a2a_list_peers` `a2a_pair` `a2a_send_message` `a2a_send_all` `a2a_send_file` `a2a_create_group` `a2a_group_send` `a2a_group_rename` `a2a_list_groups` — LAN discovery, pairing, messaging, files and groups |
 
 ## Repository layout
 
@@ -171,6 +182,7 @@ Around 55 tools ship with the core, grouped by surface:
 AgentBrook-Helper/
 ├── AgentBrook.slnx                  ← solution
 ├── assets/                          ← README visuals
+├── tools/GroupSyncRepro/            ← headless regression harness for the group pipeline
 └── src/
     ├── AgentBrook.Agent.Core/       ← the agent (shared by every host)
     │   ├── BrookAgent.cs            ← event-driven agent; RunAsync yields BrookEvent
@@ -178,14 +190,21 @@ AgentBrook-Helper/
     │   ├── Infrastructure/          ← workspace sandbox, agent factory, provider settings
     │   ├── Memory/  Skills/  Tools/  Team/  Mcp/  Configuration/
     ├── AgentBrook.Agent/            ← console host (REPL)
+    ├── AgentBrook.A2A.Core/         ← A2A protocol core (Peer/Group sessions, events, identity)
+    ├── AgentBrook.A2A.Transport/    ← A2A transport (signing, pairing, discovery, group sync)
     └── AgentBrook.Helper/           ← desktop host (Avalonia); macOS + Windows
         ├── BubbleWindow.axaml(.cs)  ← floating bubble: animation, drag, position memory
-        ├── MainWindow.axaml(.cs)    ← chat window: stream, status bar, approval cards
-        ├── ModelSettingsWindow      ← settings: general / appearance / models
+        ├── MainWindow.axaml(.cs)    ← chat window: stream, @-mentions, status bar, approval cards
+        ├── A2ASessionWindow(.cs)    ← A2A session center: peers, groups, event stream, summary
+        ├── GroupAutoTalkProcessor.cs← group auto-talk: @-trigger, anti-loop gates, context
+        ├── A2AExtensionController.cs← A2A host + business glue (groups, discovery, update)
+        ├── A2AAgentTools.cs         ← a2a_* tools exposed to the model
+        ├── ModelSettingsWindow      ← settings: general / models / collaboration / update
         ├── MarkdownView.cs          ← hand-written Markdown → Avalonia renderer
         ├── AssistantController.cs   ← controller shared by bubble and window
         ├── UiPrefs.cs               ← UI preference persistence
-        └── build-mac-app.sh         ← macOS .app packaging and signing
+        ├── Update/AutoUpdater.cs    ← daily update check, chunked download, apply & restart
+        └── build-mac-app.sh / publish-helper.ps1 ← macOS / Windows packaging
 ```
 
 ## Documentation

@@ -10,6 +10,8 @@ $ErrorActionPreference = "Stop"
 $projectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $srcDir = Split-Path -Parent $projectDir
 $publishBase = Join-Path $srcDir "publish"
+# 最终产物根目录：src/publish/updated/<平台>/（文件名仅含版本号，整文件夹可直接拷贝到更新服务器）
+$finalRoot = Join-Path $publishBase "updated"
 $serviceDir = Join-Path $srcDir "AgentBrook.Service"
 $versionFile = Join-Path $projectDir "version.txt"
 
@@ -51,13 +53,17 @@ foreach ($rid in $runtimes) {
         Write-Host "  -> 已清除 appsettings.json 中的敏感信息"
     }
 
-    # 平台分发包：版本号 + rid
-    $distZipName = "AgentBrook.Helper-$version-$rid.zip"
-    $distZipPath = Join-Path $publishBase $distZipName
+    # 平台分发包：文件名仅含版本号，存于 updated/<平台>/ 文件夹内
+    $finalDir = Join-Path $finalRoot $rid
+    New-Item -ItemType Directory -Force -Path $finalDir | Out-Null
+    $distZipName = "AgentBrook.Helper-$version.zip"
+    $distZipPath = Join-Path $finalDir $distZipName
     Remove-Item $distZipPath -ErrorAction SilentlyContinue
     Compress-Archive -Path (Join-Path $outDir "*") -DestinationPath $distZipPath -Force
     Write-Host "  -> 分发包：$distZipPath"
 
+    # 更新说明随平台文件夹分发（服务器按目录读取 release-notes.txt 作为该版本更新说明）
+    Copy-Item (Join-Path $projectDir "release-notes.txt") (Join-Path $finalDir "release-notes.txt") -Force
     # 服务端更新目录：固定命名 AgentBrook.Helper-{version}.zip
     $updateDir = Join-Path $serviceDir "updates/$rid"
     New-Item -ItemType Directory -Force -Path $updateDir | Out-Null
@@ -65,6 +71,55 @@ foreach ($rid in $runtimes) {
     Copy-Item $distZipPath $serviceZipPath -Force
     Copy-Item (Join-Path $projectDir "release-notes.txt") (Join-Path $updateDir "release-notes.txt") -Force
     Write-Host "  -> 服务端更新包：$serviceZipPath"
+}
+
+# ── 构建安装程序（如果 Inno Setup 可用） ──
+$iscc = @(
+    "$env:ProgramFiles\Inno Setup 7\ISCC.exe",
+    "${env:ProgramFiles(x86)}\Inno Setup 7\ISCC.exe",
+    "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+    "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $iscc) {
+    $iscc = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
+}
+
+if ($iscc) {
+    Write-Host ""
+    Write-Host "==> 检测到 Inno Setup，开始构建安装程序..."
+    $issFile = Join-Path $projectDir "installer\setup.iss"
+    foreach ($rid in $runtimes) {
+        $archTag = $rid -replace '^win-', ''
+        $srcPublishDir = Join-Path $publishBase $rid
+        $installerOutputDir = Join-Path $finalRoot $rid   # 安装包与 zip 同入 updated/<平台>/
+        Write-Host "  -> 构建 $rid 安装包..."
+        & $iscc `
+            /DAppVersion=$version `
+            /DArch=$archTag `
+            "/DSourceDir=$srcPublishDir" `
+            "/DOutputDir=$installerOutputDir" `
+            /Q `
+            $issFile
+        if ($LASTEXITCODE -eq 0) {
+            $exeName = "AgentBrook.Helper-$version.exe"
+            $exePath = Join-Path $installerOutputDir $exeName
+            if (Test-Path $exePath) {
+                $sizeMB = [math]::Round((Get-Item $exePath).Length / 1MB, 1)
+                Write-Host "  -> 安装包：$exePath ($sizeMB MB)" -ForegroundColor Green
+                # 复制到服务端更新目录
+                $updateDir = Join-Path $serviceDir "updates/$rid"
+                New-Item -ItemType Directory -Force -Path $updateDir | Out-Null
+                Copy-Item $exePath (Join-Path $updateDir $exeName) -Force
+                Write-Host "  -> 服务端安装包：$updateDir\$exeName"
+            }
+        } else {
+            Write-Host "  ⚠ $rid 安装包构建失败（zip 包不受影响）" -ForegroundColor Yellow
+        }
+    }
+} else {
+    Write-Host ""
+    Write-Host "提示：未检测到 Inno Setup，跳过安装程序构建。" -ForegroundColor DarkGray
+    Write-Host "      如需构建安装程序，请安装 Inno Setup: https://jrsoftware.org/isdl.php" -ForegroundColor DarkGray
 }
 
 Write-Host ""

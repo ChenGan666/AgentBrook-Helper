@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Text.Json;
 
 namespace AgentBrook.Helper.Update;
 
@@ -39,18 +40,24 @@ internal static class AutoUpdater
     public static Version CurrentVersion =>
         Assembly.GetEntryAssembly()?.GetName().Version ?? new Version(1, 0, 0, 0);
 
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
     public static async Task<UpdateInfo?> CheckAsync(string? versionUrl = null)
     {
         var requestUrl = string.IsNullOrWhiteSpace(versionUrl) ? DefaultVersionUrl : versionUrl;
         try
         {
-            var dto = await Http.GetFromJsonAsync<VersionDto>(requestUrl).ConfigureAwait(false);
+            var dto = await Http.GetFromJsonAsync<VersionDto>(requestUrl, JsonOptions).ConfigureAwait(false);
             if (dto?.Version is null || !Version.TryParse(dto.Version, out var latest))
             {
                 return null;
             }
 
             var downloadUrl = ResolveDownloadUrl(requestUrl, dto.DownloadUrl);
+            Console.Error.WriteLine($"[update] resolved download url: {downloadUrl}");
 
             return new UpdateInfo(
                 latest,
@@ -70,22 +77,32 @@ internal static class AutoUpdater
 
     private static string ResolveDownloadUrl(string versionUrl, string? candidate)
     {
+        var versionUri = new Uri(versionUrl);
+        var defaultDownloadPath = $"/api/update/download?os={CurrentPlatform.Os}&arch={CurrentPlatform.Arch}";
+        var defaultAbsolute = new Uri(versionUri, defaultDownloadPath).AbsoluteUri;
+
         if (string.IsNullOrWhiteSpace(candidate))
         {
-            return DefaultDownloadUrl;
+            return defaultAbsolute;
         }
 
-        if (Uri.TryCreate(candidate, UriKind.Absolute, out _))
+        if (Uri.TryCreate(candidate, UriKind.Absolute, out var absolute))
         {
-            return candidate;
+            // 服务器误返回 file:// 等本地协议时无法下载，回退到默认 http 地址
+            if (absolute.Scheme == Uri.UriSchemeFile)
+            {
+                Console.Error.WriteLine($"[update] server returned file:// URL, falling back to {defaultAbsolute}");
+                return defaultAbsolute;
+            }
+            return absolute.AbsoluteUri;
         }
 
-        if (Uri.TryCreate(new Uri(versionUrl), candidate, out var combined))
+        if (Uri.TryCreate(versionUri, candidate, out var combined))
         {
             return combined.AbsoluteUri;
         }
 
-        return DefaultDownloadUrl;
+        return defaultAbsolute;
     }
 
     public static bool IsNewer(Version latest) => latest > CurrentVersion;
@@ -94,6 +111,18 @@ internal static class AutoUpdater
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(info.DownloadUrl) ||
+                !Uri.IsWellFormedUriString(info.DownloadUrl, UriKind.Absolute))
+            {
+                return $"下载地址无效：{info.DownloadUrl}";
+            }
+
+            var downloadUri = new Uri(info.DownloadUrl);
+            if (downloadUri.Scheme == Uri.UriSchemeFile)
+            {
+                return $"下载地址使用了不支持的 file 协议：{info.DownloadUrl}";
+            }
+
             var tempRoot = Path.Combine(Path.GetTempPath(), "AgentBrookUpdate", info.Version.ToString());
             Directory.CreateDirectory(tempRoot);
 
@@ -169,15 +198,58 @@ internal static class AutoUpdater
             }
             else
             {
+                // macOS：更新包是完整 .app bundle（含 Info.plist/_CodeSignature）。
+                // 只覆盖 Contents/MacOS 会毁掉 bundle 签名结构；且替换出的文件若带隔离属性
+                // （或包体签名校验不过），Gatekeeper 会判"已损坏或不完整"拒绝启动。
+                // 因此整包替换：旁路暂存 → 去隔离 → 重签 ad-hoc → 原子换入 → open 经
+                // LaunchServices 重启，失败可回滚旧版。
                 scriptContent = $$"""
                     #!/bin/bash
                     sleep 2
-                    echo "Updating files..."
-                    rm -rf "{{appDir}}"/*
-                    cp -R "{{extractDir}}"/* "{{appDir}}"/
-                    chmod -R +x "{{appDir}}"
+                    APP_DIR="{{appDir}}"
+                    BUNDLE="$(dirname "$(dirname "$APP_DIR")")"
+                    NEW_APP="$(find "{{extractDir}}" -maxdepth 1 -name "*.app" | head -n 1)"
+                    RELAUNCH="$APP_DIR/{{appName}}"
+
+                    echo "Updating..."
+                    if [ -n "$NEW_APP" ] && [ -d "$NEW_APP" ] && [ -d "$BUNDLE" ] && [[ "$BUNDLE" == *.app ]]; then
+                        PARENT="$(dirname "$BUNDLE")"
+                        STAGE="$PARENT/.AgentBrook.update.stage"
+                        BACKUP="$PARENT/.AgentBrook.update.backup"
+                        rm -rf "$STAGE" "$BACKUP"
+                        if ! cp -R "$NEW_APP" "$STAGE"; then
+                            echo "暂存新版本失败，更新中止"
+                            exit 1
+                        fi
+                        xattr -cr "$STAGE" 2>/dev/null
+                        chmod -R u+x "$STAGE/Contents/MacOS" 2>/dev/null
+                        codesign --force --deep --sign - "$STAGE" >/dev/null 2>&1
+                        if mv "$BUNDLE" "$BACKUP" && mv "$STAGE" "$BUNDLE"; then
+                            rm -rf "$BACKUP"
+                            RELAUNCH="$BUNDLE"
+                        else
+                            rm -rf "$STAGE"
+                            mv "$BACKUP" "$BUNDLE" 2>/dev/null
+                            echo "换入新版本失败，已保留原版本"
+                            exit 1
+                        fi
+                    else
+                        # 旧格式散文件包：退回覆盖 Contents/MacOS，同样去隔离 + 重签
+                        rm -rf "$APP_DIR"/*
+                        cp -R "{{extractDir}}"/* "$APP_DIR"/
+                        chmod -R +x "$APP_DIR" 2>/dev/null
+                        if [ -d "$BUNDLE" ] && [[ "$BUNDLE" == *.app ]]; then
+                            xattr -cr "$BUNDLE" 2>/dev/null
+                            codesign --force --deep --sign - "$BUNDLE" >/dev/null 2>&1
+                        fi
+                    fi
+
                     echo "Starting {{appName}}..."
-                    nohup "{{currentExe}}" >/dev/null 2>&1 &
+                    if [[ "$RELAUNCH" == *.app ]]; then
+                        open "$RELAUNCH" 2>/dev/null || nohup "$APP_DIR/{{appName}}" >/dev/null 2>&1 &
+                    else
+                        nohup "$RELAUNCH" >/dev/null 2>&1 &
+                    fi
                     exit
                     """;
             }
@@ -219,6 +291,10 @@ internal static class AutoUpdater
         if (totalSize <= 0)
         {
             return "无效的文件大小，无法分块下载。";
+        }
+        if (string.IsNullOrWhiteSpace(url) || !Uri.IsWellFormedUriString(url, UriKind.Absolute))
+        {
+            return $"下载地址无效：{url}";
         }
 
         try

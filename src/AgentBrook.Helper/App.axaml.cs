@@ -11,6 +11,32 @@ public partial class App : Application
 {
     /// <summary>全局共享的智能体控制器（气泡与对话窗共用）。</summary>
     public static AssistantController Controller { get; private set; } = null!;
+    public static A2AExtensionHost A2A { get; private set; } = null!;
+    private static A2ASessionWindow? _a2aWindow;
+
+    public static void ShowA2AWindow()
+    {
+        try
+        {
+            if (_a2aWindow is null)
+            {
+                _a2aWindow = new A2ASessionWindow();
+                _a2aWindow.Closed += (_, _) => _a2aWindow = null;
+            }
+
+            if (!_a2aWindow.IsVisible)
+            {
+                _a2aWindow.Show();
+            }
+
+            _a2aWindow.Activate();
+            _a2aWindow.Focus();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[a2a] ShowA2AWindow failed: {ex}");
+        }
+    }
 
     public override void Initialize()
     {
@@ -36,12 +62,22 @@ public partial class App : Application
 
             AssistantIdentity.Load();
             Controller = new AssistantController();
+            A2A = new A2AExtensionHost(Controller);
+            desktop.Exit += async (_, _) =>
+            {
+                try { await A2A.DisposeAsync(); }
+                catch (Exception ex) { Console.Error.WriteLine($"[a2a] shutdown failed: {ex}"); }
+            };
+            _ = A2A.StartAsync();
             var conversation = new MainWindow();
             Controller.AttachConversation(conversation);
             Controller.AttachLifetime(desktop);
             var bubble = new BubbleWindow();
             Controller.AttachBubble(bubble);
             desktop.MainWindow = bubble;
+
+            // 每日首次启动检查更新（发现新版本时气泡提醒，可一键转设置自动更新）
+            _ = Controller.CheckUpdateOnStartupAsync();
 
             // --fullaccess：完全访问模式启动（审批自动通过，测试钩子）
             if (desktop.Args is not null && desktop.Args.Contains("--fullaccess"))
@@ -69,6 +105,10 @@ public partial class App : Application
             if (desktop.Args is not null && desktop.Args.Contains("--show"))
             {
                 conversation.ShowFromBubble();
+            }
+            if (desktop.Args is not null && desktop.Args.Contains("--a2a-show"))
+            {
+                ShowA2AWindow();
             }
             if (desktop.Args is not null && desktop.Args.Contains("--langtest"))
             {

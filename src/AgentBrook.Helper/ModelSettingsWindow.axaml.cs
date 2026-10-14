@@ -1,10 +1,13 @@
 using AgentBrook.Agent.Infrastructure;
 using AgentBrook.Agent.Skills;
+using AgentBrook.Helper.EnvironmentCheck;
 using AgentBrook.Helper.Update;
 using Avalonia.Controls;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Media;
+using Avalonia.Threading;
+using System.Diagnostics;
 
 namespace AgentBrook.Helper;
 
@@ -31,6 +34,8 @@ public partial class ModelSettingsWindow : Window
     private bool _dirty;
     private TextBlock? _skillsHint;
     private UpdateInfo? _pendingUpdate;
+    private List<EnvironmentCheckResult> _environmentResults = new();
+    private Button? _repairAllBtn;
 
     public ModelSettingsWindow()
     {
@@ -42,6 +47,7 @@ public partial class ModelSettingsWindow : Window
 
         _skillsHint = this.FindControl<TextBlock>("SkillsHint");
         BuildSkillsList();
+        WireCollaborationAndUpdateSettings();
 
         var currentVersionText = this.FindControl<TextBlock>("CurrentVersionText");
         if (currentVersionText is not null)
@@ -52,6 +58,8 @@ public partial class ModelSettingsWindow : Window
         if (checkUpdateBtn is not null) checkUpdateBtn.Click += async (_, _) => await CheckUpdateAsync();
         var upgradeBtn = this.FindControl<Button>("UpgradeBtn");
         if (upgradeBtn is not null) upgradeBtn.Click += async (_, _) => await UpgradeAsync();
+        var downloadLinkBtn = this.FindControl<Button>("UpdateDownloadLinkBtn");
+        if (downloadLinkBtn is not null) downloadLinkBtn.Click += (_, _) => OpenDownloadLinkInBrowser();
         var updateUrlBox = this.FindControl<TextBox>("UpdateServiceUrlBox");
         if (updateUrlBox is not null) updateUrlBox.Text = LoadUpdateServiceUrl();
         var saveUpdateUrlBtn = this.FindControl<Button>("SaveUpdateUrlBtn");
@@ -163,6 +171,10 @@ public partial class ModelSettingsWindow : Window
         {
             if (NavSkills.IsChecked == true) ShowPage(PageSkills);
         };
+        NavEnvironment.IsCheckedChanged += (_, _) =>
+        {
+            if (NavEnvironment.IsChecked == true) ShowPage(PageEnvironment);
+        };
         ShowPage(PageGeneral);   // 与 NavGeneral 默认选中一致
         this.FindControl<Button>("SaveApplyBtn")!.Click += async (_, _) => await SaveAndApplyAsync();
         this.FindControl<Button>("CloseBtn")!.Click += (_, _) => Close();
@@ -176,6 +188,13 @@ public partial class ModelSettingsWindow : Window
         {
             box.TextChanged += (_, _) => _dirty = true;
         }
+
+        // 环境检测页
+        var checkEnvBtn = this.FindControl<Button>("CheckEnvironmentBtn");
+        _repairAllBtn = this.FindControl<Button>("RepairAllBtn");
+        if (_repairAllBtn is not null) _repairAllBtn.IsEnabled = false;
+        if (checkEnvBtn is not null) checkEnvBtn.Click += async (_, _) => await CheckEnvironmentAsync();
+        if (_repairAllBtn is not null) _repairAllBtn.Click += async (_, _) => await RepairAllAsync();
 
         Closed += (_, _) =>
         {
@@ -227,6 +246,85 @@ public partial class ModelSettingsWindow : Window
         }
     }
 
+    private string _selectedHelperIcon = "🤖";
+    private bool _helperIconUiBuilt;
+    private Flyout? _helperIconFlyout;
+
+    /// <summary>构建 Helper 图标选择弹层（设置页一次性初始化）。84 个预设图标，带滚动条。</summary>
+    private void BuildHelperIconPicker()
+    {
+        var button = this.FindControl<Button>("HelperIconPickerButton")!;
+        var wrap = new WrapPanel { MaxWidth = 268 };
+        string[] choices =
+        [
+            // 人物与角色
+            "🤖", "🧑‍🚀", "👩‍💻", "🧑‍💻", "🧑‍💼", "🛡️", "👨‍🎤", "🕵️", "🧙", "🦸", "🧚", "👻",
+            "🧛", "🧜", "🧝", "🧞", "🤴", "👸", "🥷", "🧑‍🎨", "🧑‍🔬", "🧑‍⚕️", "🧑‍🏫", "👮",
+            // 动物
+            "🦊", "🐱", "🐶", "🐼", "🦉", "🐙", "🦁", "🐯", "🐸", "🐵", "🐳", "🦋",
+            "🐝", "🦔", "🐧", "🦅", "🦇", "🐺", "🐗", "🦌", "🐨", "🐹", "🐰", "🐭",
+            // 奇幻与器物
+            "🦄", "🚀", "⭐", "💡", "🔧", "🎭", "👑", "🌈", "🎯", "⚡", "🌊", "🍀",
+            "🔮", "💎", "🔥", "🛰️", "📡", "🔭", "🧲", "🧩", "♟️", "🥇", "🏆", "🎖️",
+            // 自然与生活
+            "🌸", "🌻", "🌙", "☕", "🍵", "🍎", "🎧", "🎨", "🏔️", "🍀", "🎈", "🎁",
+            "🌴", "🌵", "🍁", "🍉", "🍇", "🥑", "🍩", "🧊", "🛸", "🧸", "🪐", "❄️",
+            // 扩展与符号
+            "🧠", "🫶", "👍", "🙌", "💫", "✨", "☸️", "☯️", "⚛️", "🧿", "🔴", "🟢",
+            "🔵", "🟣", "🟡", "⭕", "❤️", "💙", "💚", "🧡", "💜", "🖤", "🤍", "🩵"
+        ];
+        foreach (var icon in choices)
+        {
+            var choice = icon;
+            var btn = new Button
+            {
+                Content = choice,
+                Width = 44,
+                Height = 44,
+                FontSize = 20,
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(0),
+                HorizontalContentAlignment = Avalonia.Layout.HorizontalAlignment.Center,
+                VerticalContentAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                Background = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#333333")),
+                Foreground = Brushes.White,
+            };
+            btn.Click += (_, _) =>
+            {
+                _selectedHelperIcon = choice;
+                button.Content = choice;
+                _helperIconFlyout?.Hide();
+                _ = ApplyHelperIconAsync(choice);
+            };
+            wrap.Children.Add(btn);
+        }
+        // 弹层内容套滚动条：图标多时不撑破屏幕，滚轮直接滚动。
+        var scroll = new ScrollViewer
+        {
+            Content = wrap,
+            MaxHeight = 390,
+            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+            VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+        };
+        _helperIconFlyout = new Flyout { Content = scroll };
+        button.Flyout = _helperIconFlyout;   // 附加后点击按钮自动弹出
+    }
+
+    private async Task ApplyHelperIconAsync(string icon)
+    {
+        var controller = App.A2A?.Controller;
+        if (controller is null) return;
+        try
+        {
+            await controller.ApplyIconAsync(icon);
+            Hint(I18n.T("Helper 图标已更新：{0}（对端将在资料刷新后显示）", icon));
+        }
+        catch (Exception ex)
+        {
+            Hint(I18n.T("Helper 图标已保存；热更新失败（未启动或对端离线）：{0}", ex.Message));
+        }
+    }
+
     private void LoadPersonal()
     {
         var nameBox = this.FindControl<TextBox>("PersonalNameBox")!;
@@ -244,6 +342,16 @@ public partial class ModelSettingsWindow : Window
         };
         _selectedIcon = AssistantIdentity.BubbleIcon;
         BuildIconPicker();
+
+        // Helper 图标（A2A 对外展示）：读取当前配置并构建选择弹层（仅初始化一次）。
+        _selectedHelperIcon = App.A2A?.Controller.Config.Icon ?? "🤖";
+        var helperIconBtn = this.FindControl<Button>("HelperIconPickerButton")!;
+        helperIconBtn.Content = _selectedHelperIcon;
+        if (!_helperIconUiBuilt)
+        {
+            _helperIconUiBuilt = true;
+            BuildHelperIconPicker();
+        }
     }
 
     private async Task SavePersonalAsync()
@@ -258,6 +366,20 @@ public partial class ModelSettingsWindow : Window
         _uiLanguage = uiLang;
         var prompt = this.FindControl<TextBox>("CustomPromptBox")!.Text?.Trim() ?? "";
         AssistantIdentity.Apply(name, _selectedIcon, lang, prompt, _uiLanguage);
+
+        // 同步更新 A2A 对外显示名，使对方 Helper 的 Peers 列表也能看到新名称
+        try
+        {
+            var a2aController = App.A2A?.Controller;
+            if (a2aController is not null)
+            {
+                await a2aController.ApplyDisplayNameAsync(name);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[settings] 同步 A2A 显示名失败: {ex.Message}");
+        }
 
         // UI 立即刷新
         if (App.Current.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop
@@ -278,12 +400,17 @@ public partial class ModelSettingsWindow : Window
         }
     }
 
-    private void ShowPage(StackPanel page)
+    private void ShowPage(Control page)
     {
         PageGeneral.IsVisible = page == PageGeneral;
         PageAppearance.IsVisible = page == PageAppearance;
         PageModels.IsVisible = page == PageModels;
         PageSkills.IsVisible = page == PageSkills;
+        PageEnvironment.IsVisible = page == PageEnvironment;
+        if (page == PageEnvironment && _environmentResults.Count == 0)
+        {
+            _ = CheckEnvironmentAsync();
+        }
     }
 
     private void CenterOnScreen()
@@ -423,12 +550,123 @@ public partial class ModelSettingsWindow : Window
         Hint(I18n.T("地址已保存"));
     }
 
+    /// <summary>协作（A2A/群组）与更新偏好：加载配置并即时保存（改动即写配置文件，无需保存按钮）。</summary>
+    private void WireCollaborationAndUpdateSettings()
+    {
+        var a2a = App.A2A?.Controller;
+        var enabled = this.FindControl<ToggleSwitch>("A2aEnabledSwitch");
+        var peerAuto = this.FindControl<ToggleSwitch>("PeerAutoProcessSwitch");
+        var autoTalk = this.FindControl<ToggleSwitch>("GroupAutoTalkDefaultSwitch");
+        var compress = this.FindControl<ToggleSwitch>("ContextCompressSwitch");
+        var rounds = this.FindControl<TextBox>("CompressRoundsBox");
+        var notify = this.FindControl<ComboBox>("GroupNotifyBox");
+        var hint = this.FindControl<TextBlock>("CollabHint");
+        var daily = this.FindControl<ToggleSwitch>("DailyUpdateCheckSwitch");
+        var autoDownload = this.FindControl<ToggleSwitch>("AutoDownloadUpdateSwitch");
+        if (a2a is null || enabled is null || peerAuto is null || autoTalk is null
+            || compress is null || rounds is null || notify is null)
+        {
+            return;
+        }
+
+        enabled.IsChecked = a2a.Config.Enabled;
+        peerAuto.IsChecked = a2a.Config.AutoProcessPeerMessages;
+        autoTalk.IsChecked = a2a.Config.GroupAutoTalkDefault;
+        compress.IsChecked = a2a.Config.GroupContextCompress;
+        rounds.Text = Math.Max(3, a2a.Config.GroupCompressRounds).ToString();
+        notify.SelectedIndex = a2a.Config.GroupNotifyMode switch { "all" => 2, "off" => 0, _ => 1 };
+
+        var updatePrefs = UiPrefs.Load<UpdatePrefs>("update-prefs.json") ?? new UpdatePrefs();
+        if (daily is not null)
+        {
+            daily.IsChecked = updatePrefs.DailyCheck;
+            daily.IsCheckedChanged += (_, _) =>
+                UiPrefs.Save("update-prefs.json", new UpdatePrefs(daily.IsChecked == true, autoDownload?.IsChecked != false));
+        }
+        if (autoDownload is not null)
+        {
+            autoDownload.IsChecked = updatePrefs.AutoDownload;
+            autoDownload.IsCheckedChanged += (_, _) =>
+                UiPrefs.Save("update-prefs.json", new UpdatePrefs(daily?.IsChecked != false, autoDownload.IsChecked == true));
+        }
+
+        ShowCollabHint(hint, a2a.Config.Enabled ? I18n.T("A2A 协作已启用") : I18n.T("A2A 协作已关闭"));
+
+        enabled.IsCheckedChanged += async (_, _) =>
+        {
+            var on = enabled.IsChecked == true;
+            a2a.Config.Enabled = on;
+            a2a.SaveConfig();
+            ShowCollabHint(hint, on ? I18n.T("已启用，正在启动 A2A…") : I18n.T("已关闭，正在断开 A2A…"));
+            try
+            {
+                if (on)
+                {
+                    await a2a.StartAsync();
+                }
+                else
+                {
+                    await a2a.StopAsync();
+                }
+                ShowCollabHint(hint, on ? I18n.T("已启用，A2A 在线") : I18n.T("已关闭，A2A 已断开（重新勾选即可恢复）"));
+            }
+            catch (Exception ex)
+            {
+                ShowCollabHint(hint, I18n.T("操作失败：{0}", ex.Message));
+            }
+        };
+        peerAuto.IsCheckedChanged += (_, _) =>
+        {
+            a2a.Config.AutoProcessPeerMessages = peerAuto.IsChecked == true;
+            a2a.SaveConfig();
+        };
+        autoTalk.IsCheckedChanged += (_, _) =>
+        {
+            a2a.Config.GroupAutoTalkDefault = autoTalk.IsChecked == true;
+            a2a.SaveConfig();
+        };
+        compress.IsCheckedChanged += (_, _) =>
+        {
+            a2a.Config.GroupContextCompress = compress.IsChecked == true;
+            a2a.SaveConfig();
+        };
+        rounds.LostFocus += (_, _) =>
+        {
+            if (int.TryParse(rounds.Text, out var n))
+            {
+                a2a.Config.GroupCompressRounds = Math.Clamp(n, 3, 99);
+            }
+            rounds.Text = a2a.Config.GroupCompressRounds.ToString();
+            a2a.SaveConfig();
+        };
+        notify.SelectionChanged += (_, _) =>
+        {
+            a2a.Config.GroupNotifyMode = notify.SelectedIndex switch
+            {
+                0 => "off",
+                2 => "all",
+                _ => "mention"
+            };
+            a2a.SaveConfig();
+        };
+    }
+
+    private static void ShowCollabHint(TextBlock? hint, string message)
+        => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            if (hint is not null)
+            {
+                hint.Text = message;
+            }
+        });
+
     private async Task CheckUpdateAsync()
     {
         var updateHint = this.FindControl<TextBlock>("UpdateHint");
         var upgradeBtn = this.FindControl<Button>("UpgradeBtn");
         if (updateHint is not null) updateHint.Text = I18n.T("正在检查更新…");
         if (upgradeBtn is not null) upgradeBtn.IsVisible = false;
+        ShowDownloadLink(null);
         ShowUpdateDetails(null);
         _pendingUpdate = null;
 
@@ -474,9 +712,41 @@ public partial class ModelSettingsWindow : Window
         if (notesText is not null)
         {
             notesText.Text = string.IsNullOrWhiteSpace(info.ReleaseNotes)
-                ? I18n.T("无")
+                ? I18n.T("（发布方未提供本次更新的说明）")
                 : info.ReleaseNotes;
         }
+    }
+
+    /// <summary>外部入口（气泡"立即更新"提醒）：定位到版本更新区并自动开始更新流程。</summary>
+    internal async Task StartUpdateFlowAsync(UpdateInfo info, bool autoStart = true)
+    {
+        this.FindControl<TextBlock>("LabelUpdate")?.BringIntoView();   // 定位到版本更新区
+        _pendingUpdate = info;
+        var hint = this.FindControl<TextBlock>("UpdateHint");
+        var upgradeBtn = this.FindControl<Button>("UpgradeBtn");
+        if (upgradeBtn is not null)
+        {
+            upgradeBtn.IsVisible = true;
+        }
+        ShowUpdateDetails(info);
+        ShowDownloadLink(info.DownloadUrl);
+        if (!autoStart)
+        {
+            if (hint is not null)
+            {
+                hint.Text = I18n.T("发现新版本：{0}，点击「立即升级」开始更新。", info.Version);
+            }
+            return;
+        }
+        if (hint is not null)
+        {
+            hint.Text = I18n.T("发现新版本：{0}，正在自动更新…", info.Version);
+        }
+        if (upgradeBtn is not null)
+        {
+            upgradeBtn.IsVisible = false;
+        }
+        await UpgradeAsync();
     }
 
     private async Task UpgradeAsync()
@@ -506,6 +776,7 @@ public partial class ModelSettingsWindow : Window
         {
             if (updateHint is not null) updateHint.Text = I18n.T("升级失败：{0}", error);
             if (progressPanel is not null) progressPanel.IsVisible = false;
+            ShowDownloadLink(_pendingUpdate.DownloadUrl);
             return;
         }
 
@@ -513,6 +784,29 @@ public partial class ModelSettingsWindow : Window
         if (progressText is not null) progressText.Text = "100%";
         await Task.Delay(800);
         Environment.Exit(0);
+    }
+
+    private void ShowDownloadLink(string? url)
+    {
+        var downloadLinkBtn = this.FindControl<Button>("UpdateDownloadLinkBtn");
+        if (downloadLinkBtn is null) return;
+        downloadLinkBtn.IsVisible = !string.IsNullOrWhiteSpace(url);
+        ToolTip.SetTip(downloadLinkBtn, url ?? "");
+    }
+
+    private void OpenDownloadLinkInBrowser()
+    {
+        if (_pendingUpdate is null) return;
+        var url = _pendingUpdate.DownloadUrl;
+        if (string.IsNullOrWhiteSpace(url)) return;
+        try
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            Hint(I18n.T("无法打开浏览器：{0}", ex.Message));
+        }
     }
 
     /// <summary>按当前语言设置窗口标题与导航文案。</summary>
@@ -539,6 +833,10 @@ public partial class ModelSettingsWindow : Window
         if (na is not null) na.Text = I18n.T("外观");
         var nm = this.FindControl<TextBlock>("NavModelsText");
         if (nm is not null) nm.Text = I18n.T("模型设置");
+        var ngs = this.FindControl<TextBlock>("NavGroupSystem");
+        if (ngs is not null) ngs.Text = I18n.T("系统");
+        var nenv = this.FindControl<TextBlock>("NavEnvironmentText");
+        if (nenv is not null) nenv.Text = I18n.T("运行环境检测");
         var saveBtn = this.FindControl<Button>("SavePersonalBtn");
         if (saveBtn is not null) saveBtn.Content = I18n.T("保存常规设置");
         var promptBox2 = this.FindControl<TextBox>("CustomPromptBox");
@@ -632,20 +930,52 @@ public partial class ModelSettingsWindow : Window
         var currentVersionText = this.FindControl<TextBlock>("CurrentVersionText");
         if (currentVersionText is not null) currentVersionText.Text = I18n.T("当前版本：{0}", AutoUpdater.CurrentVersion.ToString());
         SetT("LabelUpdateServiceUrl", "更新服务地址");
+        SetT("LabelCollab", "协作（A2A 局域网）");
+        SetT("A2aEnabledDesc", "启用 A2A 局域网协作（关闭即断开发现/配对/群组，开启即时恢复）");
+        SetT("PeerAutoProcessDesc", "自动处理其他 Helper 发来的点对点消息（关闭后仅存 Inbox 等人工处理）");
+        SetT("GroupAutoTalkDesc", "群组自动交流（默认；可在 A2A 会话中心按群单独关闭）");
+        SetT("ContextCompressDesc", "群上下文自动压缩，每");
+        SetT("CompressRoundsSuffix", "轮一次并同步全群");
+        SetT("LabelGroupNotify", "群消息提醒");
+        SetT("GroupNotifyDesc", "群内有新消息时气泡提醒，点击打开 A2A 会话中心");
+        SetT("GroupNotifyOff", "关闭");
+        SetT("GroupNotifyMention", "仅 @我");
+        SetT("GroupNotifyAll", "所有消息");
+        SetT("DailyUpdateCheckDesc", "每日首次启动自动检查更新");
+        SetT("AutoDownloadUpdateDesc", "提醒后自动下载并安装");
+        // ComboBox 下拉项不是 TextBlock，SetT 覆盖不到，逐项设置 Content
+        var notifyOff = this.FindControl<ComboBoxItem>("GroupNotifyOff");
+        if (notifyOff is not null) notifyOff.Content = I18n.T("关闭");
+        var notifyMention = this.FindControl<ComboBoxItem>("GroupNotifyMention");
+        if (notifyMention is not null) notifyMention.Content = I18n.T("仅 @我");
+        var notifyAll = this.FindControl<ComboBoxItem>("GroupNotifyAll");
+        if (notifyAll is not null) notifyAll.Content = I18n.T("所有消息");
+        var soundDing = this.FindControl<ComboBoxItem>("NotifySoundDing");
+        if (soundDing is not null) soundDing.Content = I18n.T("叮");
+        var soundGlass = this.FindControl<ComboBoxItem>("NotifySoundGlass");
+        if (soundGlass is not null) soundGlass.Content = I18n.T("玻璃");
+        var soundChord = this.FindControl<ComboBoxItem>("NotifySoundChord");
+        if (soundChord is not null) soundChord.Content = I18n.T("和弦");
         var saveUrlBtn = this.FindControl<Button>("SaveUpdateUrlBtn");
         if (saveUrlBtn is not null) saveUrlBtn.Content = I18n.T("保存地址");
         var releaseNotesTitle = this.FindControl<TextBlock>("UpdateReleaseNotesTitle");
         if (releaseNotesTitle is not null) releaseNotesTitle.Text = I18n.T("更新说明");
         SetT("SkillsTitle", "Skill管理");
         SetT("SkillsDesc", "管理已安装的技能，删除后立即生效。");
+        SetT("EnvironmentTitle", "环境检测");
+        SetT("EnvironmentDesc", "检查系统环境是否满足 AgentBrook Helper 正常运行。");
+        var checkEnvBtn = this.FindControl<Button>("CheckEnvironmentBtn");
+        if (checkEnvBtn is not null) checkEnvBtn.Content = I18n.T("重新检测");
+        var repairAllBtn = this.FindControl<Button>("RepairAllBtn");
+        if (repairAllBtn is not null) repairAllBtn.Content = I18n.T("一键修复");
         SetT("LabelProviderName", "供应商名称");
         SetT("LabelApiEndpoint", "API 地址（OpenAI 兼容端点）");
         SetT("LabelApiKey", "API Key");
         SetT("LabelModelsCsv", "模型清单（逗号分隔，第一个为默认）");
         }
-        catch
+        catch (Exception ex)
         {
-            // 语言应用失败不阻塞窗口
+            Console.Error.WriteLine($"[i18n] ApplyWindowLanguage failed: {ex}");
         }
     }
 
@@ -828,5 +1158,250 @@ public partial class ModelSettingsWindow : Window
     private void Hint(string text)
     {
         PersonalHint.Text = text;
+    }
+
+    // ───────────────────────── 环境检测 ─────────────────────────
+    private async Task CheckEnvironmentAsync()
+    {
+        var list = this.FindControl<StackPanel>("EnvironmentListPanel");
+        var summary = this.FindControl<TextBlock>("EnvironmentSummary");
+        var hint = this.FindControl<TextBlock>("EnvironmentHint");
+        var checkBtn = this.FindControl<Button>("CheckEnvironmentBtn");
+        if (list is null) return;
+
+        if (checkBtn is not null) checkBtn.IsEnabled = false;
+        list.Children.Clear();
+        if (summary is not null) summary.Text = I18n.T("正在检测…");
+        if (hint is not null) hint.Text = "";
+
+        var agent = App.Controller.Ready ? App.Controller.Agent : null;
+        _environmentResults = await EnvironmentChecker.CheckAllAsync(agent);
+        Dispatcher.UIThread.Post(() => BuildEnvironmentList(_environmentResults));
+
+        var errorCount = _environmentResults.Count(r => r.Status == CheckStatus.Error);
+        var warningCount = _environmentResults.Count(r => r.Status == CheckStatus.Warning);
+        if (summary is not null)
+        {
+            summary.Text = errorCount == 0 && warningCount == 0
+                ? I18n.T("✔ 全部通过")
+                : I18n.T("检测完成：{0} 项异常，{1} 项警告", errorCount, warningCount);
+        }
+        if (_repairAllBtn is not null) _repairAllBtn.IsEnabled = errorCount > 0 || warningCount > 0;
+        if (checkBtn is not null) checkBtn.IsEnabled = true;
+    }
+
+    private async Task RepairAllAsync()
+    {
+        if (_environmentResults.Count == 0) return;
+        var list = this.FindControl<StackPanel>("EnvironmentListPanel");
+        var summary = this.FindControl<TextBlock>("EnvironmentSummary");
+        var hint = this.FindControl<TextBlock>("EnvironmentHint");
+        if (_repairAllBtn is not null) _repairAllBtn.IsEnabled = false;
+        if (hint is not null) hint.Text = I18n.T("正在修复…");
+
+        var repaired = new List<EnvironmentCheckResult>();
+        foreach (var item in _environmentResults.Where(r => r.CanRepair))
+        {
+            var result = await EnvironmentChecker.RepairAsync(item);
+            repaired.Add(result);
+        }
+
+        // 更新结果列表
+        for (var i = 0; i < _environmentResults.Count; i++)
+        {
+            var existing = _environmentResults[i];
+            var update = repaired.FirstOrDefault(r => r.Id == existing.Id);
+            if (update is not null) _environmentResults[i] = update;
+        }
+
+        Dispatcher.UIThread.Post(() => BuildEnvironmentList(_environmentResults));
+
+        var stillError = _environmentResults.Count(r => r.Status == CheckStatus.Error);
+        var stillWarning = _environmentResults.Count(r => r.Status == CheckStatus.Warning);
+        if (summary is not null)
+        {
+            summary.Text = stillError == 0 && stillWarning == 0
+                ? I18n.T("✔ 修复后全部通过")
+                : I18n.T("修复后：{0} 项异常，{1} 项警告", stillError, stillWarning);
+        }
+        if (hint is not null)
+        {
+            if (repaired.Count > 0)
+            {
+                hint.Text = I18n.T("已尝试修复 {0} 项，若仍异常请按提示手动处理。", repaired.Count);
+            }
+            else if (stillError > 0 || stillWarning > 0)
+            {
+                hint.Text = I18n.T("没有可自动修复的项，请按上方提示手动处理。");
+            }
+            else
+            {
+                hint.Text = I18n.T("没有可自动修复的项。");
+            }
+        }
+        if (_repairAllBtn is not null) _repairAllBtn.IsEnabled = stillError > 0 || stillWarning > 0;
+    }
+
+    private void BuildEnvironmentList(List<EnvironmentCheckResult> results)
+    {
+        var list = this.FindControl<StackPanel>("EnvironmentListPanel");
+        if (list is null) return;
+        list.Children.Clear();
+
+        foreach (var r in results)
+        {
+            var (dotColor, statusText) = r.Status switch
+            {
+                CheckStatus.Ok => ("#4cc38a", I18n.T("正常")),
+                CheckStatus.Warning => ("#e0a030", I18n.T("警告")),
+                CheckStatus.Error => ("#ff6b6b", I18n.T("异常")),
+                _ => ("#8a8a8a", I18n.T("未知")),
+            };
+
+            var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
+
+            var dot = new Border
+            {
+                Width = 10, Height = 10, CornerRadius = new CornerRadius(5),
+                Background = new SolidColorBrush(Color.Parse(dotColor)),
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 10, 0),
+            };
+            Grid.SetColumn(dot, 0);
+            grid.Children.Add(dot);
+
+            var content = new StackPanel { Spacing = 2 };
+            Grid.SetColumn(content, 1);
+            content.Children.Add(new TextBlock
+            {
+                Text = r.Title,
+                FontSize = 13.5,
+                Foreground = new SolidColorBrush(Color.Parse("#f0f0f0")),
+                FontWeight = FontWeight.SemiBold,
+            });
+            content.Children.Add(new TextBlock
+            {
+                Text = r.Message,
+                FontSize = 12,
+                Foreground = new SolidColorBrush(Color.Parse("#b0b0b0")),
+                TextWrapping = TextWrapping.Wrap,
+            });
+            if (!string.IsNullOrWhiteSpace(r.Solution))
+            {
+                content.Children.Add(new TextBlock
+                {
+                    Text = I18n.T("解决方案：{0}", r.Solution),
+                    FontSize = 11.5,
+                    Foreground = new SolidColorBrush(Color.Parse("#d29922")),
+                    TextWrapping = TextWrapping.Wrap,
+                });
+            }
+            grid.Children.Add(content);
+
+            if (r.CanRepair)
+            {
+                var repairBtn = new Button
+                {
+                    Classes = { "ghostBtn" },
+                    Content = I18n.T("修复"),
+                    Margin = new Thickness(8, 0, 0, 0),
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                };
+                repairBtn.Click += async (_, _) => await RepairSingleAsync(r);
+                Grid.SetColumn(repairBtn, 2);
+                grid.Children.Add(repairBtn);
+            }
+            else if (r.Status == CheckStatus.Error && r.Id.StartsWith("Mcp-", StringComparison.OrdinalIgnoreCase))
+            {
+                var mcpRepairBtn = new Button
+                {
+                    Classes = { "ghostBtn" },
+                    Content = I18n.T("修复"),
+                    Margin = new Thickness(8, 0, 0, 0),
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                };
+                mcpRepairBtn.Click += async (_, _) => await RepairMcpViaChatAsync(r.Title, r.Extra);
+                Grid.SetColumn(mcpRepairBtn, 2);
+                grid.Children.Add(mcpRepairBtn);
+            }
+            else if (r.Status == CheckStatus.Error && r.Id == "CommandExecution")
+            {
+                var cmdRepairBtn = new Button
+                {
+                    Classes = { "ghostBtn" },
+                    Content = I18n.T("修复"),
+                    Margin = new Thickness(8, 0, 0, 0),
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                };
+                cmdRepairBtn.Click += async (_, _) => await RepairCommandViaChatAsync(r.Title, r.Message, r.Extra);
+                Grid.SetColumn(cmdRepairBtn, 2);
+                grid.Children.Add(cmdRepairBtn);
+            }
+
+            list.Children.Add(grid);
+            list.Children.Add(new Border { Height = 1, Background = new SolidColorBrush(Color.Parse("#333333")), Margin = new Thickness(0, 6, 0, 0) });
+        }
+    }
+
+    private async Task RepairSingleAsync(EnvironmentCheckResult item)
+    {
+        var result = await EnvironmentChecker.RepairAsync(item);
+        var idx = _environmentResults.FindIndex(r => r.Id == result.Id);
+        if (idx >= 0) _environmentResults[idx] = result;
+        Dispatcher.UIThread.Post(() => BuildEnvironmentList(_environmentResults));
+
+        var summary = this.FindControl<TextBlock>("EnvironmentSummary");
+        var errorCount = _environmentResults.Count(r => r.Status == CheckStatus.Error);
+        var warningCount = _environmentResults.Count(r => r.Status == CheckStatus.Warning);
+        if (summary is not null)
+        {
+            summary.Text = errorCount == 0 && warningCount == 0
+                ? I18n.T("✔ 全部通过")
+                : I18n.T("检测完成：{0} 项异常，{1} 项警告", errorCount, warningCount);
+        }
+        if (_repairAllBtn is not null) _repairAllBtn.IsEnabled = errorCount > 0 || warningCount > 0;
+    }
+
+    private async Task RepairMcpViaChatAsync(string title, string? command)
+    {
+        var main = App.Controller.ConversationWindow;
+        if (main is null || !App.Controller.Ready)
+        {
+            Hint(I18n.T("Agent 尚未就绪，请稍后再试。"));
+            return;
+        }
+
+        var serverName = title.StartsWith("MCP: ", StringComparison.OrdinalIgnoreCase) ? title[5..] : title;
+        var prompt = I18n.T("请帮我修复 MCP 服务器 {0} 的连接。启动命令是：{1}。当前连接失败，请检查配置、依赖、工作目录并尝试修复。", serverName, command ?? "");
+        await ShowConversationAndSendAsync(main, prompt);
+        Close();
+    }
+
+    private async Task RepairCommandViaChatAsync(string title, string message, string? command)
+    {
+        var main = App.Controller.ConversationWindow;
+        if (main is null || !App.Controller.Ready)
+        {
+            Hint(I18n.T("Agent 尚未就绪，请稍后再试。"));
+            return;
+        }
+
+        var prompt = I18n.T("请帮我修复外部命令执行环境。检测项：{0}。探针命令：{1}。错误信息：{2}。请检查系统 PATH 与进程权限，并尝试修复。", title, command ?? "", message);
+        await ShowConversationAndSendAsync(main, prompt);
+        Close();
+    }
+
+    private static async Task ShowConversationAndSendAsync(MainWindow main, string prompt)
+    {
+        if (!main.IsVisible)
+        {
+            main.ShowFromBubble();
+        }
+        else
+        {
+            main.Activate();
+            main.WindowState = WindowState.Normal;
+        }
+        await main.SendMessageAsync(prompt);
     }
 }

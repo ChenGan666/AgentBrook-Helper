@@ -1,0 +1,13 @@
+global using Microsoft.AspNetCore.Builder;
+global using Microsoft.AspNetCore.Hosting;
+global using Microsoft.AspNetCore.Http;
+global using Microsoft.AspNetCore.Http.Features;
+global using Microsoft.AspNetCore.Routing;
+global using Microsoft.AspNetCore.Hosting.Server;
+global using Microsoft.AspNetCore.Hosting.Server.Features;
+global using Microsoft.Extensions.DependencyInjection;
+global using Microsoft.Extensions.Logging;
+global using System.Net.Sockets;
+global using System.Runtime.CompilerServices;
+global using System.Threading.Channels;
+global using AgentBrook.A2A.Core.Tasks;
