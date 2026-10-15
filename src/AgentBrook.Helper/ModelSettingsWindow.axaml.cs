@@ -8,6 +8,8 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Media;
 using Avalonia.Threading;
 using System.Diagnostics;
+using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
 
 namespace AgentBrook.Helper;
 
@@ -15,12 +17,12 @@ namespace AgentBrook.Helper;
 /// 模型设置：管理多个 OpenAI 兼容供应商（名称/端点/Key/模型清单），
 /// 保存后热应用到会话（切换供应商时保留对话上下文）。
 /// </summary>
-public partial class ModelSettingsWindow : Window
+public partial class ModelSettingsWindow : WindowBase
 {
     /// <summary>预设模板：名称 →（默认端点，默认模型 CSV）。</summary>
     private static readonly (string Name, string BaseUrl, string Models)[] Presets =
     [
-        ("DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat, deepseek-reasoner"),
+        ("DeepSeek", "https://api.deepseek.com", "deepseek-flash, deepseek-v4-pro"),
         ("OpenAI", "https://api.openai.com/v1", "gpt-4o, gpt-4o-mini"),
         ("Kimi", "https://api.moonshot.cn/v1", "moonshot-v1-8k, moonshot-v1-32k"),
         ("智谱 GLM", "https://open.bigmodel.cn/api/paas/v4", "glm-4.5-flash"),
@@ -48,6 +50,7 @@ public partial class ModelSettingsWindow : Window
         _skillsHint = this.FindControl<TextBlock>("SkillsHint");
         BuildSkillsList();
         WireCollaborationAndUpdateSettings();
+        this.FindControl<Button>("SetupWizardBtn")?.Click += (_, _) => new OnboardingWindow().Show();
 
         var currentVersionText = this.FindControl<TextBlock>("CurrentVersionText");
         if (currentVersionText is not null)
@@ -65,7 +68,7 @@ public partial class ModelSettingsWindow : Window
         var saveUpdateUrlBtn = this.FindControl<Button>("SaveUpdateUrlBtn");
         if (saveUpdateUrlBtn is not null) saveUpdateUrlBtn.Click += (_, _) => SaveUpdateServiceUrl();
 
-        I18n.LanguageChanged += ApplyWindowLanguage;
+        WatchLanguageChanges();
         this.FindControl<ComboBox>("UiLanguageBox")!.SelectionChanged += (_, _) =>
         {
             var uiLang = (this.FindControl<ComboBox>("UiLanguageBox")!.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "auto";
@@ -80,7 +83,7 @@ public partial class ModelSettingsWindow : Window
         BuildIconPicker();
         LoadPersonal();
         // 所有静态控件和个人设置均初始化后再统一刷新，避免 AXAML fallback 覆盖已翻译文案。
-        ApplyWindowLanguage();
+        OnLanguageChanged();
         this.FindControl<Button>("SavePersonalBtn")!.Click += async (_, _) => await SavePersonalAsync();
         this.FindControl<Button>("ResetPosBtn")!.Click += (_, _) => ResetBubblePosition();
 
@@ -180,6 +183,29 @@ public partial class ModelSettingsWindow : Window
         this.FindControl<Button>("SaveApplyBtn")!.Click += async (_, _) => await SaveAndApplyAsync();
         this.FindControl<Button>("CloseBtn")!.Click += (_, _) => Close();
         this.FindControl<Button>("DeleteBtn")!.Click += (_, _) => DeleteSelected();
+        this.FindControl<Button>("TestBtn")!.Click += async (_, _) => await TestProviderAsync();
+        // 助手名字「取名」：用当前激活大模型生成，填入名称框（点「保存个人设置」后生效）
+        this.FindControl<Button>("NameGenBtn")!.Click += async (_, _) =>
+        {
+            var genBtn = this.FindControl<Button>("NameGenBtn")!;
+            genBtn.IsEnabled = false;
+            genBtn.Content = I18n.T("ui.naming.working");
+            try
+            {
+                var nameBox = this.FindControl<TextBox>("PersonalNameBox")!;
+                nameBox.Text = await AssistantNameGenerator.GenerateAsync(AssistantIdentity.Language);
+                Hint(I18n.T("ui.naming.done", nameBox.Text));
+            }
+            catch (Exception ex)
+            {
+                Hint(I18n.T("ui.naming.failed", ex.Message));
+            }
+            finally
+            {
+                genBtn.IsEnabled = true;
+                genBtn.Content = I18n.T("ui.naming");
+            }
+        };
         ProviderList.SelectionChanged += (_, _) =>
         {
             _selectedIndex = ProviderList.SelectedIndex;
@@ -817,7 +843,8 @@ public partial class ModelSettingsWindow : Window
     }
 
     /// <summary>按当前语言设置窗口标题与导航文案。</summary>
-    private void ApplyWindowLanguage()
+    /// <summary>语言切换回调：刷新本窗口全部静态文案。</summary>
+    protected override void OnLanguageChanged()
     {
         try
         {
@@ -888,11 +915,6 @@ public partial class ModelSettingsWindow : Window
         var delBtn = this.FindControl<Button>("DeleteBtn");
         if (delBtn is not null) delBtn.Content = I18n.T("ui.delete.this.provider");
         // 页面元素（空安全，缺 x:Name 的跳过）
-        void SetT(string name, string key)
-        {
-            var c = this.FindControl<Control>(name) as TextBlock;
-            if (c is not null) c.Text = I18n.T(key);
-        }
         SetT("GeneralTitle", "ui.general");
         SetT("GeneralDesc", "ui.assistant.identity.reply.preferences");
         SetT("LabelAssistantName", "ui.assistant.name");
@@ -945,6 +967,7 @@ public partial class ModelSettingsWindow : Window
         SetT("CompressRoundsSuffix", "ui.rounds.and.sync.to.the.whole.group");
         SetT("LabelGroupNotify", "ui.group.message.alerts");
         SetT("GroupNotifyDesc", "ui.bubble.alert.on.new.group.messages.click.to.open.the.a2a.session.center");
+        SetT("SetupWizardText", "ui.setup.wizard");
         SetT("DailyUpdateCheckDesc", "ui.check.for.updates.on.the.first.launch.each.day");
         SetT("AutoDownloadUpdateDesc", "ui.download.and.install.automatically.after.the.reminder");
         // ComboBox 下拉项不是 TextBlock，SetT 覆盖不到，逐项设置 Content
@@ -1133,6 +1156,54 @@ public partial class ModelSettingsWindow : Window
         catch (Exception ex)
         {
             Hint(I18n.T("ui.save.failed.value", ex.Message));
+        }
+    }
+
+    /// <summary>模型连通性测试：用表单当前填写的参数直连一次对话补全（不落盘、不影响已保存配置）。</summary>
+    private async Task TestProviderAsync()
+    {
+        SyncFormIntoWorking();
+        if (_selectedIndex < 0 || _selectedIndex >= _working.Count)
+        {
+            return;
+        }
+        var p = _working[_selectedIndex];
+        if (!p.IsConfigured)
+        {
+            Hint(I18n.T("ui.models.test.need.config"));
+            return;
+        }
+        var model = p.ActiveModel;
+        var testBtn = this.FindControl<Button>("TestBtn");
+        if (testBtn is not null)
+        {
+            testBtn.IsEnabled = false;
+            testBtn.Content = I18n.T("ui.models.testing");
+        }
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            var reply = await PingModelAsync(p.BaseUrl, p.ApiKey, model);
+            sw.Stop();
+            reply = reply.Trim();
+            Hint(I18n.T("ui.models.test.ok", sw.ElapsedMilliseconds / 1000.0,
+                string.IsNullOrWhiteSpace(reply) ? "(空回复)" : (reply.Length > 60 ? reply[..60] + "…" : reply)));
+        }
+        catch (OperationCanceledException)
+        {
+            Hint(I18n.T("ui.models.test.timeout"));
+        }
+        catch (Exception ex)
+        {
+            Hint(I18n.T("ui.models.test.fail", ex.Message));
+        }
+        finally
+        {
+            if (testBtn is not null)
+            {
+                testBtn.IsEnabled = true;
+                testBtn.Content = I18n.T("ui.models.test");
+            }
         }
     }
 

@@ -9,6 +9,18 @@
 
     <Window.Styles>
         <!-- 左侧导航项（RadioButton 重模板为导航条目） -->
+        <Style Selector="Button.setupWizard">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#c8c8c8"/>
+            <Setter Property="FontSize" Value="13.5"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+        </Style>
+        <Style Selector="Button.setupWizard:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#333333"/>
+        </Style>
         <Style Selector="RadioButton.navItem">
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="Foreground" Value="#c8c8c8"/>
@@ -110,8 +122,17 @@
 
         <!-- 左侧导航 -->
         <Border Grid.Column="0" Background="#232323" BorderBrush="#333333" BorderThickness="0,0,1,0">
-            <ScrollViewer>
-                <StackPanel Margin="10,18,10,10">
+            <DockPanel Margin="10,18,10,10">
+                <!-- 设置向导固定在侧栏最底部（不随导航列表滚动） -->
+                <Button x:Name="SetupWizardBtn" Classes="setupWizard" DockPanel.Dock="Bottom"
+                        HorizontalAlignment="Stretch" Margin="0,10,0,0">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <PathIcon Data="{StaticResource Icon.Sparkle}" Width="15" Height="15"/>
+                        <TextBlock x:Name="SetupWizardText" Text="设置向导"/>
+                    </StackPanel>
+                </Button>
+                <ScrollViewer>
+                    <StackPanel>
                     <TextBlock x:Name="NavGroupBasic" Text="基础设置" Classes="navGroup"/>
                     <RadioButton x:Name="NavGeneral" Classes="navItem" GroupName="nav" IsChecked="True">
                         <StackPanel Orientation="Horizontal" Spacing="8">
@@ -148,6 +169,7 @@
                     </RadioButton>
                 </StackPanel>
             </ScrollViewer>
+            </DockPanel>
         </Border>
 
         <!-- 右侧内容区（内容超高时可纵向滚动，如常规页的自启动/提示音区块） -->
@@ -179,6 +201,7 @@
                             ToolTip.Tip="选择 Helper 图标（显示在对方 PEERS 列表中）"/>
                     <TextBox x:Name="PersonalNameBox" Watermark="Brook" FontSize="14" MaxWidth="380"
                              VerticalAlignment="Center"/>
+                    <Button x:Name="NameGenBtn" Classes="ghostBtn" Content="取名" ToolTip.Tip="用当前大模型起一个名字"/>
                 </StackPanel>
                 <TextBlock x:Name="LabelHelperIconHint" Text="图标选择：点击左侧图标更换（显示在对方 Helper 的列表中）" FontSize="11.5" Foreground="#888888"/>
                 <TextBlock x:Name="LabelReplyLang" Text="交流语言（影响模型回复语言）" Classes="formLabel"/>
@@ -355,8 +378,11 @@
                                 <TextBlock x:Name="LabelModelsCsv" Text="模型清单（逗号分隔，第一个为默认）" Classes="formLabel"/>
                                 <TextBox x:Name="ModelsBox" Watermark="model-a, model-b" FontSize="14" Height="64"
                                          TextWrapping="Wrap" AcceptsReturn="True"/>
-                                <Button x:Name="DeleteBtn" Classes="dangerBtn" Content="删除此供应商" Margin="0,18,0,0"
-                                        HorizontalAlignment="Left"/>
+                                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,18,0,0"
+                                            HorizontalAlignment="Left">
+                                    <Button x:Name="TestBtn" Classes="ghostBtn" Content="测试" Tag="provider-test"/>
+                                    <Button x:Name="DeleteBtn" Classes="dangerBtn" Content="删除此供应商"/>
+                                </StackPanel>
                             </StackPanel>
                         </ScrollViewer>
                     </Border>

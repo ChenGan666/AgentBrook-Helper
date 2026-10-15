@@ -10,11 +10,16 @@ namespace AgentBrook.Agent.Infrastructure;
 /// <summary>组装 ChatClientAgent：模型客户端 + 工具面 + 上下文提供者。</summary>
 public static class AgentFactory
 {
-    /// <summary>按显式供应商参数创建 IChatClient（模型管理/多供应商切换用）。</summary>
-    public static IChatClient CreateChatClient(string baseUrl, string apiKey, string defaultModel)
+    /// <summary>按显式供应商参数创建 IChatClient（模型管理/多供应商切换用）。
+    /// maxRetries：传 0 供"测试/取名"等交互场景快速失败（默认保持 SDK 内建重试）。</summary>
+    public static IChatClient CreateChatClient(string baseUrl, string apiKey, string defaultModel, int? maxRetries = null)
     {
-        var client = new OpenAIClient(new System.ClientModel.ApiKeyCredential(apiKey),
-            new OpenAIClientOptions { Endpoint = new Uri(baseUrl) });
+        var options = new OpenAIClientOptions { Endpoint = new Uri(baseUrl) };
+        if (maxRetries is not null)
+        {
+            options.RetryPolicy = new System.ClientModel.Primitives.ClientRetryPolicy(maxRetries.Value);
+        }
+        var client = new OpenAIClient(new System.ClientModel.ApiKeyCredential(apiKey), options);
         return client.GetChatClient(defaultModel).AsIChatClient();
     }
 
