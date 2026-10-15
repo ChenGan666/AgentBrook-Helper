@@ -12,6 +12,11 @@ namespace AgentBrook.Helper;
 /// </summary>
 public abstract class WindowBase : Window
 {
+    /// <summary>AgentBrook.API 中转地址（生产部署改为线上域名，如 https://api.example.com）</summary>
+    protected const string RelayApiBase = "https://api.agentbrook.com";
+    /// <summary>AgentBrook.Service Token卡购买页</summary>
+    protected const string TokenPurchaseUrl = "https://helper.agentbrook.com/Token";
+
     /// <summary>按控件名把 TextBlock 文本设为翻译值（键为中文原文或语义化 Key）。</summary>
     protected void SetT(string name, string key)
     {
@@ -65,10 +70,11 @@ public abstract class WindowBase : Window
     /// <summary>模型供应商预设：名称 →（默认端点，默认模型 CSV）。与设置窗口保持一致。</summary>
     protected static readonly (string Name, string BaseUrl, string Models)[] Presets =
     [
+        ("AgentBrook", "https://api.agentbrook.com", ""),
         ("DeepSeek", "https://api.deepseek.com", "deepseek-flash, deepseek-v4-pro"),
         ("OpenAI", "https://api.openai.com/v1", "gpt-4o, gpt-4o-mini"),
         ("Kimi", "https://api.moonshot.cn/v1", "moonshot-v1-8k, moonshot-v1-32k"),
-        ("智谱 GLM", "https://open.bigmodel.cn/api/paas/v4", "glm-4.5-flash"),
+        ("GLM", "https://open.bigmodel.cn/api/paas/v4", "glm-4.5-flash"),
         ("OpenRouter", "https://openrouter.ai/api/v1", "openai/gpt-4o-mini"),
     ];
 

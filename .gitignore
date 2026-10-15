@@ -67,3 +67,4 @@ workspace/
 **/workspace-mac/
 workspace-override.json
 src/AgentBrook.Helper/workspace-override.json
+appsettings.local.json

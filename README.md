@@ -69,6 +69,10 @@ The fixed token cost is deliberately kept low: MCP tool JSON Schemas are not loa
 
 The A2A session center discovers Helper nodes on your LAN, pairs with them, and puts them into group chats. Creating a group is one click — join is automatic and the group name is generated for you. Type `@` in the send box to pick a member for a directed answer, `@all` for the whole room — every Helper answers from the shared group context. Six anti-loop gates (consecutive auto-reply cap, ping-pong detection, rate quota, busy yielding, cooldown, idempotency) keep discussions from running forever; long threads are compressed every 10 rounds into a structured summary (conclusions, artifacts, process — minus the small talk) that is synced to the whole room, keeping token cost bounded. Offline members catch up automatically when they return; the group owner can rename, close, or remove members inline; a dedicated Summary tab shows the shared summary anytime. Helpers inside a group carry the same tool surface as the main conversation — high-risk actions still require local approval.
 
+### Token cards: 24-hour trial, pay-as-you-go top-ups
+
+First-launch onboarding automatically requests a trial card from the billing service — ¥5 of quota, valid for 24 hours, bound to your device and network — and fills the model config for you (provider "AgentBrook", endpoint `https://api.agentbrook.com`). The model settings page shows a "Top up Token card" shortcut for the AgentBrook provider (your card Key is the API Key; top-ups take effect automatically), plus a "Fetch models" action that pulls the live model list and specs from the relay.
+
 ### Automatic self-update
 
 On the first launch of each day the Helper checks for a new version (once per day). When one is found, the bubble announces it (version + release notes); clicking "Update now" jumps to Settings, locates the version section, and runs the download-and-apply flow by itself. Both the daily check and auto-download can be turned off in Settings.
@@ -148,7 +152,12 @@ cd src/AgentBrook.Agent && dotnet run
     "WorkspaceRoot": "../AgentBrook.Agent/workspace",
     "RequireApprovalTools": ["run_command", "create_skill", "install_skill", "mcp_add_server", "spawn_worker"]
   },
-  "MCP": { "Servers": [ /* filesystem enabled; fetch and github as examples */ ] }
+  "MCP": { "Servers": [ /* filesystem enabled; fetch and github as examples */ ] },
+  "Token": {
+    "ServiceUrl": "http://127.0.0.1:5300",        // billing/purchase service (trial cards, top-ups)
+    "RelayApiBase": "http://127.0.0.1:5200",      // OpenAI-compatible relay used by the AgentBrook provider
+    "RelayPublicUrl": "https://api.agentbrook.com" // public relay endpoint pre-filled by onboarding
+  }
 }
 ```
 
@@ -199,7 +208,8 @@ AgentBrook-Helper/
         ├── GroupAutoTalkProcessor.cs← group auto-talk: @-trigger, anti-loop gates, context
         ├── A2AExtensionController.cs← A2A host + business glue (groups, discovery, update)
         ├── A2AAgentTools.cs         ← a2a_* tools exposed to the model
-        ├── ModelSettingsWindow      ← settings: general / models / collaboration / update
+        ├── ModelSettingsWindow      ← settings: general / models / token top-up / collaboration / update
+        ├── ClientFingerprint.cs     ← hardware fingerprint (trial-card anti-duplicate)
         ├── MarkdownView.cs          ← hand-written Markdown → Avalonia renderer
         ├── AssistantController.cs   ← controller shared by bubble and window
         ├── UiPrefs.cs               ← UI preference persistence

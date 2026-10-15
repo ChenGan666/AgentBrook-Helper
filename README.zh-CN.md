@@ -71,6 +71,10 @@ AgentBrook Helper 是一个真正跑在你机器上的 AI 智能体的桌面客�
 
 A2A 会话中心一键建群（建群即入群，群名自动生成），把局域网内的其他 Helper 拉进同一间屋子。发送框 @ 呼出成员列表：@成员 定向应答、@全部 全群响应，每个 Helper 基于共享的群上下文自动发言。六道防循环闸门（连续自动发言上限、乒乓检测、频率配额、忙碌让位、冷却、幂等）保证讨论自然收敛；长对话每 10 轮自动压缩为结构化摘要（保留结论/产物/过程，去掉寒暄）并同步全群，token 消耗有界。离线成员上线自动补齐错过的消息；群主可行内改名、关闭群组、踢出成员；右侧「摘要」页随时查看共享摘要。群内 Helper 的工具能力与主对话完全一致，高风险操作仍需本机审批。
 
+### Token卡：24 小时试用与即充即用
+
+首次启动引导会自动向计费服务申请试用卡——5 元额度、24 小时有效期、绑定设备与网络——并自动填充大模型配置（供应商 AgentBrook，端点 `https://api.agentbrook.com`）。模型设置页为 AgentBrook 供应商提供「Token卡充值」快捷入口（卡 Key 即 API Key，充值到账自动生效），以及「获取模型列表」：凭 Key 自动拉取中转上的模型清单与参数。
+
 ### 自动更新
 
 每天首次启动自动检查新版本（当天只查一次）。发现新版本时气泡提醒（版本号 + 更新说明），点击「立即更新」自动定位到设置并完成下载安装，全程无需手动操作。可在设置中开关每日检查与自动下载。
@@ -150,7 +154,12 @@ cd src/AgentBrook.Agent && dotnet run
     "WorkspaceRoot": "../AgentBrook.Agent/workspace",
     "RequireApprovalTools": ["run_command", "create_skill", "install_skill", "mcp_add_server", "spawn_worker"]
   },
-  "MCP": { "Servers": [ /* filesystem 已启用；fetch 与 github 为示例 */ ] }
+  "MCP": { "Servers": [ /* filesystem 已启用；fetch 与 github 为示例 */ ] },
+  "Token": {
+    "ServiceUrl": "http://127.0.0.1:5300",        // 计费/购买服务（试用卡与充值）
+    "RelayApiBase": "http://127.0.0.1:5200",      // AgentBrook 供应商使用的 OpenAI 兼容中转
+    "RelayPublicUrl": "https://api.agentbrook.com" // 引导自动填充的公网中转端点
+  }
 }
 ```
 
@@ -201,7 +210,8 @@ AgentBrook-Helper/
         ├── GroupAutoTalkProcessor.cs← 群自动交流：@ 触发、防循环六道闸、上下文压缩
         ├── A2AExtensionController.cs← A2A 宿主与业务联动（群组/发现/压缩/更新）
         ├── A2AAgentTools.cs         ← a2a_* 工具暴露给模型
-        ├── ModelSettingsWindow      ← 设置窗口：常规 / 模型 / 协作 / 更新
+        ├── ModelSettingsWindow      ← 设置窗口：常规 / 模型 / Token充值 / 协作 / 更新
+        ├── ClientFingerprint.cs     ← 硬件指纹（试用卡防重复申请）
         ├── MarkdownView.cs          ← 自研 Markdown → Avalonia 渲染器
         ├── AssistantController.cs   ← 气泡与对话窗共享的控制器
         ├── UiPrefs.cs               ← UI 偏好持久化

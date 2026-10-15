@@ -72,6 +72,8 @@
         <TextBox x:Name="BaseUrlBox" MinWidth="320" HorizontalAlignment="Left"/>
         <TextBlock x:Name="S2ApiKeyLabel" Classes="formLabel" Text="API Key"/>
         <TextBox x:Name="ApiKeyBox" MinWidth="320" HorizontalAlignment="Left"/>
+        <TextBlock x:Name="TrialHint" Text="" FontSize="12" Foreground="#8a8a8a" TextWrapping="Wrap"
+                   MaxWidth="420" HorizontalAlignment="Left" Margin="0,2,0,0"/>
         <TextBlock x:Name="S2ModelsLabel" Classes="formLabel" Text="模型（逗号分隔）"/>
         <TextBox x:Name="ModelsBox" MinWidth="320" HorizontalAlignment="Left"/>
         <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,4,0,0">

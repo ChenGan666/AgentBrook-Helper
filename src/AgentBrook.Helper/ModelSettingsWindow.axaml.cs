@@ -8,6 +8,8 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Media;
 using Avalonia.Threading;
 using System.Diagnostics;
+using System.Net.Http;
+using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 
@@ -173,6 +175,9 @@ public partial class ModelSettingsWindow : WindowBase
         this.FindControl<Button>("CloseBtn")!.Click += (_, _) => Close();
         this.FindControl<Button>("DeleteBtn")!.Click += (_, _) => DeleteSelected();
         this.FindControl<Button>("TestBtn")!.Click += async (_, _) => await TestProviderAsync();
+        this.FindControl<Button>("FetchModelsBtn")!.Click += async (_, _) => await FetchModelsBtnAsync();
+        this.FindControl<Button>("TokenRechargeBtn")!.Click += (_, _) => OpenTokenPurchasePage(recharge: true);
+        NameBox.TextChanged += (_, _) => RefreshProviderSpecificUi();
         // 助手名字「取名」：用当前激活大模型生成，填入名称框（点「保存个人设置」后生效）
         this.FindControl<Button>("NameGenBtn")!.Click += async (_, _) =>
         {
@@ -855,6 +860,15 @@ public partial class ModelSettingsWindow : WindowBase
         if (saveBtn is not null) saveBtn.Content = I18n.T("ui.save.general");
         var promptBox2 = this.FindControl<TextBox>("CustomPromptBox");
         if (promptBox2 is not null) promptBox2.Watermark = I18n.T("ui.e.g.keep.answers.brief.prefer.tables.for.data");
+        // 模型设置：测试/获取模型列表/Token卡充值
+        var testBtnL = this.FindControl<Button>("TestBtn");
+        if (testBtnL is not null) testBtnL.Content = I18n.T("ui.models.test");
+        var fetchBtnL = this.FindControl<Button>("FetchModelsBtn");
+        if (fetchBtnL is not null) fetchBtnL.Content = I18n.T("ui.models.fetch");
+        var rechargeBtnL = this.FindControl<Button>("TokenRechargeBtn");
+        if (rechargeBtnL is not null) rechargeBtnL.Content = I18n.T("ui.token.recharge.btn");
+        var rechargeLabelL = this.FindControl<TextBlock>("TokenRechargeLabel");
+        if (rechargeLabelL is not null) rechargeLabelL.Text = I18n.T("ui.token.recharge.label");
         // 提示音偏好：开关/音色切换即保存并试听（不经过"保存"按钮）
         var notifySwitch = this.FindControl<ToggleSwitch>("NotifySoundSwitch");
         var notifyBox = this.FindControl<ComboBox>("NotifySoundBox");
@@ -994,6 +1008,17 @@ public partial class ModelSettingsWindow : WindowBase
 
     private void LoadFromController()
     {
+        // Agent 未就绪（启动初始化中/失败）时 Controller 返回空列表：兜底直读 models.json
+        if (!App.Controller.Ready || App.Controller.Providers.Count == 0)
+        {
+            var loaded = ProviderSettings.Load(ModelsJsonPath);
+            if (loaded.Providers.Count > 0)
+            {
+                _working = loaded.Providers;
+                _activeName = loaded.ActiveProvider;
+                return;
+            }
+        }
         _working = App.Controller.Providers.Select(p => new ProviderConfig
         {
             Name = p.Name,
@@ -1003,6 +1028,27 @@ public partial class ModelSettingsWindow : WindowBase
             ActiveModel = p.ActiveModel,
         }).ToList();
         _activeName = App.Controller.CurrentProvider;
+    }
+
+    /// <summary>workspace/models.json 路径（与 Agent 宿主同一解析规则）。</summary>
+    private static string ModelsJsonPath
+    {
+        get
+        {
+            var dir = UiPrefs.WorkspaceDir();
+            Directory.CreateDirectory(dir);
+            return Path.Combine(dir, "models.json");
+        }
+    }
+
+    /// <summary>把当前 _working 写入 models.json（Agent 未就绪时的保存兜底）。</summary>
+    private static void SaveModelsJson(List<ProviderConfig> providers, string activeProvider)
+    {
+        new AgentBrook.Agent.Infrastructure.ProviderSettings
+        {
+            Providers = providers,
+            ActiveProvider = activeProvider,
+        }.Save(ModelsJsonPath);
     }
 
     private void BuildProviderList()
@@ -1031,6 +1077,10 @@ public partial class ModelSettingsWindow : WindowBase
         {
             _selectedIndex = _working.Count - 1;
         }
+        if (_selectedIndex < 0 && _working.Count > 0)
+        {
+            _selectedIndex = 0;   // 打开窗口默认选中第一个供应商，表单即显示已有配置
+        }
         ProviderList.SelectedIndex = _selectedIndex;
         FormPanel.IsEnabled = _working.Count > 0;
     }
@@ -1048,14 +1098,6 @@ public partial class ModelSettingsWindow : WindowBase
             b.Click += (_, _) => AddProvider(presetName, baseUrl, models);
             PresetPanel.Children.Add(b);
         }
-
-        var custom = new Button
-        {
-            Classes = { "presetBtn" },
-            Content = I18n.T("ui.create.custom.provider"),
-        };
-        custom.Click += (_, _) => AddProvider();
-        PresetPanel.Children.Add(custom);
     }
 
     private void AddProvider(string? presetName = null, string presetUrl = "", string presetModels = "")
@@ -1115,7 +1157,15 @@ public partial class ModelSettingsWindow : WindowBase
 
     private async Task SaveAndApplyAsync()
     {
-        SyncFormIntoWorking();
+        if (!App.Controller.Ready)
+        {
+            // Agent 未就绪：仅持久化到 models.json，就绪后自动加载
+            SyncFormIntoWorking();
+            SaveModelsJson([.. _working], _activeName);
+            Hint(I18n.T("ui.models.saved.offline"));
+            return;
+        }
+       SyncFormIntoWorking();
         // 名称去重
         var dup = _working.GroupBy(p => p.Name.Trim(), StringComparer.OrdinalIgnoreCase).FirstOrDefault(g => g.Count() > 1);
         if (dup is not null)
@@ -1161,6 +1211,21 @@ public partial class ModelSettingsWindow : WindowBase
             return;
         }
         var p = _working[_selectedIndex];
+        if (p.Models.Count == 0)
+        {
+            // 自动获取模型列表与参数（AgentBrook.API /models，OpenAI 兼容）
+            try
+            {
+                var models = await FetchRelayModelsAsync(p.BaseUrl, p.ApiKey);
+                if (models.Count > 0)
+                {
+                    p.Models = models.Select(m => m.Id).ToList();
+                    p.ActiveModel = p.Models[0];
+                    ModelsBox.Text = string.Join(", ", p.Models);
+                }
+            }
+            catch { /* 拉取失败：按原逻辑提示未配置 */ }
+        }
         if (!p.IsConfigured)
         {
             if (testHint is not null)
@@ -1209,6 +1274,116 @@ public partial class ModelSettingsWindow : WindowBase
                 testBtn.IsEnabled = true;
                 testBtn.Content = I18n.T("ui.models.test");
             }
+        }
+    }
+
+    // ---------------- Token卡：模型列表自动获取 / 一键激活 ----------------
+
+    private static readonly HttpClient TokenHttp = new() { Timeout = TimeSpan.FromSeconds(20) };
+    
+
+    private sealed record RelayModelInfo(string Id, string? Name, long? ContextWindow, int? MaxOutput);
+
+    /// <summary>调 OpenAI 兼容 /models 获取模型列表与参数。</summary>
+    private static async Task<List<RelayModelInfo>> FetchRelayModelsAsync(string apiBase, string apiKey)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"{apiBase.TrimEnd('/')}/models");
+        req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+        using var resp = await TokenHttp.SendAsync(req);
+        var text = await resp.Content.ReadAsStringAsync();
+        if (!resp.IsSuccessStatusCode)
+            throw new InvalidOperationException($"HTTP {(int)resp.StatusCode}: {(text.Length > 120 ? text[..120] : text)}");
+        using var doc = JsonDocument.Parse(text);
+        var list = new List<RelayModelInfo>();
+        foreach (var m in doc.RootElement.GetProperty("data").EnumerateArray())
+        {
+            list.Add(new RelayModelInfo(
+                m.GetProperty("id").GetString() ?? "",
+                m.TryGetProperty("name", out var n) ? n.GetString() : null,
+                m.TryGetProperty("context_window", out var cw) && cw.ValueKind == JsonValueKind.Number ? cw.GetInt64() : null,
+                m.TryGetProperty("max_output_tokens", out var mo) && mo.ValueKind == JsonValueKind.Number ? mo.GetInt32() : null));
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// 按供应商名称切换 Token 区与「获取模型列表」按钮：
+    /// AgentBrook → 显示充值按钮（Key 即当前 API Key，无需重填）；
+    /// DeepSeek → 显示「获取模型列表」（官方 /models 支持）；
+    /// 其他供应商 → 等拿到各自的模型列表接口后再显示。
+    /// </summary>
+    private void RefreshProviderSpecificUi()
+    {
+        var name = NameBox.Text?.Trim() ?? "";
+        var isAgentBrook = name == "AgentBrook";
+        var supportsFetch = isAgentBrook || name == "DeepSeek";
+
+        var fetchBtn = this.FindControl<Button>("FetchModelsBtn");
+        if (fetchBtn is not null) fetchBtn.IsVisible = supportsFetch;
+        var rechargePanel = this.FindControl<StackPanel>("TokenRechargePanel");
+        if (rechargePanel is not null) rechargePanel.IsVisible = isAgentBrook;
+    }
+
+    /// <summary>打开 Token卡购买/充值页；充值时带上当前 AgentBrook 供应商的 Key 预填。</summary>
+    private void OpenTokenPurchasePage(bool recharge = false)
+    {
+        try
+        {
+            var url = TokenPurchaseUrl;
+            if (recharge)
+            {
+                SyncFormIntoWorking();
+                var p = _selectedIndex >= 0 && _selectedIndex < _working.Count ? _working[_selectedIndex] : null;
+                var key = p?.ApiKey ?? "";
+                if (p?.Name == "AgentBrook" && !string.IsNullOrWhiteSpace(key))
+                    url += "?mode=2&key=" + Uri.EscapeDataString(key);
+            }
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            var hint = this.FindControl<TextBlock>("TokenHint");
+            if (hint is not null)
+                hint.Text = recharge
+                    ? I18n.T("ui.token.recharge.opened")
+                    : I18n.T("ui.token.buy.opened");
+        }
+        catch (Exception ex)
+        {
+            Hint(I18n.T("ui.token.open.fail", ex.Message));
+        }
+    }
+
+    /// <summary>「获取模型列表」：用表单当前的 API 地址 + Key 拉取并填充模型清单，附参数摘要。</summary>
+    private async Task FetchModelsBtnAsync()
+    {
+        SyncFormIntoWorking();
+        if (_selectedIndex < 0 || _selectedIndex >= _working.Count) return;
+        var p = _working[_selectedIndex];
+        if (string.IsNullOrWhiteSpace(p.BaseUrl) || string.IsNullOrWhiteSpace(p.ApiKey))
+        {
+            Hint(I18n.T("ui.models.fetch.need.url.key"));
+            return;
+        }
+        try
+        {
+            var modelsBase = p.Name == "AgentBrook" ? p.BaseUrl.TrimEnd('/') + "/v1" : p.BaseUrl;
+            var models = await FetchRelayModelsAsync(modelsBase, p.ApiKey);
+            if (models.Count == 0)
+            {
+                Hint(I18n.T("ui.models.fetch.empty"));
+                return;
+            }
+            p.Models = models.Select(m => m.Id).ToList();
+            if (string.IsNullOrEmpty(p.ActiveModel) || !p.Models.Contains(p.ActiveModel))
+                p.ActiveModel = p.Models[0];
+            ModelsBox.Text = string.Join(", ", p.Models);
+            var first = models[0];
+            var extra = first.ContextWindow.HasValue || first.MaxOutput.HasValue
+                ? I18n.T("ui.models.fetch.params", first.Id, first.ContextWindow?.ToString() ?? "-", first.MaxOutput?.ToString() ?? "-")
+                : "";
+            Hint(I18n.T("ui.models.fetch.ok", models.Count, extra));
+        }
+        catch (Exception ex)
+        {
+            Hint(I18n.T("ui.models.fetch.fail", ex.Message));
         }
     }
 

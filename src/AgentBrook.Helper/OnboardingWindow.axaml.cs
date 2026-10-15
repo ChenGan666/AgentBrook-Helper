@@ -8,6 +8,8 @@ using Avalonia.Markup.Xaml;
 using Avalonia.Controls.Primitives;
 using Avalonia.Threading;
 using System.Diagnostics;
+using System.Text;
+using Microsoft.Extensions.Configuration;
 
 namespace AgentBrook.Helper;
 
@@ -28,6 +30,9 @@ public partial class OnboardingWindow : WindowBase
     private int _step;
     private string _icon = "🦊";
     private bool _providerSaved;   // 步骤 1 的大模型是否已落盘（取名按钮依赖它激活模型）
+    private bool _trialRequested;  // 试用卡只自动申请一次
+    private string? _trialKey;     // 试用卡 Key（申请成功后填充）
+    private bool _trialFilled;    // 试用卡已自动填充大模型配置（保存时类型名固定 AgentBrook）
 
     public OnboardingWindow()
     {
@@ -43,6 +48,9 @@ public partial class OnboardingWindow : WindowBase
         }
         presets.SelectedIndex = 0;
         presets.SelectionChanged += (_, _) => ApplyPreset();
+
+        // 首次引导：自动向 AgentBrook.Service 申请试用卡（24小时/5元，绑定设备与公网IP）
+        Opened += (_, _) => { if (!_trialRequested) { _trialRequested = true; _ = RequestTrialAsync(); } };
 
         this.FindControl<Button>("SkipBtn")!.Click += (_, _) => CloseOnboarding("skipped");
 
@@ -302,6 +310,96 @@ public partial class OnboardingWindow : WindowBase
         }
     }
 
+    // ── 试用卡：自动申请并填充大模型配置（类型 AgentBrook，端点为中转网关） ──
+
+    private static (string ServiceUrl, string RelayPublicUrl) LoadTokenConfig()
+    {
+        try
+        {
+            var configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+                .SetBasePath(AppContext.BaseDirectory)
+                .AddJsonFile("appsettings.json", optional: true)
+                .AddEnvironmentVariables("AGENTBROOK_")
+                .Build();
+            var serviceUrl = configuration["Token:ServiceUrl"];
+            var relayUrl = configuration["Token:RelayPublicUrl"];
+            return (string.IsNullOrWhiteSpace(serviceUrl) ? "http://127.0.0.1:5300" : serviceUrl,
+                    string.IsNullOrWhiteSpace(relayUrl) ? "https://api.agentbrook.com" : relayUrl);
+        }
+        catch
+        {
+            return ("http://127.0.0.1:5300", "https://api.agentbrook.com");
+        }
+    }
+
+    private async Task RequestTrialAsync()
+    {
+        var hint = this.FindControl<TextBlock>("TrialHint");
+        try
+        {
+            var (serviceUrl, relayPublicUrl) = LoadTokenConfig();
+            var (fingerprint, hostname, osInfo) = ClientFingerprint.Get();
+            using var client = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            using var content = new System.Net.Http.StringContent(
+                System.Text.Json.JsonSerializer.Serialize(new { fingerprint, hostname, os = osInfo }),
+                Encoding.UTF8, "application/json");
+            using var resp = await client.PostAsync($"{serviceUrl.TrimEnd('/')}/Token/Api/Trial", content);
+            var body = await resp.Content.ReadAsStringAsync();
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            var code = doc.RootElement.GetProperty("code").GetInt32();
+            var message = doc.RootElement.GetProperty("message").GetString() ?? "";
+
+            if (code != 0)
+            {
+                if (hint is not null)
+                    hint.Text = I18n.T("onboarding.trial.dup", message);
+                return;
+            }
+
+            var data = doc.RootElement.GetProperty("data");
+            _trialKey = data.GetProperty("key").GetString() ?? "";
+            var baseUrl = data.GetProperty("base_url").GetString() ?? relayPublicUrl;
+            var models = data.GetProperty("models").EnumerateArray()
+                .Select(m => m.GetString() ?? "").Where(m => m.Length > 0).ToList();
+            var expire = data.GetProperty("expire").GetString();
+
+            // 自动填充大模型配置：类型 AgentBrook、端点为中转网关、Key 为试用卡 Key
+            this.FindControl<TextBox>("BaseUrlBox")!.Text = baseUrl;
+            this.FindControl<TextBox>("ApiKeyBox")!.Text = _trialKey;
+            this.FindControl<TextBox>("ModelsBox")!.Text = string.Join(", ", models);
+            var presetBox = this.FindControl<ComboBox>("PresetBox")!;
+            var idx = Presets.ToList().FindIndex(p => p.Name == "AgentBrook");
+            if (idx >= 0) presetBox.SelectedIndex = idx;   // 会触发 ApplyPreset，下面重新覆盖动态值
+            this.FindControl<TextBox>("BaseUrlBox")!.Text = baseUrl;
+            this.FindControl<TextBox>("ApiKeyBox")!.Text = _trialKey;
+            this.FindControl<TextBox>("ModelsBox")!.Text = string.Join(", ", models);
+
+            _trialFilled = true;
+            if (hint is not null)
+                hint.Text = I18n.T("onboarding.trial.ok", expire);
+        }
+        catch (Exception ex)
+        {
+            if (hint is not null)
+                hint.Text = I18n.T("onboarding.trial.unreachable", ex.Message);
+        }
+    }
+
+    private async Task SaveTrialProviderAsync(string baseUrl, string modelsText)
+    {
+        var provider = new ProviderConfig
+        {
+            Name = "AgentBrook",
+            BaseUrl = baseUrl,
+            ApiKey = _trialKey ?? "",
+            Models = modelsText.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList(),
+            ActiveModel = "",
+        };
+        provider.ActiveModel = provider.Models.FirstOrDefault() ?? "";
+        await App.Controller.SaveProvidersAsync([provider], provider.Name);
+        _providerSaved = true;
+    }
+
     // ── 预设 → 填充端点/模型（“自定义”不覆盖手输内容） ──
     private void ApplyPreset()
     {
@@ -383,7 +481,8 @@ public partial class OnboardingWindow : WindowBase
         {
             return false;
         }
-        var presetName = (this.FindControl<ComboBox>("PresetBox")!.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "自定义";
+        var presetName = _trialFilled ? "AgentBrook"
+            : (this.FindControl<ComboBox>("PresetBox")!.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "自定义";
         var provider = new ProviderConfig
         {
             Name = string.IsNullOrWhiteSpace(presetName) ? "自定义" : presetName,
@@ -394,7 +493,11 @@ public partial class OnboardingWindow : WindowBase
         };
         try
         {
-            App.Controller.SaveProvidersAsync([provider], provider.Name).GetAwaiter().GetResult();
+            // 合并保存：保留其他已有供应商，仅替换/追加当前这一个（避免覆盖用户原有配置）
+            var existing = App.Controller.Providers.ToList();
+            var idx = existing.FindIndex(p => p.Name == provider.Name);
+            if (idx >= 0) existing[idx] = provider; else existing.Add(provider);
+            App.Controller.SaveProvidersAsync(existing, provider.Name).GetAwaiter().GetResult();
             _providerSaved = true;
             return true;
         }
