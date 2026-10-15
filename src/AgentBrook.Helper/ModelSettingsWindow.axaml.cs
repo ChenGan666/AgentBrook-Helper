@@ -19,17 +19,6 @@ namespace AgentBrook.Helper;
 /// </summary>
 public partial class ModelSettingsWindow : WindowBase
 {
-    /// <summary>预设模板：名称 →（默认端点，默认模型 CSV）。</summary>
-    private static readonly (string Name, string BaseUrl, string Models)[] Presets =
-    [
-        ("DeepSeek", "https://api.deepseek.com", "deepseek-flash, deepseek-v4-pro"),
-        ("OpenAI", "https://api.openai.com/v1", "gpt-4o, gpt-4o-mini"),
-        ("Kimi", "https://api.moonshot.cn/v1", "moonshot-v1-8k, moonshot-v1-32k"),
-        ("智谱 GLM", "https://open.bigmodel.cn/api/paas/v4", "glm-4.5-flash"),
-        ("OpenRouter", "https://openrouter.ai/api/v1", "openai/gpt-4o-mini"),
-        ("自定义", "", ""),
-    ];
-
     private List<ProviderConfig> _working = new();
     private string _activeName = "";
     private int _selectedIndex = -1;
@@ -623,14 +612,14 @@ public partial class ModelSettingsWindow : WindowBase
                 UiPrefs.Save("update-prefs.json", new UpdatePrefs(daily?.IsChecked != false, autoDownload.IsChecked == true));
         }
 
-        ShowCollabHint(hint, a2a.Config.Enabled ? I18n.T("ui.a2a.collaboration.enabled") : I18n.T("ui.a2a.collaboration.disabled"));
+        PostHint(hint, a2a.Config.Enabled ? I18n.T("ui.a2a.collaboration.enabled") : I18n.T("ui.a2a.collaboration.disabled"));
 
         enabled.IsCheckedChanged += async (_, _) =>
         {
             var on = enabled.IsChecked == true;
             a2a.Config.Enabled = on;
             a2a.SaveConfig();
-            ShowCollabHint(hint, on ? I18n.T("ui.enabled.starting.a2a") : I18n.T("ui.disabled.disconnecting.a2a"));
+            PostHint(hint, on ? I18n.T("ui.enabled.starting.a2a") : I18n.T("ui.disabled.disconnecting.a2a"));
             try
             {
                 if (on)
@@ -641,11 +630,11 @@ public partial class ModelSettingsWindow : WindowBase
                 {
                     await a2a.StopAsync();
                 }
-                ShowCollabHint(hint, on ? I18n.T("ui.enabled.a2a.online") : I18n.T("ui.disabled.a2a.disconnected.tick.again.to.restore"));
+                PostHint(hint, on ? I18n.T("ui.enabled.a2a.online") : I18n.T("ui.disabled.a2a.disconnected.tick.again.to.restore"));
             }
             catch (Exception ex)
             {
-                ShowCollabHint(hint, I18n.T("ui.operation.failed.value", ex.Message));
+                PostHint(hint, I18n.T("ui.operation.failed.value", ex.Message));
             }
         };
         peerAuto.IsCheckedChanged += (_, _) =>
@@ -683,15 +672,6 @@ public partial class ModelSettingsWindow : WindowBase
             a2a.SaveConfig();
         };
     }
-
-    private static void ShowCollabHint(TextBlock? hint, string message)
-        => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-        {
-            if (hint is not null)
-            {
-                hint.Text = message;
-            }
-        });
 
     private async Task CheckUpdateAsync()
     {
@@ -1063,11 +1043,19 @@ public partial class ModelSettingsWindow : WindowBase
             var b = new Button
             {
                 Classes = { "presetBtn" },
-                Content = name == "自定义" ? I18n.T("ui.create.custom.provider") : name,
+                Content = name,
             };
             b.Click += (_, _) => AddProvider(presetName, baseUrl, models);
             PresetPanel.Children.Add(b);
         }
+
+        var custom = new Button
+        {
+            Classes = { "presetBtn" },
+            Content = I18n.T("ui.create.custom.provider"),
+        };
+        custom.Click += (_, _) => AddProvider();
+        PresetPanel.Children.Add(custom);
     }
 
     private void AddProvider(string? presetName = null, string presetUrl = "", string presetModels = "")
@@ -1162,6 +1150,11 @@ public partial class ModelSettingsWindow : WindowBase
     /// <summary>模型连通性测试：用表单当前填写的参数直连一次对话补全（不落盘、不影响已保存配置）。</summary>
     private async Task TestProviderAsync()
     {
+        var testHint = this.FindControl<TextBlock>("ModelTestHint");
+        if (testHint is not null)
+        {
+            testHint.Text = "";
+        }
         SyncFormIntoWorking();
         if (_selectedIndex < 0 || _selectedIndex >= _working.Count)
         {
@@ -1170,7 +1163,10 @@ public partial class ModelSettingsWindow : WindowBase
         var p = _working[_selectedIndex];
         if (!p.IsConfigured)
         {
-            Hint(I18n.T("ui.models.test.need.config"));
+            if (testHint is not null)
+            {
+                testHint.Text = I18n.T("ui.models.test.need.config");
+            }
             return;
         }
         var model = p.ActiveModel;
@@ -1186,16 +1182,25 @@ public partial class ModelSettingsWindow : WindowBase
             var reply = await PingModelAsync(p.BaseUrl, p.ApiKey, model);
             sw.Stop();
             reply = reply.Trim();
-            Hint(I18n.T("ui.models.test.ok", sw.ElapsedMilliseconds / 1000.0,
-                string.IsNullOrWhiteSpace(reply) ? "(空回复)" : (reply.Length > 60 ? reply[..60] + "…" : reply)));
+            if (testHint is not null)
+            {
+                testHint.Text = I18n.T("ui.models.test.ok", sw.ElapsedMilliseconds / 1000.0,
+                    string.IsNullOrWhiteSpace(reply) ? "(空回复)" : (reply.Length > 60 ? reply[..60] + "…" : reply));
+            }
         }
         catch (OperationCanceledException)
         {
-            Hint(I18n.T("ui.models.test.timeout"));
+            if (testHint is not null)
+            {
+                testHint.Text = I18n.T("ui.models.test.timeout");
+            }
         }
         catch (Exception ex)
         {
-            Hint(I18n.T("ui.models.test.fail", ex.Message));
+            if (testHint is not null)
+            {
+                testHint.Text = I18n.T("ui.models.test.fail", ex.Message);
+            }
         }
         finally
         {

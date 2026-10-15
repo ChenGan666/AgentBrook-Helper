@@ -356,7 +356,7 @@
                     <Button Grid.Column="1" x:Name="SaveApplyBtn" Classes="primaryBtn" Content="保存并应用" Margin="0,0,8,0"/>
                     <Button Grid.Column="2" x:Name="CloseBtn" Classes="ghostBtn" Content="关闭"/>
                 </Grid>
-                <Grid ColumnDefinitions="230,*,240" ColumnSpacing="14">
+                <Grid ColumnDefinitions="230,*,190" ColumnSpacing="14">
                     <Border Grid.Column="0" Background="#252525" CornerRadius="12" Padding="8"
                             BorderBrush="#333333" BorderThickness="1">
                         <Grid RowDefinitions="*,Auto">
@@ -383,6 +383,8 @@
                                     <Button x:Name="TestBtn" Classes="ghostBtn" Content="测试" Tag="provider-test"/>
                                     <Button x:Name="DeleteBtn" Classes="dangerBtn" Content="删除此供应商"/>
                                 </StackPanel>
+                                <TextBlock x:Name="ModelTestHint" Text="" FontSize="12" Foreground="#8a8a8a"
+                                           TextWrapping="Wrap" Margin="0,8,0,0"/>
                             </StackPanel>
                         </ScrollViewer>
                     </Border>

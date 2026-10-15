@@ -18,7 +18,6 @@ namespace AgentBrook.Helper;
 /// </summary>
 public partial class OnboardingWindow : WindowBase
 {
-    /// <summary>预设模板：名称 →（默认端点，默认模型 CSV）。与设置窗口保持一致。</summary>
     /// <summary>向导用 Helper 图标（emoji 子集，完整 84 个在设置页可选）。</summary>
     private static readonly string[] IconChoices =
     [
@@ -427,10 +426,10 @@ public partial class OnboardingWindow : WindowBase
             {
                 if (namingAttempt >= 2)
                 {
-                    ShowCollabHintFor(hint, I18n.T("onboarding.s1.naming.failed") + " " + ex.Message);
+                    PostHint(hint, I18n.T("onboarding.s1.naming.failed") + " " + ex.Message);
                     break;
                 }
-                ShowCollabHintFor(hint, I18n.T("onboarding.s1.naming.failed") + " " + ex.Message + "，自动重试…");
+                PostHint(hint, I18n.T("onboarding.s1.naming.failed") + " " + ex.Message + "，自动重试…");
                 await Task.Delay(2500);
             }
             finally
@@ -497,11 +496,8 @@ public partial class OnboardingWindow : WindowBase
             throw new InvalidOperationException(I18n.T("onboarding.s1.naming.failed"));
         }
         this.FindControl<TextBox>("NameBox")!.Text = result;
-        ShowCollabHintFor(hint, I18n.T("onboarding.s1.naming.done", result));
+        PostHint(hint, I18n.T("onboarding.s1.naming.done", result));
     }
-
-    private static void ShowCollabHintFor(TextBlock hint, string message)
-        => Avalonia.Threading.Dispatcher.UIThread.Post(() => hint.Text = message);
 
     private void ShowDone()
     {

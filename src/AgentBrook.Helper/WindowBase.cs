@@ -39,6 +39,18 @@ public abstract class WindowBase : Window
         }
     }
 
+    /// <summary>在 UI 线程安全更新提示文本。</summary>
+    protected static void PostHint(TextBlock? hint, string message)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            if (hint is not null)
+            {
+                hint.Text = message;
+            }
+        });
+    }
+
     /// <summary>订阅语言切换事件；切换时回调 <see cref="OnLanguageChanged"/>（派生窗口刷新各自文案）。</summary>
     protected void WatchLanguageChanges()
     {
