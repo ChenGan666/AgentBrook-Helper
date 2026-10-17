@@ -436,6 +436,13 @@ public sealed class AssistantController : IBrookInteraction
     /// <summary>排队纯文本输入（兼容性入口）。</summary>
     public void EnqueueInput(string text) => EnqueueInput(new ChatMessage(ChatRole.User, text));
 
+    /// <summary>清空排队中的输入（用户点击排队条上的删除按钮）。</summary>
+    public void ClearQueuedInput()
+    {
+        _queuedInput.Clear();
+        QueueChanged?.Invoke(_queuedInput.Count);
+    }
+
     public async Task NewSessionAsync()
     {
         if (Busy || !Ready)

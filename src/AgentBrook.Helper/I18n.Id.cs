@@ -32,6 +32,7 @@ internal static partial class I18n
         ["onboarding.trial.ok"] = "🎉 Kartu uji aktif dan terisi otomatis: ¥5 / 24 jam (kedaluwarsa {0}). Klik \"Uji\" untuk verifikasi, lalu simpan. Isi ulang otomatis berlaku.",
         ["onboarding.trial.dup"] = "{0} Isi konfigurasi model yang ada atau beli Token card.",
         ["onboarding.trial.unreachable"] = "Layanan kartu uji tidak dapat dihubungi ({0}). Isi konfigurasi model manual atau coba lagi nanti.",
+        ["onboarding.trial.not.available"] = "Kartu uji segera hadir. Isi konfigurasi model manual untuk sementara.",
         ["onboarding.s2.test"] = "Uji",
         ["onboarding.s2.testing"] = "Menguji…",
         ["onboarding.s2.test.need"] = "Isi alamat API dan API Key dulu",

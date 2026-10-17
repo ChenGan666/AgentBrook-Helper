@@ -32,6 +32,7 @@ internal static partial class I18n
         ["onboarding.trial.ok"] = "🎉 Trial card activated and auto-filled: ¥5 / 24 hours (expires {0}). Click \"Test\" to verify, then save. Top-ups apply automatically — no config change needed.",
         ["onboarding.trial.dup"] = "{0} You can fill in an existing model config or buy a Token card.",
         ["onboarding.trial.unreachable"] = "Trial service unreachable ({0}). Fill in the model config manually or retry later.",
+        ["onboarding.trial.not.available"] = "Trial cards are coming soon. Please fill in your model config manually for now.",
         ["onboarding.s2.test"] = "Test",
         ["onboarding.s2.testing"] = "Testing…",
         ["onboarding.s2.test.need"] = "Fill in the API endpoint and API key first",

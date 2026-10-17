@@ -32,6 +32,7 @@ internal static partial class I18n
         ["onboarding.trial.ok"] = "🎉 试用卡已开通并自动填充：5 元 / 24 小时（{0}）。点「测试」验证连通，完成后保存即可使用。充值后余额自动到账，配置无需改动。",
         ["onboarding.trial.dup"] = "{0}（可直接填写已有模型配置，或购买 Token卡）",
         ["onboarding.trial.unreachable"] = "试用卡服务暂不可达（{0}），请手动填写模型配置或稍后重试。",
+        ["onboarding.trial.not.available"] = "试用卡功能即将上线，敬请期待；请先手动填写大模型配置。",
         ["onboarding.s2.test"] = "测试",
         ["onboarding.s2.testing"] = "测试中…",
         ["onboarding.s2.test.need"] = "请先填写 API 地址与 API Key",

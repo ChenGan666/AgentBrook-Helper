@@ -247,6 +247,7 @@ public partial class MainWindow : Window
         _controller.QueueChanged += n =>
         {
             _queuedHintCount = n;
+            this.FindControl<Button>("QueueClearBtn")!.Click += (_, _) => ClearQueuedMessages();
             Dispatcher.UIThread.Post(UpdateQueueBar);
         };
         _controller.UserSaid += text =>
@@ -569,6 +570,14 @@ public partial class MainWindow : Window
         text.Text = I18n.T("ui.value.queued.will.send.after.the.current.turn", _queuedHintCount);
     }
     private int _queuedHintCount;
+
+    /// <summary>删除排队中的消息（清空队列）。</summary>
+    private void ClearQueuedMessages()
+    {
+        _controller.ClearQueuedInput();
+        _queuedHintCount = 0;
+        UpdateQueueBar();
+    }
 
     /// <summary>把个性化设置（名字）应用到窗口标题与顶栏。</summary>
     public void ApplyStaticTexts()
@@ -1074,7 +1083,7 @@ public partial class MainWindow : Window
                 {
                     Background = new SolidColorBrush(Color.Parse("#333333")),
                     CornerRadius = new CornerRadius(8),
-                    Padding = new Thickness(9),
+                    Padding = new Thickness(8, 6),
                     Child = new SelectableTextBlock
                     {
                         Text = FormatArgsForApproval(argsJson),

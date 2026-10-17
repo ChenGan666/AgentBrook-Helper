@@ -26,7 +26,7 @@
         <Style Selector="Border.userBubble">
             <Setter Property="Background" Value="#393939"/>
             <Setter Property="CornerRadius" Value="16,16,4,16"/>
-            <Setter Property="Padding" Value="13,9"/>
+            <Setter Property="Padding" Value="10,9"/>
             <Setter Property="Margin" Value="64,0,0,0"/>
             <Setter Property="HorizontalAlignment" Value="Right"/>
             <Setter Property="MaxWidth" Value="400"/>
@@ -41,7 +41,7 @@
         <Style Selector="Border.assistantBlock">
             <Setter Property="Background" Value="#2b2b2b"/>
             <Setter Property="CornerRadius" Value="4,14,14,14"/>
-            <Setter Property="Padding" Value="14,10"/>
+            <Setter Property="Padding" Value="10,10"/>
             <Setter Property="Margin" Value="0,0,48,0"/>
             <Setter Property="HorizontalAlignment" Value="Left"/>
             <Setter Property="MaxWidth" Value="420"/>
@@ -59,7 +59,7 @@
         <Style Selector="Border.errorBox">
             <Setter Property="Background" Value="#33231f"/>
             <Setter Property="CornerRadius" Value="12"/>
-            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="Padding" Value="10,8"/>
             <Setter Property="HorizontalAlignment" Value="Center"/>
         </Style>
         <Style Selector="Border.errorBox > TextBlock">
@@ -73,7 +73,7 @@
             <Setter Property="BorderBrush" Value="#5a5a5a"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="CornerRadius" Value="12"/>
-            <Setter Property="Padding" Value="14"/>
+            <Setter Property="Padding" Value="10"/>
             <Setter Property="Margin" Value="0,0,24,0"/>
         </Style>
         <Style Selector="Border.card.ask">
@@ -199,6 +199,20 @@
         <Style Selector="Button.sendBtn:pressed /template/ ContentPresenter">
             <Setter Property="Background" Value="#d8d8d8"/>
         </Style>
+        <!-- 紧凑折叠组（原始指令 / 执行过程） -->
+        <Style Selector="Expander.execGroup">
+            <Setter Property="Padding" Value="10,4"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+        </Style>
+        <Style Selector="Expander.execGroup /template/ ToggleButton#PART_toggle">
+            <Setter Property="MinHeight" Value="0"/>
+            <Setter Property="Padding" Value="0,5"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Background" Value="Transparent"/>
+        </Style>
+        <Style Selector="Expander.execGroup /template/ TextBlock">
+            <Setter Property="FontSize" Value="12.5"/>
+        </Style>
     </Window.Styles>
 
     <Grid RowDefinitions="Auto,*,Auto">
@@ -222,11 +236,12 @@
                     <!-- 会话切换器：助手名 + 当前会话标题，点击弹出会话列表 -->
                     <Button x:Name="SessionBtn" Background="Transparent" Padding="6,3" CornerRadius="6"
                             HorizontalContentAlignment="Left" ToolTip.Tip="切换会话">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
+                        <StackPanel Orientation="Horizontal" Spacing="6" MaxWidth="380">
                             <TextBlock x:Name="AgentNameText" Text="Brook" FontSize="15" FontWeight="SemiBold"
-                                       VerticalAlignment="Center" Foreground="#e6e6e6"/>
+                                       VerticalAlignment="Center" Foreground="#e6e6e6"
+                                       TextTrimming="CharacterEllipsis" MaxWidth="150"/>
                             <TextBlock x:Name="SessionTitleText" Text="" FontSize="12.5" VerticalAlignment="Center"
-                                       Foreground="#8a8a8a"/>
+                                       Foreground="#8a8a8a" TextTrimming="CharacterEllipsis" MaxWidth="200"/>
                         </StackPanel>
                     </Button>
                 </StackPanel>
@@ -247,7 +262,15 @@
                                 Spacing="6" IsVisible="False"/>
                     <Border Grid.Row="0" x:Name="QueueBar" Classes="attachChip" IsVisible="False"
                             HorizontalAlignment="Left" Margin="0,0,0,4">
-                        <TextBlock x:Name="QueueText" FontSize="12" Foreground="#d29922"/>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock x:Name="QueueText" FontSize="12" Foreground="#d29922"
+                                       VerticalAlignment="Center"/>
+                            <Button x:Name="QueueClearBtn" Background="Transparent" Padding="2"
+                                    ToolTip.Tip="删除排队消息" VerticalAlignment="Center">
+                                <PathIcon Data="{StaticResource Icon.Close}" Width="12" Height="12"
+                                          Foreground="#d29922"/>
+                            </Button>
+                        </StackPanel>
                     </Border>
                     <TextBox Grid.Row="1" x:Name="InputBox" Classes="plainInput" Watermark="输入消息，@ 选 Helper、# 选群组，Ctrl+Enter 发送"
                              FontSize="14.5" Foreground="#e6e6e6" Background="Transparent"

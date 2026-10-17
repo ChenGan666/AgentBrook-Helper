@@ -61,7 +61,8 @@
     </Grid>
     <TextBlock Grid.Row="1" x:Name="StepText" Text="" Margin="0,6,0,12" FontSize="12" Foreground="#78b7ff"/>
 
-    <Panel Grid.Row="2">
+    <ScrollViewer Grid.Row="2" Padding="0,0,6,0">
+      <Panel>
       <!-- 步骤 2：大模型 -->
       <StackPanel x:Name="StepModels" Spacing="8" IsVisible="False">
         <TextBlock x:Name="S1Welcome" Text="欢迎使用 AgentBrook Helper！先配置一个大模型供应商（OpenAI 兼容，可稍后在「设置 → 模型」中修改）。" TextWrapping="Wrap" Foreground="#c8c8c8"/>
@@ -147,6 +148,7 @@
         <Button x:Name="RestartBtn" Classes="primaryBtn" Content="立即重启应用" HorizontalAlignment="Left"/>
       </StackPanel>
     </Panel>
+    </ScrollViewer>
 
     <Grid Grid.Row="3" ColumnDefinitions="*,Auto,Auto" Margin="0,14,0,0">
       <Button x:Name="BackBtn" Classes="ghostBtn" Content="上一步" IsVisible="False"/>

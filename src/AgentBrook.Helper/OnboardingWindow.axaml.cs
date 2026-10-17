@@ -323,12 +323,12 @@ public partial class OnboardingWindow : WindowBase
                 .Build();
             var serviceUrl = configuration["Token:ServiceUrl"];
             var relayUrl = configuration["Token:RelayPublicUrl"];
-            return (string.IsNullOrWhiteSpace(serviceUrl) ? "http://127.0.0.1:5300" : serviceUrl,
+            return (string.IsNullOrWhiteSpace(serviceUrl) ? "https://helper.agentbrook.com" : serviceUrl,
                     string.IsNullOrWhiteSpace(relayUrl) ? "https://api.agentbrook.com" : relayUrl);
         }
         catch
         {
-            return ("http://127.0.0.1:5300", "https://api.agentbrook.com");
+            return ("https://helper.agentbrook.com", "https://api.agentbrook.com");
         }
     }
 
@@ -377,6 +377,12 @@ public partial class OnboardingWindow : WindowBase
             _trialFilled = true;
             if (hint is not null)
                 hint.Text = I18n.T("onboarding.trial.ok", expire);
+        }
+        catch (HttpRequestException)
+        {
+            // 计费服务未部署/不可达属正常场景（空响应或连接失败均走这里），给友好提示
+            if (hint is not null)
+                hint.Text = I18n.T("onboarding.trial.not.available");
         }
         catch (Exception ex)
         {
