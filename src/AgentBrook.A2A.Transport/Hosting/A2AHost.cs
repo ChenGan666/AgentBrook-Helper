@@ -160,7 +160,12 @@ public sealed class A2AHost : IAsyncDisposable
 
     private WebApplication BuildApplication(int port)
     {
-        var builder = WebApplication.CreateBuilder();
+        // ContentRoot 必须显式指定：Finder/launchd 启动时进程 cwd 是 "/"，默认 ContentRoot=根目录，
+        // 配置 reloadOnChange 的文件监视会挂在 / 上，全盘文件变动都触发回调与目录枚举风暴
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            ContentRootPath = AppContext.BaseDirectory,
+        });
         builder.WebHost.UseKestrel();
         builder.WebHost.ConfigureKestrel(options =>
         {
@@ -198,6 +203,8 @@ public sealed class A2AHost : IAsyncDisposable
         builder.Services.AddSingleton<AgentBrookExtensionHandler>();
         builder.Services.AddSingleton<A2ASecurityMiddleware>();
         var app = builder.Build();
+        // 双保险：内容根不提供任何文件（A2A 端点无静态资源），杜绝后续对 ContentRoot 的监视/枚举
+        app.Environment.ContentRootFileProvider = new Microsoft.Extensions.FileProviders.NullFileProvider();
         if (!string.IsNullOrEmpty(_options.PathBase))
         {
             app.UsePathBase(_options.PathBase);

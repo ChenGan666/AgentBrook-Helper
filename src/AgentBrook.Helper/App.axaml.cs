@@ -192,6 +192,7 @@ public partial class App : Application
                     conversation.AddAskCard("文件想放在哪里？",
                         "重新复制到桌面|就放工作区|放到其他目录",
                         new System.Threading.Tasks.TaskCompletionSource<string>());
+                    conversation.DebugSeedCardInputs();   // 灌入超长文本验证输入框固定宽度自动换行
                 };
                 timer.Start();
             }

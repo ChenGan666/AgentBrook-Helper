@@ -487,11 +487,11 @@ public partial class BubbleWindow : Window
         if (OperatingSystem.IsMacOS() && _compactMode)
         {
             // 把紧凑窗口位置转换为等效的非紧凑窗口位置，保持 PlaceBubble 兼容
-            var scale = RenderScaling;
+            // （macOS 的 PixelPoint 为点单位，同上不乘 RenderScaling）
             const double dxDip = (240.0 - 96.0) / 2.0 - (120.0 - 96.0) / 2.0;   // 60
             const double dyDip = 24.0 - 12.0;                                   // 12
-            x -= (int)(dxDip * scale);
-            y -= (int)(dyDip * scale);
+            x -= (int)dxDip;
+            y -= (int)dyDip;
         }
         UiPrefs.Save("bubble-pos.json", new BubblePos(x, y));
     }
@@ -561,7 +561,6 @@ public partial class BubbleWindow : Window
         var needCompact = _toastPanel.Children.Count == 0 && _orbit.Count == 0;
         if (needCompact == _compactMode || !IsVisible) return;
 
-        var scale = RenderScaling;
         const double compactSize = 120.0;
         const double normalWidth = 240.0;
         const double bubbleSize = 96.0;
@@ -577,9 +576,9 @@ public partial class BubbleWindow : Window
             // 推到 (66,66) 而非下方位置补偿假设的 (60,60)，导致切模式时气泡跳动、贴边图标多裁 6px
             root.Margin = new Thickness(12, 12, 12, 12);
             orbit.Margin = new Thickness(12, 12, 12, 12);
-            Position = new PixelPoint(
-                Position.X + (int)(dxDip * scale),
-                Position.Y + (int)(dyDip * scale));
+            // macOS 的 PixelPoint 与 Screen.Bounds 同为点（DIP）单位，不乘 RenderScaling——
+            // 乘了会把补偿量放大一倍，轨道图标出现/消失时气泡整体跳动 60pt
+            Position = new PixelPoint(Position.X + (int)dxDip, Position.Y + (int)dyDip);
             Width = compactSize;
             Height = compactSize;
             SizeToContent = SizeToContent.Manual;
@@ -589,9 +588,7 @@ public partial class BubbleWindow : Window
         {
             root.Margin = new Thickness(0, 24, 0, 0);
             orbit.Margin = new Thickness(0, 24, 0, 0);
-            Position = new PixelPoint(
-                Position.X - (int)(dxDip * scale),
-                Position.Y - (int)(dyDip * scale));
+            Position = new PixelPoint(Position.X - (int)dxDip, Position.Y - (int)dyDip);
             Width = normalWidth;
             ClearValue(HeightProperty);
             SizeToContent = SizeToContent.Height;

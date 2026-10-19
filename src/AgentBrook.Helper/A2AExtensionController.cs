@@ -304,6 +304,15 @@ public sealed class A2AExtensionController : IAsyncDisposable
                 Approval = approval
             };
             _interactions.Insert(0, added);
+            // 协作记录上限：进程常驻 + 远程消息每条都入列，不设上限会无界增长；
+            // 超出部分从最旧端丢弃，Pending 审批条目保留（其 TCS 仍有等待方）
+            const int MaxInteractions = 200;
+            if (_interactions.Count > MaxInteractions)
+            {
+                var overflow = _interactions.Skip(MaxInteractions).ToList();
+                _interactions.RemoveRange(MaxInteractions, _interactions.Count - MaxInteractions);
+                _interactions.AddRange(overflow.Where(x => x.State == A2AInteractionState.Pending));
+            }
             if (approval is not null)
             {
                 // 气泡上的批准/拒绝同样回写条目状态（Inbox 按钮随之隐藏，两入口状态一致）。

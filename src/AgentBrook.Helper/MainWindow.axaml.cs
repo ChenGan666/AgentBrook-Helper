@@ -1100,7 +1100,13 @@ public partial class MainWindow : Window
             stack.Children.Add(argsExpander);
         }
 
-        var reasonBox = new TextBox { Watermark = I18n.T("ui.reason.for.rejection.optional"), FontSize = 13.5 };
+        // 固定宽度自动换行：拒绝原因可能很长，单行横向滚动看不全，宽度受卡片约束、长文自动折行增高
+        var reasonBox = new TextBox
+        {
+            Watermark = I18n.T("ui.reason.for.rejection.optional"),
+            FontSize = 13.5,
+            TextWrapping = TextWrapping.Wrap,
+        };
         var ok = new Button { Content = I18n.T("ui.approve"), Classes = { "actionOk" } };
         var full = new Button { Content = I18n.T("ui.full.access"), Classes = { "actionFull" } };
         var no = new Button { Content = I18n.T("ui.reject"), Classes = { "actionNo" } };
@@ -1208,7 +1214,13 @@ public partial class MainWindow : Window
             Foreground = new SolidColorBrush(Color.Parse("#f0f0f0")),
         });
 
-        var answerBox = new TextBox { Watermark = I18n.T("ui.type.your.answer"), FontSize = 15 };
+        // 固定宽度自动换行：长回答自动折行增高，不横向溢出
+        var answerBox = new TextBox
+        {
+            Watermark = I18n.T("ui.type.your.answer"),
+            FontSize = 15,
+            TextWrapping = TextWrapping.Wrap,
+        };
         var answerBtn = new Button { Content = I18n.T("ui.answer"), Classes = { "actionOk" } };
         var choicesRow = new WrapPanel { Orientation = Orientation.Horizontal };
 
@@ -1255,13 +1267,30 @@ public partial class MainWindow : Window
         };
 
         stack.Children.Add(choicesRow);
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        // 输入框占满剩余宽度（横排 StackPanel 给子项无限宽度，长输入会把行撑出卡片边界）
+        var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+        answerBtn.Margin = new Thickness(10, 0, 0, 0);
+        answerBtn.VerticalAlignment = VerticalAlignment.Top;
+        Grid.SetColumn(answerBox, 0);
+        Grid.SetColumn(answerBtn, 1);
         row.Children.Add(answerBox);
         row.Children.Add(answerBtn);
         stack.Children.Add(row);
         card.Child = stack;
         _chatPanel!.Children.Add(card);
         ScrollToEnd();
+    }
+
+    /// <summary>测试钩子：向审批/提问卡的补充输入框灌入超长文本（验证固定宽度自动换行不横向溢出）。</summary>
+    public void DebugSeedCardInputs()
+    {
+        var longText = "这是一段超长的补充说明，验证输入框在固定宽度下自动换行：用户可能输入很长的拒绝原因或回答，" +
+                       "例如 /very/long/path/reports/gold/gold-report-20260930-临时备份目录/segment_without_spaces " +
+                       "这类中英混合的长路径也必须折行显示，而不是横向撑出卡片边界。";
+        var boxes = _chatPanel!.GetVisualDescendants().OfType<Avalonia.Controls.TextBox>()
+            .Where(b => b.Name != "InputBox").ToList();
+        if (boxes.Count > 0) boxes[0].Text = longText;
+        if (boxes.Count > 1) boxes[1].Text = longText;
     }
 
     // ───────────────────────── 思考动态指示（ZCode 风格）─────────────────────────
@@ -1641,7 +1670,45 @@ public partial class MainWindow : Window
 
     private void ScrollToEnd()
     {
+        TrimChatHistory();
         Dispatcher.UIThread.Post(() => _chatScroll?.ScrollToEnd(), DispatcherPriority.Background);
+    }
+
+    /// <summary>聊天历史裁剪：控件树只进不出会让长会话/长驻进程累积大量视觉对象；
+    /// 超过上限时从最旧端移除普通消息，未决议的审批/提问卡（可能还挂着等待方）一律保留。</summary>
+    private void TrimChatHistory()
+    {
+        const int MaxChildren = 300;
+        var children = _chatPanel!.Children;
+        var allowed = children.Count - MaxChildren;
+        if (allowed <= 0)
+        {
+            return;
+        }
+        List<Control>? remove = null;
+        foreach (var child in children)
+        {
+            if (remove is not null && remove.Count >= allowed)
+            {
+                break;
+            }
+            if (child is Border { Classes: var cls } && cls.Contains("card") && !cls.Contains("resolved"))
+            {
+                continue;   // 未决议卡片保留
+            }
+            if (ReferenceEquals(child, _thinkLine))
+            {
+                continue;   // 活动中的思考行保留
+            }
+            (remove ??= new List<Control>()).Add(child);
+        }
+        if (remove is not null)
+        {
+            foreach (var c in remove)
+            {
+                children.Remove(c);
+            }
+        }
     }
 
     // ───────────────────────── 状态条 ─────────────────────────
