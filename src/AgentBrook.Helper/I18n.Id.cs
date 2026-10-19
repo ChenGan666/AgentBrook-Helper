@@ -292,6 +292,7 @@ internal static partial class I18n
         ["ui.add.attachment.or.paste.image"] = "Tambah attachment (atau tempel gambar)",
         ["ui.stop.the.current.task"] = "Hentikan saat ini task",
         ["ui.quit.value"] = "Keluar dari {0}",
+        ["ui.shutdown.busy"] = "Masih memproses tugas — shutdown ditahan sampai selesai",
         ["ui.external.commands.executable"] = "Perintah eksternal dapat dijalankan",
         ["ui.appearance"] = "Tampilan",
         ["ui.full.access"] = "Akses penuh",

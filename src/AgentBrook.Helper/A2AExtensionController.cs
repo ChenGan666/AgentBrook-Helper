@@ -335,6 +335,9 @@ public sealed class A2AExtensionController : IAsyncDisposable
 
     private bool _remoteBusy;
 
+    /// <summary>是否正在隔离处理远程 A2A 消息（系统退出请求据此决定放行或阻止）。</summary>
+    public bool IsRemoteBusy => _remoteBusy;
+
     /// <summary>远程消息隔离处理期间置 Busy（文档 §11.5：远程执行计入 Presence 负载）。</summary>
     public void SetRemoteBusy(bool busy)
     {

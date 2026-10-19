@@ -2305,8 +2305,13 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(WindowClosingEventArgs e)
     {
-        // 点关闭 = 隐藏（气泡仍常驻；退出走气泡右键菜单）
+        // 点关闭 = 隐藏（气泡仍常驻；退出走气泡右键菜单）；系统退出请求（App 已判定空闲）放行真正关闭
         SaveBoundsNow();
+        if (App.IsQuitting)
+        {
+            base.OnClosing(e);
+            return;
+        }
         e.Cancel = true;
         Hide();
         base.OnClosing(e);

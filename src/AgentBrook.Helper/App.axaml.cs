@@ -14,6 +14,12 @@ public partial class App : Application
     public static A2AExtensionHost A2A { get; private set; } = null!;
     private static A2ASessionWindow? _a2aWindow;
 
+    /// <summary>是否正在处理请求（本地回合或 A2A 远程消息）：系统退出请求据此决定放行或阻止。</summary>
+    public static bool IsProcessing => Controller.Busy || A2A.Controller.IsRemoteBusy;
+
+    /// <summary>空闲时收到系统退出请求即置位；气泡/对话窗 OnClosing 据此放行真正关闭。</summary>
+    public static bool IsQuitting { get; private set; }
+
     public static void ShowA2AWindow()
     {
         try
@@ -69,6 +75,22 @@ public partial class App : Application
                 catch (Exception ex) { Console.Error.WriteLine($"[a2a] shutdown failed: {ex}"); }
             };
             _ = A2A.StartAsync();
+
+            // 系统关机/注销/Cmd+Q：空闲则置 IsQuitting 放行窗口真正关闭、正常退出；
+            // 正在处理请求则取消退出，让 macOS 弹「中断了关机」提示，回合不被打断
+            desktop.ShutdownRequested += (_, e) =>
+            {
+                if (IsProcessing)
+                {
+                    e.Cancel = true;
+                    Controller.Bubble?.ShowToast(I18n.T("ui.shutdown.busy"), "#ffb340", TimeSpan.FromSeconds(5));
+                }
+                else
+                {
+                    IsQuitting = true;
+                }
+            };
+
             var conversation = new MainWindow();
             Controller.AttachConversation(conversation);
             Controller.AttachLifetime(desktop);

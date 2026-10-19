@@ -866,8 +866,13 @@ public partial class BubbleWindow : Window
 
     protected override void OnClosing(WindowClosingEventArgs e)
     {
-        // 气泡窗口不允许被关闭（退出走右键菜单）
+        // 气泡窗口不允许被关闭（退出走右键菜单）；系统退出请求（关机/Cmd+Q，App 已判定空闲）放行
         SavePosition();   // 退出前记录位置
+        if (App.IsQuitting)
+        {
+            base.OnClosing(e);
+            return;
+        }
         e.Cancel = true;
         base.OnClosing(e);
     }

@@ -12,7 +12,7 @@ set -e
 cd "$(dirname "$0")"
 MODE=${MODE:-all}
 
-# 版本号管理：自动递增 patch，也可通过 VERSION 环境变量覆盖
+# 版本号管理：以 version.txt 为准（手工维护，脚本只读不改）；可用 VERSION 环境变量临时覆盖
 VERSION_FILE="$(pwd)/version.txt"
 if [ -f "$VERSION_FILE" ]; then
   # 兼容 Windows 生成的 UTF-8 BOM：先去掉 BOM
@@ -20,10 +20,7 @@ if [ -f "$VERSION_FILE" ]; then
 else
   BASE_VERSION="1.0.0"
 fi
-IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE_VERSION"
-NEW_PATCH=$((PATCH + 1))
-VERSION="${VERSION:-$MAJOR.$MINOR.$NEW_PATCH}"
-printf '%s\n' "$VERSION" > "$VERSION_FILE"
+VERSION="${VERSION:-$BASE_VERSION}"
 echo "==> 发布版本：$VERSION"
 
 # 发布根目录，可通过环境变量覆盖

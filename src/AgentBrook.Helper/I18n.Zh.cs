@@ -292,6 +292,7 @@ internal static partial class I18n
         ["ui.add.attachment.or.paste.image"] = "添加附件（或直接粘贴图片）",
         ["ui.stop.the.current.task"] = "停止当前任务",
         ["ui.quit.value"] = "退出 {0}",
+        ["ui.shutdown.busy"] = "正在处理任务，已暂时阻止关机；任务完成后再关机即可",
         ["ui.external.commands.executable"] = "外部命令可执行",
         ["ui.appearance"] = "外观",
         ["ui.full.access"] = "完全访问",

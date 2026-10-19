@@ -292,6 +292,7 @@ internal static partial class I18n
         ["ui.add.attachment.or.paste.image"] = "Add attachment (or paste image)",
         ["ui.stop.the.current.task"] = "Stop the current task",
         ["ui.quit.value"] = "Quit {0}",
+        ["ui.shutdown.busy"] = "A task is running — shutdown paused until it finishes",
         ["ui.external.commands.executable"] = "External commands executable",
         ["ui.appearance"] = "Appearance",
         ["ui.full.access"] = "Full access",
