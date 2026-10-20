@@ -15,6 +15,7 @@ $finalRoot = Join-Path $publishBase "updated"
 $serviceDir = Join-Path $srcDir "AgentBrook.Service"
 $versionFile = Join-Path $projectDir "version.txt"
 
+# 版本号管理：自动递增 patch 并写回 version.txt（mac 侧脚本只读不改，两平台策略不同）
 $currentVersion = if (Test-Path $versionFile) { (Get-Content $versionFile -Raw).Trim() -replace '^\uFEFF' } else { "1.0.0" }
 if ($VersionOverride) {
     $version = $VersionOverride
@@ -59,7 +60,16 @@ foreach ($rid in $runtimes) {
     $distZipName = "AgentBrook.Helper-$version.zip"
     $distZipPath = Join-Path $finalDir $distZipName
     Remove-Item $distZipPath -ErrorAction SilentlyContinue
-    Compress-Archive -Path (Join-Path $outDir "*") -DestinationPath $distZipPath -Force
+    # Windows PowerShell 5.1 自带 Archive 模块的 Write-Progress 存在进度计算越界的已知 bug
+    # （"索引超出了数组界限"），且进度渲染会显著拖慢打包——局部关闭进度规避
+    $prevProgress = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
+    try {
+        Compress-Archive -Path (Join-Path $outDir "*") -DestinationPath $distZipPath -Force
+    }
+    finally {
+        $ProgressPreference = $prevProgress
+    }
     Write-Host "  -> 分发包：$distZipPath"
 
     # 更新说明随平台文件夹分发（服务器按目录读取 release-notes.txt 作为该版本更新说明）

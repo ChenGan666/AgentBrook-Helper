@@ -161,6 +161,10 @@ public sealed class AssistantController : IBrookInteraction
 
     public string CurrentSessionTitle => Ready ? Agent!.CurrentSessionTitle : "新对话";
     public IReadOnlyList<(string Role, string Text)> GetTranscript() => Ready ? Agent!.GetTranscript() : [];
+    /// <summary>滚动加载历史用：可读记录总条数与分页读取（skipFromEnd=从末尾跳过的条数）。</summary>
+    public int TranscriptCount => Ready ? Agent!.TranscriptCount : 0;
+    public IReadOnlyList<(string Role, string Text)> GetTranscriptRange(int skipFromEnd, int take) =>
+        Ready ? Agent!.GetTranscriptRange(skipFromEnd, take) : [];
     public IReadOnlyList<SessionMeta> Sessions => Ready ? Agent!.Sessions : [];
 
     /// <summary>切换会话；忙碌/未就绪时返回 false。</summary>

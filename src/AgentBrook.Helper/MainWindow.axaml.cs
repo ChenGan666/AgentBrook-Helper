@@ -54,6 +54,11 @@ public partial class MainWindow : Window
     private readonly AssistantController _controller;
     private StackPanel? _chatPanel;
     private ScrollViewer? _chatScroll;
+    // ── 历史滚动加载：会话记录可视光标（从末尾计数已渲染条数）与加载状态 ──
+    private int _visibleFromEnd;        // 已可见的记录条数（从末尾计；含底部直播渲染与顶部滚动加载）
+    private int _lastKnownTotal;        // 上次对账时的记录总数
+    private bool _historyExhausted;     // 记录已全部加载到顶
+    private bool _loadingOlderHistory;  // 插入历史期间忽略 ScrollChanged，防重入
     private TextBlock? _statusText;
     private Border? _statusPill;
     private TextBox? _inputBox;
@@ -84,6 +89,7 @@ public partial class MainWindow : Window
 
         _chatPanel = this.FindControl<StackPanel>("ChatPanel");
         _chatScroll = this.FindControl<ScrollViewer>("ChatScroll");
+        _chatScroll!.ScrollChanged += OnChatScrollChanged;   // 滚动到顶 → 增量加载更早的历史记录
         _statusText = this.FindControl<TextBlock>("StatusText");
         _statusPill = this.FindControl<Border>("StatusPill");
         _inputBox = this.FindControl<TextBox>("InputBox");
@@ -244,6 +250,7 @@ public partial class MainWindow : Window
         _controller.EventRaised += OnControllerEvent;
         _controller.StateChanged -= OnStateChanged;
         _controller.StateChanged += OnStateChanged;
+        _controller.StateChanged += (_, _) => Dispatcher.UIThread.Post(SyncHistoryCursor);   // 回合结束对账记录增量（滚动加载历史的游标）
         _controller.QueueChanged += n =>
         {
             _queuedHintCount = n;
@@ -263,7 +270,7 @@ public partial class MainWindow : Window
 
         // 启动过程（连接 MCP/恢复会话/就绪）改在顶栏状态胶囊展示，不进对话流
         _controller.StartupStatus += line => Dispatcher.UIThread.Post(() => ShowStartupStatus(line));
-        _controller.ReadyChanged += () => Dispatcher.UIThread.Post(UpdateSessionTitle);   // 就绪后标题才能取到真实值
+        _controller.ReadyChanged += () => Dispatcher.UIThread.Post(OnReadyForHistory);   // 就绪后标题取真实值；并回放当前会话最近记录
 
         I18n.LanguageChanged += () => Dispatcher.UIThread.Post(() =>
         {
@@ -512,6 +519,32 @@ public partial class MainWindow : Window
         ShowDropdown(anchor, panel, ref _sessionPopup);
     }
 
+    private bool _startupReplayed;
+
+    /// <summary>就绪后回放当前会话最近记录：启动时聊天区为空没有滚动空间，滚动加载需要初始内容；
+    /// 只在首次就绪执行一次（后续就绪/重连由会话切换流程负责重建）。</summary>
+    private void OnReadyForHistory()
+    {
+        UpdateSessionTitle();
+        if (_startupReplayed || !_controller.Ready)
+        {
+            return;
+        }
+        _startupReplayed = true;
+        var transcript = _controller.GetTranscript();
+        if (transcript.Count == 0)
+        {
+            return;   // 全新会话：保持问候引导
+        }
+        foreach (var (role, text) in transcript)
+        {
+            _chatPanel!.Children.Add(BuildTranscriptItem(role, text));
+        }
+        _lastKnownTotal = _controller.TranscriptCount;
+        _visibleFromEnd = transcript.Count;
+        ScrollToEnd();
+    }
+
     /// <summary>切换/新建会话后清空聊天区并回放历史（历史在会话存档中，不丢）。</summary>
     private void ClearChatForSessionSwitch(string title)
     {
@@ -520,24 +553,16 @@ public partial class MainWindow : Window
         _streamViewer = null;
         UpdateSessionTitle();
 
-        // 回放历史消息（最近 40 条，assistant 走 Markdown 渲染）
-        var replayed = 0;
-        foreach (var (role, text) in _controller.GetTranscript())
+        // 回放历史消息（最近 40 条，assistant 走 Markdown 渲染）；光标对账供后续滚动加载
+        var transcript = _controller.GetTranscript();
+        foreach (var (role, text) in transcript)
         {
-            if (role == "user")
-            {
-                AddUserBubble(text, new List<SentAttachment>());
-            }
-            else
-            {
-                Control render;
-                try { render = MarkdownView.Render(text); }
-                catch { render = new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.Parse("#e6e6e6")) }; }
-                var border = new Border { Classes = { "assistantBubble" }, Child = render };
-                _chatPanel!.Children.Add(border);
-            }
-            replayed++;
+            _chatPanel!.Children.Add(BuildTranscriptItem(role, text));
         }
+        _lastKnownTotal = _controller.TranscriptCount;
+        _visibleFromEnd = transcript.Count;
+        _historyExhausted = false;
+        var replayed = transcript.Count;
 
         if (replayed > 0)
         {
@@ -737,6 +762,9 @@ public partial class MainWindow : Window
                     _execHeader = null;
                     _execContent = null;
                     _execCount = 0;
+                    _lastKnownTotal = 0;   // 新会话：历史光标归零
+                    _visibleFromEnd = 0;
+                    _historyExhausted = false;
                     AddUserBubble(I18n.T("ui.new.conversation.started"));
                     return;
                 }
@@ -1403,7 +1431,7 @@ public partial class MainWindow : Window
         {
             stack.Children.Add(MarkdownView.Selectable(new SelectableTextBlock { Text = text, TextWrapping = TextWrapping.Wrap }));
         }
-        var border = new Border { Classes = { "userBubble" }, Child = stack };
+        var border = new Border { Classes = { "userBubble" }, Child = stack, Tag = "msg" };
         _chatPanel!.Children.Add(border);
         ScrollToEnd();
     }
@@ -1530,7 +1558,7 @@ public partial class MainWindow : Window
         buttonRow.Children.Add(copyBtn);
         buttonRow.Children.Add(retryBtn);
 
-        var wrapper = new StackPanel { Spacing = 2 };
+        var wrapper = new StackPanel { Spacing = 2, Tag = "msg" };
         wrapper.Children.Add(render);
         wrapper.Children.Add(buttonRow);
         _chatPanel!.Children.Add(wrapper);
@@ -1674,13 +1702,134 @@ public partial class MainWindow : Window
         Dispatcher.UIThread.Post(() => _chatScroll?.ScrollToEnd(), DispatcherPriority.Background);
     }
 
-    /// <summary>聊天历史裁剪：控件树只进不出会让长会话/长驻进程累积大量视觉对象；
-    /// 超过上限时从最旧端移除普通消息，未决议的审批/提问卡（可能还挂着等待方）一律保留。</summary>
+    /// <summary>按角色构造对话记录条目（回放/滚动加载共用）：user 气泡、assistant 走 Markdown 渲染。
+    /// 统一标记 Tag="history"：不计入直播裁剪上限（总量受会话记录窗口约束，有界）。</summary>
+    private Control BuildTranscriptItem(string role, string text)
+    {
+        if (role == "user")
+        {
+            var stack = new StackPanel { Spacing = 6 };
+            stack.Children.Add(MarkdownView.Selectable(new SelectableTextBlock { Text = text, TextWrapping = TextWrapping.Wrap }));
+            return new Border { Classes = { "userBubble" }, Child = stack, Tag = "history" };
+        }
+        Control render;
+        try { render = MarkdownView.Render(text); }
+        catch { render = new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.Parse("#e6e6e6")) }; }
+        return new Border { Classes = { "assistantBubble" }, Child = render, Tag = "history" };
+    }
+
+    /// <summary>回合结束时对账：会话记录新增的条数计入可视光标（新增条目都已在底部直播渲染）。</summary>
+    private void SyncHistoryCursor()
+    {
+        if (!_controller.Ready)
+        {
+            return;
+        }
+        var total = _controller.TranscriptCount;
+        if (total > _lastKnownTotal)
+        {
+            _visibleFromEnd += total - _lastKnownTotal;
+            _lastKnownTotal = total;
+            _historyExhausted = false;
+        }
+        else if (total < _lastKnownTotal)
+        {
+            // 总量回退（会话切换/清空兜底）：以新总数为基线，可见数收敛到不越界
+            _lastKnownTotal = total;
+            _visibleFromEnd = Math.Min(_visibleFromEnd, total);
+        }
+    }
+
+    /// <summary>滚动到顶（留 24dip 余量）时增量加载更早的历史记录。</summary>
+    private void OnChatScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        var sv = _chatScroll!;
+        if (_loadingOlderHistory || _historyExhausted)
+        {
+            return;
+        }
+        if (sv.Extent.Height <= sv.Viewport.Height)
+        {
+            return;   // 内容不足一屏，无滚动空间
+        }
+        if (sv.Offset.Y > 24)
+        {
+            return;
+        }
+        LoadOlderHistory();
+    }
+
+    /// <summary>向上滚动加载：取可视光标之前的一批记录插入聊天区顶部，并补偿滚动偏移保持视口不跳。</summary>
+    private void LoadOlderHistory()
+    {
+        var total = _controller.TranscriptCount;
+        var end = total - _visibleFromEnd;   // 最早一条未渲染记录的位置（从末尾计）
+        if (end <= 0)
+        {
+            _historyExhausted = true;
+            return;
+        }
+        var batch = _controller.GetTranscriptRange(_visibleFromEnd, Math.Min(40, end));
+        if (batch.Count == 0)
+        {
+            _historyExhausted = true;
+            return;
+        }
+        _loadingOlderHistory = true;
+        try
+        {
+            var prevExtent = _chatScroll!.Extent.Height;
+            for (var i = 0; i < batch.Count; i++)
+            {
+                _chatPanel!.Children.Insert(i, BuildTranscriptItem(batch[i].Role, batch[i].Text));
+            }
+            _visibleFromEnd += batch.Count;
+            if (end - batch.Count <= 0)
+            {
+                _historyExhausted = true;
+                _chatPanel!.Children.Insert(0, new TextBlock
+                {
+                    Text = I18n.T("ui.history.all.loaded"),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    FontSize = 12,
+                    Margin = new Thickness(0, 4),
+                    Foreground = new SolidColorBrush(Color.Parse("#6f6f6f")),
+                    Tag = "history",
+                });
+            }
+            // 插入在顶部会把内容整体下推：把高度增量补偿进滚动偏移，视口停留在原内容上
+            Dispatcher.UIThread.Post(() =>
+            {
+                var grew = _chatScroll!.Extent.Height - prevExtent;
+                if (grew > 0)
+                {
+                    _chatScroll.Offset = _chatScroll.Offset.WithY(_chatScroll.Offset.Y + grew);
+                }
+                _loadingOlderHistory = false;
+            }, DispatcherPriority.Background);
+        }
+        catch
+        {
+            _loadingOlderHistory = false;
+        }
+    }
+
+    /// <summary>聊天历史裁剪：直播区控件树只进不出会让长会话/长驻进程累积大量视觉对象；
+    /// 直播子节点超过上限时从最旧端移除（被裁的记录条目回到"未渲染"，滚动到顶可重新加载）；
+    /// 回放/滚动加载的历史条目（Tag="history"）不计入、不裁剪；未决议卡片与活动思考行保留。</summary>
     private void TrimChatHistory()
     {
-        const int MaxChildren = 300;
+        const int MaxLiveChildren = 300;
         var children = _chatPanel!.Children;
-        var allowed = children.Count - MaxChildren;
+        var liveCount = 0;
+        foreach (var child in children)
+        {
+            if (child.Tag as string != "history")
+            {
+                liveCount++;
+            }
+        }
+        var allowed = liveCount - MaxLiveChildren;
         if (allowed <= 0)
         {
             return;
@@ -1691,6 +1840,10 @@ public partial class MainWindow : Window
             if (remove is not null && remove.Count >= allowed)
             {
                 break;
+            }
+            if (child.Tag as string == "history")
+            {
+                continue;   // 历史条目保留
             }
             if (child is Border { Classes: var cls } && cls.Contains("card") && !cls.Contains("resolved"))
             {
@@ -1707,6 +1860,10 @@ public partial class MainWindow : Window
             foreach (var c in remove)
             {
                 children.Remove(c);
+                if (c.Tag as string == "msg")
+                {
+                    _visibleFromEnd = Math.Max(0, _visibleFromEnd - 1);
+                }
             }
         }
     }

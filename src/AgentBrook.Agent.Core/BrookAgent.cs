@@ -644,6 +644,28 @@ public sealed class BrookAgent : IAsyncDisposable
     /// </summary>
     public IReadOnlyList<(string Role, string Text)> GetTranscript(int limit = 40)
     {
+        var list = BuildTranscriptList();
+        return list.Skip(Math.Max(0, list.Count - limit)).ToList();
+    }
+
+    /// <summary>当前会话可读对话记录的总条数（与 GetTranscript 同源同过滤）。</summary>
+    public int TranscriptCount => BuildTranscriptList().Count;
+
+    /// <summary>
+    /// 分页取更早的可读对话记录：skipFromEnd = 从末尾跳过的条数，take = 最多返回多少条。
+    /// 供 UI 滚动到顶时增量加载历史；过滤规则与 GetTranscript 完全一致。
+    /// </summary>
+    public IReadOnlyList<(string Role, string Text)> GetTranscriptRange(int skipFromEnd, int take)
+    {
+        var list = BuildTranscriptList();
+        var end = Math.Max(0, list.Count - Math.Max(0, skipFromEnd));
+        var start = Math.Max(0, end - Math.Max(0, take));
+        return list.GetRange(start, end - start);
+    }
+
+    /// <summary>可读对话记录（user/assistant 文本对，跳过系统摘要与无正文轮）。</summary>
+    private List<(string Role, string Text)> BuildTranscriptList()
+    {
         var list = new List<(string, string)>();
         try
         {
@@ -661,7 +683,7 @@ public sealed class BrookAgent : IAsyncDisposable
             }
         }
         catch { }
-        return list.Skip(Math.Max(0, list.Count - limit)).ToList();
+        return list;
     }
 
     /// <summary>当前会话 ID 与标题。</summary>

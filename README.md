@@ -47,7 +47,7 @@ The gap isn't model quality — it's proximity. So this project takes an agent c
 
 ### An ambient bubble
 
-A draggable, always-on-top bubble that does not steal focus. It breathes when idle, spins while thinking, and turns amber when it needs you — opening the chat window by itself. Closing the window hides it; the bubble stays. Paste screenshots straight into the input with Ctrl/⌘+V.
+A draggable, always-on-top bubble that does not steal focus. It breathes when idle, spins while thinking, and turns amber when it needs you — opening the chat window by itself. Closing the window hides it; the bubble stays. Paste screenshots straight into the input with Ctrl/⌘+V. Drag it against the left, right, or top screen edge and it docks half-hidden (macOS); hover and it slides fully out. Near the bottom edge it pops back fully into view.
 
 ### A full runtime behind it
 
@@ -59,7 +59,7 @@ Shell commands, skill installation, MCP server registration and worker spawning 
 
 ### Interrupt, queue, and switch sessions anytime
 
-While a turn is running, the send button turns into a stop button (Esc works too) and whatever completed is kept; anything you type while busy is queued and sent automatically when the turn ends. Sessions are managed from the top-bar switcher: titles are generated from the first message, "new session" archives the old one instead of wiping it, and switching replays the full history with context and rolling summary intact. Any session can be distilled into a `session-` skill with one click — other sessions can `load_skill` those conclusions and outputs, and the skill survives session deletion.
+While a turn is running, the send button turns into a stop button (Esc works too) and whatever completed is kept; anything you type while busy is queued and sent automatically when the turn ends. Sessions are managed from the top-bar switcher: titles are generated from the first message, "new session" archives the old one instead of wiping it, and switching replays recent history — scroll to the top to keep loading older messages back to the session archive's start — with context and rolling summary intact. Any session can be distilled into a `session-` skill with one click — other sessions can `load_skill` those conclusions and outputs, and the skill survives session deletion.
 
 ### On-demand context loading
 
