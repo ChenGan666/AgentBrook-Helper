@@ -833,8 +833,9 @@ public partial class BubbleWindow : Window
     private double _shiftFromX, _shiftFromY, _shiftToX, _shiftToY;
     private DateTime _slideStart;
 
-    private const double BubbleHalf = 48;    // 气泡布局半径（96/2）
-    private const double DockSnapSlack = 20; // 气泡边缘贴近/越过屏幕边 20dip 内吸附
+    private const double BubbleHalf = 48;          // 气泡布局半径（96/2），用于可视区夹取
+    private const double BubbleVisualRadius = 31.5; // 气泡可见圆半径（主体 70 × 0.9 缩放 / 2）：贴边与吸附以它为准，否则会留 16.5dip 间隙
+    private const double DockSnapSlack = 20;        // 可见圆边缘贴近/越过屏幕边 20dip 内吸附
 
     /// <summary>气泡圆心在窗口内的偏移与窗口宽度（随紧凑/展开模式）。</summary>
     private (double Cx, double Cy, double W) BubbleLayout() =>
@@ -869,7 +870,7 @@ public partial class BubbleWindow : Window
         };
     }
 
-    /// <summary>悬停展开时的平移量：只滑出到气泡恰好完整贴着屏幕边（而非回到窗口原位）。
+    /// <summary>悬停展开时的平移量：只滑出到气泡可见圆恰好完整贴着屏幕边（而非回到窗口原位）。
     /// 这样展开前被鼠标悬停的那半边始终被气泡覆盖——若滑回原位会从指针下移走，
     /// 触发"离开→收回→再进入→展开"的抖动循环（指针越靠近屏幕边越明显）。</summary>
     private (double X, double Y) ExpandedShift()
@@ -877,9 +878,9 @@ public partial class BubbleWindow : Window
         var (x, y) = CollapsedShift();
         return _dockEdge switch
         {
-            DockEdge.Left => (x + BubbleHalf, y),
-            DockEdge.Right => (x - BubbleHalf, y),
-            DockEdge.Top => (x, y + BubbleHalf),
+            DockEdge.Left => (x + BubbleVisualRadius, y),
+            DockEdge.Right => (x - BubbleVisualRadius, y),
+            DockEdge.Top => (x, y + BubbleVisualRadius),
             _ => (0, 0),
         };
     }
@@ -924,11 +925,11 @@ public partial class BubbleWindow : Window
         }
         var area = screen.WorkingArea;
         DockEdge edge;
-        if (visual.X - BubbleHalf <= area.X + DockSnapSlack)
+        if (visual.X - BubbleVisualRadius <= area.X + DockSnapSlack)
         {
             edge = DockEdge.Left;
         }
-        else if (visual.X + BubbleHalf >= area.Right - DockSnapSlack)
+        else if (visual.X + BubbleVisualRadius >= area.Right - DockSnapSlack)
         {
             edge = DockEdge.Right;
         }
