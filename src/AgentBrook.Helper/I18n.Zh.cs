@@ -29,6 +29,8 @@ internal static partial class I18n
         ["ui.models.fetch"] = "获取模型列表",
         ["ui.models.fetch.need.url.key"] = "请先填写 API 地址与 Key",
         ["ui.models.fetch.empty"] = "服务返回了空模型列表",
+        ["ui.models.balance"] = "余额：{0}",
+        ["ui.models.balance.fail"] = "余额：获取失败",
         ["ui.models.fetch.ok"] = "已获取 {0} 个模型{1}，点击「保存并应用」生效",
         ["ui.models.fetch.params"] = "；参数：{0}（上下文 {1} / 最大输出 {2}）",
         ["ui.models.fetch.fail"] = "获取模型列表失败：{0}",

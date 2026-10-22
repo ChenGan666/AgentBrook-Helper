@@ -384,6 +384,8 @@
                                     <Button x:Name="FetchModelsBtn" Classes="ghostBtn" Content="获取模型列表" Tag="provider-test"/>
                                     <Button x:Name="DeleteBtn" Classes="dangerBtn" Content="删除此供应商"/>
                                 </StackPanel>
+                                <TextBlock x:Name="BalanceText" Text="" FontSize="14" FontWeight="Bold"
+                                           Foreground="#ff6b6b" Margin="0,10,0,0" IsVisible="False"/>
                                 <TextBlock x:Name="ModelTestHint" Text="" FontSize="12" Foreground="#8a8a8a"
                                            TextWrapping="Wrap" Margin="0,8,0,0"/>
                                 <Separator Margin="0,12,0,4" Background="#333333"/>

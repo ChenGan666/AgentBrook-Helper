@@ -29,6 +29,8 @@ internal static partial class I18n
         ["ui.models.fetch"] = "Ambil daftar model",
         ["ui.models.fetch.need.url.key"] = "Isi URL API dan Key terlebih dahulu",
         ["ui.models.fetch.empty"] = "Layanan mengembalikan daftar model kosong",
+        ["ui.models.balance"] = "Saldo: {0}",
+        ["ui.models.balance.fail"] = "Saldo: gagal diambil",
         ["ui.models.fetch.ok"] = "{0} model didapatkan{1}. Klik \"Simpan & apply\" untuk berlaku",
         ["ui.models.fetch.params"] = "; spesifikasi: {0} (konteks {1} / keluaran maks {2})",
         ["ui.models.fetch.fail"] = "Gagal mengambil daftar model: {0}",

@@ -1151,6 +1151,7 @@ public partial class ModelSettingsWindow : WindowBase
         BaseUrlBox.Text = p.BaseUrl;
         ApiKeyBox.Text = p.ApiKey;
         ModelsBox.Text = string.Join(", ", p.Models);
+        _ = RefreshBalanceAsync();
     }
 
     private void SyncFormIntoWorking()
@@ -1349,6 +1350,8 @@ public partial class ModelSettingsWindow : WindowBase
         if (fetchBtn is not null) fetchBtn.IsVisible = supportsFetch;
         var rechargePanel = this.FindControl<StackPanel>("TokenRechargePanel");
         if (rechargePanel is not null) rechargePanel.IsVisible = isAgentBrook;
+        var balanceText = this.FindControl<TextBlock>("BalanceText");
+        if (balanceText is not null) balanceText.IsVisible = supportsFetch;
     }
 
     /// <summary>打开 Token卡购买/充值页；充值时带上当前 AgentBrook 供应商的 Key 预填。</summary>
@@ -1410,6 +1413,51 @@ public partial class ModelSettingsWindow : WindowBase
         catch (Exception ex)
         {
             Hint(I18n.T("ui.models.fetch.fail", ex.Message));
+        }
+    }
+
+    /// <summary>
+    /// 显示所选供应商余额（红色粗体 14 号）：仅 DeepSeek / AgentBrook 支持余额接口，
+    /// 两者返回结构一致（balance_infos[0].total_balance），共用解析。
+    /// </summary>
+    private async Task RefreshBalanceAsync()
+    {
+        var balanceText = this.FindControl<TextBlock>("BalanceText");
+        if (balanceText is null) return;
+        var p = _selectedIndex >= 0 && _selectedIndex < _working.Count ? _working[_selectedIndex] : null;
+        if (p is null || string.IsNullOrWhiteSpace(p.ApiKey) || string.IsNullOrWhiteSpace(p.BaseUrl))
+        {
+            balanceText.Text = "";
+            return;
+        }
+
+        // 余额端点不带 /v1 前缀（DeepSeek: /user/balance；AgentBrook: /api/get-card-balance）
+        var root = p.BaseUrl.Trim().TrimEnd('/');
+        if (root.EndsWith("/v1", StringComparison.OrdinalIgnoreCase)) root = root[..^3];
+        var url = p.Name == "DeepSeek" ? root + "/user/balance" : root + "/api/get-card-balance";
+
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", p.ApiKey);
+            req.Headers.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue { NoCache = true, NoStore = true };
+            using var resp = await TokenHttp.SendAsync(req);
+            if (!resp.IsSuccessStatusCode)
+            {
+                balanceText.Text = I18n.T("ui.models.balance.fail");
+                return;
+            }
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+            var info = doc.RootElement.GetProperty("balance_infos")[0];
+            var total = info.GetProperty("total_balance").GetString() ?? "0";
+            var currency = info.TryGetProperty("currency", out var cur) ? cur.GetString() ?? "" : "";
+            var shown = currency.Equals("CNY", StringComparison.OrdinalIgnoreCase) ? "¥" + total
+                : string.IsNullOrEmpty(currency) ? total : currency + " " + total;
+            balanceText.Text = I18n.T("ui.models.balance", shown);
+        }
+        catch
+        {
+            balanceText.Text = I18n.T("ui.models.balance.fail");
         }
     }
 

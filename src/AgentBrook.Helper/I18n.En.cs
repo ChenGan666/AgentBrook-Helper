@@ -29,6 +29,8 @@ internal static partial class I18n
         ["ui.models.fetch"] = "Fetch models",
         ["ui.models.fetch.need.url.key"] = "Fill in the API URL and Key first",
         ["ui.models.fetch.empty"] = "The service returned an empty model list",
+        ["ui.models.balance"] = "Balance: {0}",
+        ["ui.models.balance.fail"] = "Balance: unavailable",
         ["ui.models.fetch.ok"] = "Fetched {0} models{1}. Click \"Save & apply\" to take effect",
         ["ui.models.fetch.params"] = "; specs: {0} (context {1} / max output {2})",
         ["ui.models.fetch.fail"] = "Failed to fetch models: {0}",
