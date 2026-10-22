@@ -1006,6 +1006,20 @@ public partial class ModelSettingsWindow : WindowBase
         UiLanguageBox.SelectedIndex = lang switch { "zh" => 1, "en" => 2, "id" => 3, _ => 0 };
     }
 
+    /// <summary>外部回填后展示：重载最新供应商列表，切到「模型设置」页并选中指定供应商。</summary>
+    public void ShowModelsPage(string? providerName = null)
+    {
+        LoadFromController();
+        BuildProviderList();
+        NavModels.IsChecked = true;
+        ShowPage(PageModels);
+        if (!string.IsNullOrEmpty(providerName))
+        {
+            var idx = _working.FindIndex(p => string.Equals(p.Name, providerName, StringComparison.OrdinalIgnoreCase));
+            if (idx >= 0) ProviderList.SelectedIndex = idx;
+        }
+    }
+
     private void LoadFromController()
     {
         // Agent 未就绪（启动初始化中/失败）时 Controller 返回空列表：兜底直读 models.json
@@ -1216,7 +1230,7 @@ public partial class ModelSettingsWindow : WindowBase
             // 自动获取模型列表与参数（AgentBrook.API /models，OpenAI 兼容）
             try
             {
-                var models = await FetchRelayModelsAsync(p.BaseUrl, p.ApiKey);
+                var models = await FetchRelayModelsAsync(EffectiveApiBase(p), p.ApiKey);
                 if (models.Count > 0)
                 {
                     p.Models = models.Select(m => m.Id).ToList();
@@ -1244,7 +1258,7 @@ public partial class ModelSettingsWindow : WindowBase
         var sw = Stopwatch.StartNew();
         try
         {
-            var reply = await PingModelAsync(p.BaseUrl, p.ApiKey, model);
+            var reply = await PingModelAsync(EffectiveApiBase(p), p.ApiKey, model);
             sw.Stop();
             reply = reply.Trim();
             if (testHint is not null)
@@ -1279,6 +1293,15 @@ public partial class ModelSettingsWindow : WindowBase
 
     // ---------------- Token卡：模型列表自动获取 / 一键激活 ----------------
 
+    /// <summary>AgentBrook 中转端点规范化：补 /v1 前缀（OpenAI SDK 只按 Endpoint 直拼 /chat/completions）。</summary>
+    private static string EffectiveApiBase(ProviderConfig p)
+    {
+        var url = (p.BaseUrl ?? "").TrimEnd('/');
+        return p.Name == "AgentBrook" && !url.EndsWith("/v1", StringComparison.OrdinalIgnoreCase)
+            ? url + "/v1"
+            : url;
+    }
+
     private static readonly HttpClient TokenHttp = new() { Timeout = TimeSpan.FromSeconds(20) };
     
 
@@ -1289,6 +1312,7 @@ public partial class ModelSettingsWindow : WindowBase
     {
         using var req = new HttpRequestMessage(HttpMethod.Get, $"{apiBase.TrimEnd('/')}/models");
         req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+        req.Headers.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue { NoCache = true, NoStore = true };
         using var resp = await TokenHttp.SendAsync(req);
         var text = await resp.Content.ReadAsStringAsync();
         if (!resp.IsSuccessStatusCode)
@@ -1364,8 +1388,7 @@ public partial class ModelSettingsWindow : WindowBase
         }
         try
         {
-            var modelsBase = p.Name == "AgentBrook" ? p.BaseUrl.TrimEnd('/') + "/v1" : p.BaseUrl;
-            var models = await FetchRelayModelsAsync(modelsBase, p.ApiKey);
+            var models = await FetchRelayModelsAsync(EffectiveApiBase(p), p.ApiKey);
             if (models.Count == 0)
             {
                 Hint(I18n.T("ui.models.fetch.empty"));

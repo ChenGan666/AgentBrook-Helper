@@ -71,7 +71,7 @@ The A2A session center discovers Helper nodes on your LAN, pairs with them, and 
 
 ### Token cards: 24-hour trial, pay-as-you-go top-ups
 
-First-launch onboarding automatically requests a trial card from the billing service — ¥5 of quota, valid for 24 hours, bound to your device and network — and fills the model config for you (provider "AgentBrook", endpoint `https://api.agentbrook.com`). The model settings page shows a "Top up Token card" shortcut for the AgentBrook provider (your card Key is the API Key; top-ups take effect automatically), plus a "Fetch models" action that pulls the live model list and specs from the relay.
+First-launch onboarding automatically requests a trial card from the billing service — ¥5 of quota, valid for 24 hours, bound to your device and network — and fills the model config for you (provider "AgentBrook", endpoint `https://api.agentbrook.com`). The model settings page shows a "Top up Token card" shortcut for the AgentBrook provider (your card Key is the API Key; top-ups take effect automatically), plus a "Fetch models" action that pulls the live model list and specs from the relay. The deliver page even offers a one-click "auto-fill into Helper" — the Helper's local loopback service writes the Key into the model config and opens the settings window for you.
 
 ### Automatic self-update
 

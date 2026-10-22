@@ -76,6 +76,9 @@ public partial class App : Application
             };
             _ = A2A.StartAsync();
 
+            // 本机回环 API（127.0.0.1）：收银台「自动回填」写入模型配置并打开设置窗
+            LocalApiServer.Start();
+
             // 系统关机/注销/Cmd+Q：空闲则置 IsQuitting 放行窗口真正关闭、正常退出；
             // 正在处理请求则取消退出，让 macOS 弹「中断了关机」提示，回合不被打断
             desktop.ShutdownRequested += (_, e) =>

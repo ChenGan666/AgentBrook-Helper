@@ -70,7 +70,7 @@ public abstract class WindowBase : Window
     /// <summary>模型供应商预设：名称 →（默认端点，默认模型 CSV）。与设置窗口保持一致。</summary>
     protected static readonly (string Name, string BaseUrl, string Models)[] Presets =
     [
-        ("AgentBrook", "https://api.agentbrook.com", ""),
+        ("AgentBrook", "https://api.agentbrook.com/v1", ""),
         ("DeepSeek", "https://api.deepseek.com", "deepseek-flash, deepseek-v4-pro"),
         ("OpenAI", "https://api.openai.com/v1", "gpt-4o, gpt-4o-mini"),
         ("Kimi", "https://api.moonshot.cn/v1", "moonshot-v1-8k, moonshot-v1-32k"),

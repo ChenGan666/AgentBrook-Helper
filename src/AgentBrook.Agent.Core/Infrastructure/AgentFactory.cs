@@ -14,7 +14,7 @@ public static class AgentFactory
     /// maxRetries：传 0 供"测试/取名"等交互场景快速失败（默认保持 SDK 内建重试）。</summary>
     public static IChatClient CreateChatClient(string baseUrl, string apiKey, string defaultModel, int? maxRetries = null)
     {
-        var options = new OpenAIClientOptions { Endpoint = new Uri(baseUrl) };
+        var options = new OpenAIClientOptions { Endpoint = new Uri(NormalizeEndpoint(baseUrl)) };
         if (maxRetries is not null)
         {
             options.RetryPolicy = new System.ClientModel.Primitives.ClientRetryPolicy(maxRetries.Value);
@@ -23,11 +23,24 @@ public static class AgentFactory
         return client.GetChatClient(defaultModel).AsIChatClient();
     }
 
+    /// <summary>
+    /// 端点规范化：AgentBrook 中转（api.agentbrook.com）仅有 /v1/* 路由，
+    /// OpenAI SDK 按 Endpoint 直拼 /chat/completions，裸域名必须补 /v1。
+    /// </summary>
+    private static string NormalizeEndpoint(string baseUrl)
+    {
+        var url = (baseUrl ?? "").TrimEnd('/');
+        return url.Contains("agentbrook", StringComparison.OrdinalIgnoreCase)
+               && !url.EndsWith("/v1", StringComparison.OrdinalIgnoreCase)
+            ? url + "/v1"
+            : url;
+    }
+
     /// <summary>创建基于 OpenAI 兼容端点（DeepSeek）的 IChatClient。</summary>
     public static IChatClient CreateChatClient(AppConfig config)
     {
         var apiKey = ResolveApiKey(config);
-        var endpoint = new Uri(config.LLM.BaseUrl);
+        var endpoint = new Uri(NormalizeEndpoint(config.LLM.BaseUrl));
 
         var client = new OpenAIClient(new System.ClientModel.ApiKeyCredential(apiKey),
             new OpenAIClientOptions { Endpoint = endpoint });
