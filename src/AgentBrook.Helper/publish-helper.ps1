@@ -12,7 +12,6 @@ $srcDir = Split-Path -Parent $projectDir
 $publishBase = Join-Path $srcDir "publish"
 # 最终产物根目录：src/publish/updated/<平台>/（文件名仅含版本号，整文件夹可直接拷贝到更新服务器）
 $finalRoot = Join-Path $publishBase "updated"
-$serviceDir = Join-Path $srcDir "AgentBrook.Service"
 $versionFile = Join-Path $projectDir "version.txt"
 
 # 版本号管理：自动递增 patch 并写回 version.txt（mac 侧脚本只读不改，两平台策略不同）
@@ -74,13 +73,6 @@ foreach ($rid in $runtimes) {
 
     # 更新说明随平台文件夹分发（服务器按目录读取 release-notes.txt 作为该版本更新说明）
     Copy-Item (Join-Path $projectDir "release-notes.txt") (Join-Path $finalDir "release-notes.txt") -Force
-    # 服务端更新目录：固定命名 AgentBrook.Helper-{version}.zip
-    $updateDir = Join-Path $serviceDir "updates/$rid"
-    New-Item -ItemType Directory -Force -Path $updateDir | Out-Null
-    $serviceZipPath = Join-Path $updateDir "AgentBrook.Helper-$version.zip"
-    Copy-Item $distZipPath $serviceZipPath -Force
-    Copy-Item (Join-Path $projectDir "release-notes.txt") (Join-Path $updateDir "release-notes.txt") -Force
-    Write-Host "  -> 服务端更新包：$serviceZipPath"
 }
 
 # ── 构建安装程序（如果 Inno Setup 可用） ──
@@ -117,10 +109,6 @@ if ($iscc) {
                 $sizeMB = [math]::Round((Get-Item $exePath).Length / 1MB, 1)
                 Write-Host "  -> 安装包：$exePath ($sizeMB MB)" -ForegroundColor Green
                 # 复制到服务端更新目录
-                $updateDir = Join-Path $serviceDir "updates/$rid"
-                New-Item -ItemType Directory -Force -Path $updateDir | Out-Null
-                Copy-Item $exePath (Join-Path $updateDir $exeName) -Force
-                Write-Host "  -> 服务端安装包：$updateDir\$exeName"
             }
         } else {
             Write-Host "  ⚠ $rid 安装包构建失败（zip 包不受影响）" -ForegroundColor Yellow

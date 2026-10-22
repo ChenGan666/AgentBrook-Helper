@@ -112,13 +112,6 @@ foreach ($rid in $Arch) {
         Write-Host "  -> 安装包：$installerFile ($sizeMB MB)" -ForegroundColor Green
     }
 
-    # ── 3. 同步到服务端更新目录 ──
-    $serviceDir = Join-Path $srcDir "AgentBrook.Service"
-    $updateDir = Join-Path $serviceDir "updates/$runtimeId"
-    New-Item -ItemType Directory -Force -Path $updateDir | Out-Null
-    $serviceInstallerPath = Join-Path $updateDir "AgentBrook.Helper-$version-setup.exe"
-    Copy-Item $installerFile $serviceInstallerPath -Force
-    Write-Host "  -> 服务端安装包：$serviceInstallerPath"
 }
 
 Write-Host ""

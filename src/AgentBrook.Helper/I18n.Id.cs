@@ -38,6 +38,7 @@ internal static partial class I18n
         ["ui.token.buy.opened"] = "Halaman pembelian dibuka di browser.",
         ["ui.token.open.fail"] = "Gagal membuka halaman pembelian: {0}",
         ["onboarding.trial.get"] = "Ambil kartu uji",
+        ["onboarding.token.buy"] = "Beli Token card (diskon)",
         ["onboarding.trial.loading"] = "Meminta kartu uji…",
         ["onboarding.trial.ok"] = "🎉 Kartu uji aktif dan terisi otomatis: ¥5 / 24 jam (kedaluwarsa {0}). Klik \"Uji\" untuk verifikasi, lalu simpan. Isi ulang otomatis berlaku.",
         ["onboarding.trial.dup"] = "{0} Isi konfigurasi model yang ada atau beli Token card.",

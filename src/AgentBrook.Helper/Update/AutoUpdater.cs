@@ -50,7 +50,10 @@ internal static class AutoUpdater
         var requestUrl = string.IsNullOrWhiteSpace(versionUrl) ? DefaultVersionUrl : versionUrl;
         try
         {
-            var dto = await Http.GetFromJsonAsync<VersionDto>(requestUrl, JsonOptions).ConfigureAwait(false);
+            // 附加一次性参数避开网关/nginx 的 GET 缓存（缓存键含 query）
+            var bustUrl = requestUrl + (requestUrl.Contains('?') ? "&" : "?")
+                + "_=" + DateTimeOffset.Now.ToUnixTimeMilliseconds();
+            var dto = await Http.GetFromJsonAsync<VersionDto>(bustUrl, JsonOptions).ConfigureAwait(false);
             if (dto?.Version is null || !Version.TryParse(dto.Version, out var latest))
             {
                 return null;

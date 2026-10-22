@@ -12,6 +12,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <AvaloniaXaml Remove="publish\**" />
+    <Compile Remove="publish\**" />
+    <EmbeddedResource Remove="publish\**" />
+    <None Remove="publish\**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- 窗口图标（axaml 里以 avares:// 引用） -->
     <AvaloniaResource Include="Assets/app-icon.png" />
   </ItemGroup>

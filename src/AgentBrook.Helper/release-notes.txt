@@ -8,4 +8,5 @@
 - 模型设置：打开默认选中首个供应商并回填配置；Agent 未就绪时直读本地配置文件，查看与保存不受影响；引导完成改合并保存（不再覆盖其他供应商）
 - 供应商差异化 UI：AgentBrook 显示 Token卡充值入口；获取模型列表当前支持 AgentBrook 与 DeepSeek
 - 会话标题过长自动省略号截断；排队消息支持一键删除；引导窗内容可滚动
+- 引导窗新增「优惠购买 Token卡」入口（AgentBrook 预设专属），购买后支持一键自动回填 Helper 配置
 - 服务端配套：Token卡购买/充值页、微信 Native 支付与回调、OpenAI 兼容中转 API（api.agentbrook.com）

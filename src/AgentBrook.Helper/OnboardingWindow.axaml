@@ -12,19 +12,38 @@
       <Setter Property="Foreground" Value="White"/>
       <Setter Property="CornerRadius" Value="7"/>
       <Setter Property="Padding" Value="16,7"/>
+      <Setter Property="Cursor" Value="Hand"/>
+    </Style>
+    <Style Selector="Button.primaryBtn:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#4a8cff"/>
+      <Setter Property="Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.primaryBtn:pressed /template/ ContentPresenter">
+      <Setter Property="Background" Value="#1f66e0"/>
+      <Setter Property="Foreground" Value="White"/>
     </Style>
     <Style Selector="Button.ghostBtn">
       <Setter Property="Background" Value="#303030"/>
       <Setter Property="Foreground" Value="#dddddd"/>
       <Setter Property="CornerRadius" Value="7"/>
       <Setter Property="Padding" Value="10,6"/>
+      <Setter Property="Cursor" Value="Hand"/>
+    </Style>
+    <Style Selector="Button.ghostBtn:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#3d3d3d"/>
+      <Setter Property="Foreground" Value="#ffffff"/>
+    </Style>
+    <Style Selector="Button.ghostBtn:pressed /template/ ContentPresenter">
+      <Setter Property="Background" Value="#2a2a2a"/>
+      <Setter Property="Foreground" Value="#ffffff"/>
     </Style>
     <Style Selector="Button.linkBtn">
       <Setter Property="Background" Value="Transparent"/>
       <Setter Property="Foreground" Value="#8a8a8a"/>
       <Setter Property="Padding" Value="4"/>
+      <Setter Property="Cursor" Value="Hand"/>
     </Style>
-    <Style Selector="Button.linkBtn:pointerover">
+    <Style Selector="Button.linkBtn:pointerover /template/ ContentPresenter">
       <Setter Property="Foreground" Value="#c8c8c8"/>
     </Style>
     <Style Selector="Button.iconBtn">
@@ -36,9 +55,21 @@
       <Setter Property="Background" Value="#333333"/>
       <Setter Property="HorizontalContentAlignment" Value="Center"/>
       <Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Setter Property="Cursor" Value="Hand"/>
     </Style>
-    <Style Selector="Button.iconBtn:checked">
+    <Style Selector="Button.iconBtn:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#3f3f3f"/>
+    </Style>
+    <Style Selector="Button.iconBtn:pressed /template/ ContentPresenter">
+      <Setter Property="Background" Value="#2a2a2a"/>
+    </Style>
+    <Style Selector="Button.iconBtn:checked /template/ ContentPresenter">
       <Setter Property="Background" Value="#2f7bff"/>
+      <Setter Property="Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.iconBtn:checked:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#4a8cff"/>
+      <Setter Property="Foreground" Value="White"/>
     </Style>
     <Style Selector="TextBlock.formLabel">
       <Setter Property="FontSize" Value="12"/>
@@ -73,8 +104,11 @@
         <TextBox x:Name="BaseUrlBox" MinWidth="320" HorizontalAlignment="Left"/>
         <TextBlock x:Name="S2ApiKeyLabel" Classes="formLabel" Text="API Key"/>
         <TextBox x:Name="ApiKeyBox" MinWidth="320" HorizontalAlignment="Left"/>
-        <Button x:Name="TrialBtn" Classes="ghostBtn" Content="获取体验卡" MinWidth="96"
-                HorizontalAlignment="Left" IsVisible="False" Margin="0,4,0,0"/>
+        <StackPanel x:Name="TokenRow" Orientation="Horizontal" Spacing="10"
+                    HorizontalAlignment="Left" IsVisible="False" Margin="0,4,0,0">
+            <Button x:Name="TrialBtn" Classes="ghostBtn" Content="获取体验卡" MinWidth="96"/>
+            <Button x:Name="BuyBtn" Classes="ghostBtn" Content="优惠购买Token卡" MinWidth="96"/>
+        </StackPanel>
         <TextBlock x:Name="TrialHint" Text="" FontSize="12" Foreground="#8a8a8a" TextWrapping="Wrap"
                    MaxWidth="420" HorizontalAlignment="Left" Margin="0,2,0,0"/>
         <TextBlock x:Name="S2ModelsLabel" Classes="formLabel" Text="模型（逗号分隔）"/>

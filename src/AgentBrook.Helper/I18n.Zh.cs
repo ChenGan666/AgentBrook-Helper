@@ -38,6 +38,7 @@ internal static partial class I18n
         ["ui.token.buy.opened"] = "已在浏览器打开购买页。",
         ["ui.token.open.fail"] = "打开购买页失败：{0}",
         ["onboarding.trial.get"] = "获取体验卡",
+        ["onboarding.token.buy"] = "优惠购买Token卡",
         ["onboarding.trial.loading"] = "正在申请体验卡…",
         ["onboarding.trial.ok"] = "🎉 试用卡已开通并自动填充：5 元 / 24 小时（{0}）。点「测试」验证连通，完成后保存即可使用。充值后余额自动到账，配置无需改动。",
         ["onboarding.trial.dup"] = "{0}（可直接填写已有模型配置，或购买 Token卡）",

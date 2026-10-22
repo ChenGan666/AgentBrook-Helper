@@ -50,6 +50,15 @@ public partial class OnboardingWindow : WindowBase
 
         // 试用卡由按钮手动触发（仅 AgentBrook 预设显示该按钮）
         this.FindControl<Button>("TrialBtn")!.Click += async (_, _) => await RequestTrialAsync();
+        this.FindControl<Button>("BuyBtn")!.Click += (_, _) =>
+        {
+            try { Process.Start(new ProcessStartInfo(TokenPurchaseUrl) { UseShellExecute = true }); }
+            catch (Exception ex)
+            {
+                var hint = this.FindControl<TextBlock>("TrialHint");
+                if (hint is not null) hint.Text = I18n.T("ui.token.open.fail", ex.Message);
+            }
+        };
 
         this.FindControl<Button>("SkipBtn")!.Click += (_, _) => CloseOnboarding("skipped");
 
@@ -237,6 +246,7 @@ public partial class OnboardingWindow : WindowBase
         SetT("S2ApiKeyLabel", "onboarding.s2.apikey");
         SetT("S2ModelsLabel", "onboarding.s2.models");
         SetB("TrialBtn", "onboarding.trial.get");
+        SetB("BuyBtn", "onboarding.token.buy");
         SetT("S3Desc", "onboarding.s3.desc");
         SetT("S3LanguageLabel", "onboarding.s3.language");
         SetT("S3PromptLabel", "onboarding.s3.prompt");
@@ -333,14 +343,14 @@ public partial class OnboardingWindow : WindowBase
         }
     }
 
-    /// <summary>仅当预设为 AgentBrook 时显示「获取体验卡」按钮（其他供应商无此功能）。</summary>
+    /// <summary>仅当预设为 AgentBrook 时显示「获取体验卡 / 购买Token卡」按钮（其他供应商无此功能）。</summary>
     private void UpdateTrialButtonVisibility()
     {
         var idx = this.FindControl<ComboBox>("PresetBox")!.SelectedIndex;
-        var btn = this.FindControl<Button>("TrialBtn");
-        if (btn is not null)
+        var row = this.FindControl<StackPanel>("TokenRow");
+        if (row is not null)
         {
-            btn.IsVisible = idx >= 0 && idx < Presets.Length && Presets[idx].Name == "AgentBrook";
+            row.IsVisible = idx >= 0 && idx < Presets.Length && Presets[idx].Name == "AgentBrook";
         }
     }
 

@@ -38,6 +38,7 @@ internal static partial class I18n
         ["ui.token.buy.opened"] = "Opened the purchase page in your browser.",
         ["ui.token.open.fail"] = "Failed to open the purchase page: {0}",
         ["onboarding.trial.get"] = "Get trial card",
+        ["onboarding.token.buy"] = "Buy Token card (discount)",
         ["onboarding.trial.loading"] = "Requesting trial card…",
         ["onboarding.trial.ok"] = "🎉 Trial card activated and auto-filled: ¥5 / 24 hours (expires {0}). Click \"Test\" to verify, then save. Top-ups apply automatically — no config change needed.",
         ["onboarding.trial.dup"] = "{0} You can fill in an existing model config or buy a Token card.",

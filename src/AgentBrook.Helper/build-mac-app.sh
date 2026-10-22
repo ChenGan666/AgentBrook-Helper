@@ -4,7 +4,7 @@
 #   /Users/chengan/Dev/AI/AgentBrook3.0/src/publish/osx-arm64/AgentBrook.Helper-arm64.app
 #   /Users/chengan/Dev/AI/AgentBrook3.0/src/publish/osx-x64/AgentBrook.Helper-x64.app
 #   /Users/chengan/Dev/AI/AgentBrook3.0/src/publish/osx-universal/AgentBrook.Helper.app
-# 同时会生成对应的 zip 分发包，并复制一份到 ../AgentBrook.Service/updates 目录，供自动更新服务使用。
+# 同时会生成对应的 zip 分发包（最终产物根：src/publish/updated/）。
 # 均为 self-contained（自带 .NET 运行时，目标机零依赖）。
 # MODE=arm64 | x64 | universal 可只构建其中一种。
 # PUBLISH_BASE 环境变量可覆盖发布根目录。
@@ -127,10 +127,6 @@ package_app() {
   (cd "$(dirname "$app")" && zip -ry "$zip_path" "$(basename "$app")" >/dev/null)
   # 更新说明随平台文件夹分发（服务器按目录读取 release-notes.txt 作为该版本更新说明）
   cp "$(pwd)/release-notes.txt" "$final_dir/release-notes.txt"
-  local update_dir="$(pwd)/../AgentBrook.Service/updates/$rid"
-  mkdir -p "$update_dir"
-  cp "$zip_path" "$update_dir/AgentBrook.Helper-$VERSION.zip"
-  cp "$(pwd)/release-notes.txt" "$update_dir/release-notes.txt"
   echo "  -> $zip_path"
   echo "  -> $final_dir/release-notes.txt"
   echo "  -> $update_dir/AgentBrook.Helper-$VERSION.zip"
