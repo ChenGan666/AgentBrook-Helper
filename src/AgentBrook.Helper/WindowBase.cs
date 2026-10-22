@@ -104,4 +104,26 @@ public abstract class WindowBase : Window
         }
         return reply.Trim();
     }
+
+    /// <summary>
+    /// 把中转服务返回的英文错误码（trial_ip_mismatch / insufficient_quota / card_* 等）
+    /// 映射成多语言友好描述；不认识的错误原样返回。
+    /// </summary>
+    protected static string FriendlyRelayError(string? rawMessage)
+    {
+        var text = rawMessage ?? "";
+        var key = text switch
+        {
+            var t when t.Contains("trial_ip_mismatch") => "ui.relay.err.trial_ip_mismatch",
+            var t when t.Contains("insufficient_quota") => "ui.relay.err.insufficient_quota",
+            var t when t.Contains("card_expired") => "ui.relay.err.card_expired",
+            var t when t.Contains("card_frozen") => "ui.relay.err.card_frozen",
+            var t when t.Contains("card_voided") => "ui.relay.err.card_voided",
+            var t when t.Contains("card_not_activated") => "ui.relay.err.card_not_activated",
+            var t when t.Contains("invalid_api_key") => "ui.relay.err.invalid_api_key",
+            var t when t.Contains("rate_limit_exceeded") => "ui.relay.err.rate_limit_exceeded",
+            _ => null,
+        };
+        return key is null ? text : I18n.T(key);
+    }
 }

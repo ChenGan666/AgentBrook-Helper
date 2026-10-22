@@ -1096,6 +1096,9 @@ public partial class ModelSettingsWindow : WindowBase
             _selectedIndex = 0;   // 打开窗口默认选中第一个供应商，表单即显示已有配置
         }
         ProviderList.SelectedIndex = _selectedIndex;
+        // SelectedIndex 未变化时 SelectionChanged 不触发（如删到只剩一项仍选 0）：
+        // 主动加载表单，保证唯一供应商的参数正确回显
+        LoadSelectedIntoForm();
         FormPanel.IsEnabled = _working.Count > 0;
     }
 
@@ -1278,7 +1281,7 @@ public partial class ModelSettingsWindow : WindowBase
         {
             if (testHint is not null)
             {
-                testHint.Text = I18n.T("ui.models.test.fail", ex.Message);
+                testHint.Text = I18n.T("ui.models.test.fail", FriendlyRelayError(ex.Message));
             }
         }
         finally

@@ -30,7 +30,6 @@ public partial class OnboardingWindow : WindowBase
     private int _step;
     private string _icon = "🦊";
     private bool _providerSaved;   // 步骤 1 的大模型是否已落盘（取名按钮依赖它激活模型）
-    private bool _trialRequested;  // 试用卡只自动申请一次
     private string? _trialKey;     // 试用卡 Key（申请成功后填充）
     private bool _trialFilled;    // 试用卡已自动填充大模型配置（保存时类型名固定 AgentBrook）
 
@@ -49,8 +48,8 @@ public partial class OnboardingWindow : WindowBase
         presets.SelectedIndex = 0;
         presets.SelectionChanged += (_, _) => ApplyPreset();
 
-        // 首次引导：自动向 AgentBrook.Service 申请试用卡（24小时/5元，绑定设备与公网IP）
-        Opened += (_, _) => { if (!_trialRequested) { _trialRequested = true; _ = RequestTrialAsync(); } };
+        // 试用卡由按钮手动触发（仅 AgentBrook 预设显示该按钮）
+        this.FindControl<Button>("TrialBtn")!.Click += async (_, _) => await RequestTrialAsync();
 
         this.FindControl<Button>("SkipBtn")!.Click += (_, _) => CloseOnboarding("skipped");
 
@@ -103,6 +102,7 @@ public partial class OnboardingWindow : WindowBase
         OnLanguageChanged();
         ShowStep(0);
         LoadExistingIntoForms();
+        UpdateTrialButtonVisibility();
     }
 
     /// <summary>已有配置回填表单（设置页可重复打开本向导）：模型/身份/语言/提示词/工作空间。
@@ -236,6 +236,7 @@ public partial class OnboardingWindow : WindowBase
         SetT("S2BaseUrlLabel", "onboarding.s2.baseurl");
         SetT("S2ApiKeyLabel", "onboarding.s2.apikey");
         SetT("S2ModelsLabel", "onboarding.s2.models");
+        SetB("TrialBtn", "onboarding.trial.get");
         SetT("S3Desc", "onboarding.s3.desc");
         SetT("S3LanguageLabel", "onboarding.s3.language");
         SetT("S3PromptLabel", "onboarding.s3.prompt");
@@ -332,9 +333,23 @@ public partial class OnboardingWindow : WindowBase
         }
     }
 
+    /// <summary>仅当预设为 AgentBrook 时显示「获取体验卡」按钮（其他供应商无此功能）。</summary>
+    private void UpdateTrialButtonVisibility()
+    {
+        var idx = this.FindControl<ComboBox>("PresetBox")!.SelectedIndex;
+        var btn = this.FindControl<Button>("TrialBtn");
+        if (btn is not null)
+        {
+            btn.IsVisible = idx >= 0 && idx < Presets.Length && Presets[idx].Name == "AgentBrook";
+        }
+    }
+
     private async Task RequestTrialAsync()
     {
         var hint = this.FindControl<TextBlock>("TrialHint");
+        var btn = this.FindControl<Button>("TrialBtn");
+        if (btn is not null) btn.IsEnabled = false;
+        if (hint is not null) hint.Text = I18n.T("onboarding.trial.loading");
         try
         {
             var (serviceUrl, relayPublicUrl) = LoadTokenConfig();
@@ -376,7 +391,9 @@ public partial class OnboardingWindow : WindowBase
 
             _trialFilled = true;
             if (hint is not null)
-                hint.Text = I18n.T("onboarding.trial.ok", expire);
+                hint.Text = string.IsNullOrWhiteSpace(message)
+                    ? I18n.T("onboarding.trial.ok", expire)
+                    : message;
         }
         catch (HttpRequestException)
         {
@@ -388,6 +405,10 @@ public partial class OnboardingWindow : WindowBase
         {
             if (hint is not null)
                 hint.Text = I18n.T("onboarding.trial.unreachable", ex.Message);
+        }
+        finally
+        {
+            if (btn is not null) btn.IsEnabled = true;
         }
     }
 
@@ -420,6 +441,7 @@ public partial class OnboardingWindow : WindowBase
             this.FindControl<TextBox>("BaseUrlBox")!.Text = url;
             this.FindControl<TextBox>("ModelsBox")!.Text = models;
         }
+        UpdateTrialButtonVisibility();
     }
 
     // ── 完成：按步骤依次落盘 ──
@@ -685,7 +707,7 @@ public partial class OnboardingWindow : WindowBase
             {
                 if (hint is not null)
                 {
-                    hint.Text = $"⚠ {I18n.T("ui.models.test.fail", ex.Message)}（第 {attempt} 次），自动重试…";
+                    hint.Text = $"⚠ {I18n.T("ui.models.test.fail", FriendlyRelayError(ex.Message))}（第 {attempt} 次），自动重试…";
                 }
                 await Task.Delay(2500);
             }
@@ -693,7 +715,7 @@ public partial class OnboardingWindow : WindowBase
             {
                 if (hint is not null)
                 {
-                    hint.Text = "✗ " + I18n.T("ui.models.test.fail", ex.Message);
+                    hint.Text = "✗ " + I18n.T("ui.models.test.fail", FriendlyRelayError(ex.Message));
                 }
                 break;
             }
