@@ -55,6 +55,10 @@ AgentBrook Helper 是一个真正跑在你机器上的 AI 智能体的桌面客�
 
 气泡打开的是一个会记住事情的智能体。`workspace/memory/` 下的 Markdown 记忆文件每轮都会注入上下文，模型自己也能写入。技能从 `SKILL.md` 渐进式加载——并且智能体可以把**它实际验证过**的工作流沉淀成新技能。MCP 服务器经 stdio 接入。项目功能让它能把一个目标拆给多个各自拥有工作区的工作智能体，并通过消息总线协调。
 
+### 在对话里生成图片、视频与音频
+
+模型选择器旁有一个 🎬 多媒体下拉，列出各供应商提供的图像与视频模型——类型信息来自拉取的模型列表元数据，媒体模型与对话模型互不混选。选中后直接开口即可：智能体自动组装提示词与模型所需参数调用 `media_generate`——提交异步任务并轮询（最长五分钟），结果直接呈现在气泡里，图片内联显示、视频/音频以可播放卡片呈现。委派出去的子智能体同样能生成媒体；改用当前所选之外的其他媒体模型会先征求你的授权。
+
 ### 不经过你，什么都不会执行
 
 命令行执行、技能安装、MCP 服务器注册、派生工作智能体——全都会先停下来，弹一张审批卡片。卡片顶部是「人话提要」，原始指令折叠在下层。你可以批准、拒绝并附上理由（理由会回传给模型让它重新规划），或者开启本次会话的完全访问——重启即复位。
@@ -73,7 +77,7 @@ A2A 会话中心一键建群（建群即入群，群名自动生成），把局�
 
 ### Token卡：24 小时试用与即充即用
 
-首次启动引导会自动向计费服务申请试用卡——5 元额度、24 小时有效期、绑定设备与网络——并自动填充大模型配置（供应商 AgentBrook，端点 `https://api.agentbrook.com`）。模型设置页为 AgentBrook 供应商提供「Token卡充值」快捷入口（卡 Key 即 API Key，充值到账自动生效），以及「获取模型列表」：凭 Key 自动拉取中转上的模型清单与参数。 发卡页更有「自动回填到 Helper」一键操作——通过 Helper 本机回环服务把 Key 直接写入模型配置并拉起设置窗，全程无需手动粘贴。
+首次启动引导会自动向计费服务申请试用卡——5 元额度、24 小时有效期、绑定设备与网络——并自动填充大模型配置（供应商 AgentBrook，端点 `https://api.agentbrook.com`）。模型设置页为 AgentBrook 供应商提供「Token卡充值」快捷入口（卡 Key 即 API Key，充值到账自动生效），以及「获取模型列表」：凭 Key 自动拉取中转上的模型清单与参数。 发卡页更有「自动回填到 Helper」一键操作——通过 Helper 本机回环服务把 Key 直接写入模型配置并拉起设置窗，全程无需手动粘贴。设置窗口现为全局单例，并新增「更新」一键操作：重新拉取模型列表、刷新余额并完成连通性测试，一步到位。
 
 ### 自动更新
 
@@ -174,7 +178,7 @@ cd src/AgentBrook.Agent && dotnet run
 
 ## 内置工具
 
-核心内置约 55 个工具，按能力面分组：
+核心内置约 56 个工具，按能力面分组：
 
 | 能力面 | 工具 |
 |---|---|
@@ -184,6 +188,7 @@ cd src/AgentBrook.Agent && dotnet run
 | **技能** | `list_skills` `load_skill` `create_skill` `install_skill` `skill_market` |
 | **MCP** | `mcp_list_servers` `mcp_add_server` —— 外加已配置服务器暴露的全部工具 |
 | **团队** | `start_project` `spawn_worker` `assign_task` `send_message` `broadcast_to_workers` `list_workers` `read_shared` `check_messages` |
+| **媒体** | `media_generate` —— 经所选多模态模型生成图片/视频/音频（异步任务提交+轮询；跨模型调用需授权） |
 | **交互** | `ask_user` —— 挂起当前回合，等一个真实回答 |
 | **A2A 协作** | `a2a_status` `a2a_list_peers` `a2a_pair` `a2a_send_message` `a2a_send_all` `a2a_send_file` `a2a_create_group` `a2a_group_send` `a2a_group_rename` `a2a_list_groups` —— 局域网发现、配对、消息、文件与群组 |
 

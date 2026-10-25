@@ -27,12 +27,12 @@
             </Canvas.RenderTransform>
         </Canvas>
 
-        <!-- 气泡本体（原 96x96 结构不动，顶部居中下移 24px） -->
+        <!-- 气泡本体（原 96x96 结构不动，顶部居中下移 24px；0.72 视觉缩放：本体缩小20%） -->
         <Panel x:Name="Root" Width="96" Height="96"
                HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,24,0,0"
                RenderTransformOrigin="50%,50%">
             <Panel.RenderTransform>
-                <ScaleTransform ScaleX="0.9" ScaleY="0.9"/>
+                <ScaleTransform ScaleX="0.72" ScaleY="0.72"/>
             </Panel.RenderTransform>
             <!-- 外圈光晕（呼吸动画；83x83，比主体大，留在气泡区内不裁剪） -->
             <Ellipse x:Name="GlowOuter" Width="83" Height="83"
@@ -89,6 +89,6 @@
 
         <!-- 提示卡堆（问候语 / 审批快捷操作 / 提问提醒），气泡下方 -->
         <StackPanel x:Name="ToastPanel" Width="228" Spacing="8"
-                    HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,140,0,0"/>
+                    HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,110,0,0"/>
     </Panel>
 </Window>

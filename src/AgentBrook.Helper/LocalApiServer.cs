@@ -16,7 +16,7 @@ internal static class LocalApiServer
     private const int Port = 47852;
     private static readonly HttpListener _listener = new();
     private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(15) };
-    private static ModelSettingsWindow? _settingsWindow;
+
 
     public static void Start()
     {
@@ -72,6 +72,14 @@ internal static class LocalApiServer
                 await WriteJsonAsync(resp, 200, new { code = 0, app = "AgentBrook.Helper" });
                 return;
             }
+            if (path == "/focus" && ctx.Request.HttpMethod is "GET" or "POST")
+            {
+                // 第二个实例启动时被 Mutex 拦截后调用：把已运行实例的对话窗前置
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                    (App.Controller.ConversationWindow as MainWindow)?.ShowFromBubble());
+                await WriteJsonAsync(resp, 200, new { code = 0 });
+                return;
+            }
             if (ctx.Request.HttpMethod == "POST" && path == "/setup/provider")
             {
                 string body;
@@ -124,6 +132,11 @@ internal static class LocalApiServer
             {
                 Name = p.Name, BaseUrl = p.BaseUrl, ApiKey = p.ApiKey,
                 Models = [.. p.Models], ActiveModel = p.ActiveModel,
+                ActiveMediaModel = p.ActiveMediaModel,
+                ModelTypes = new Dictionary<string, int>(p.ModelTypes),
+                ModelNames = new Dictionary<string, string>(p.ModelNames),
+                ModelEndpoints = new Dictionary<string, string>(p.ModelEndpoints),
+                ModelParams = new Dictionary<string, string>(p.ModelParams),
             }).ToList();
             active = App.Controller.CurrentProvider;
         }
@@ -146,13 +159,23 @@ internal static class LocalApiServer
         if (p.ApiKey != apiKey) { p.ApiKey = apiKey; changed = true; }
         if (models is { Count: > 0 } && !models.SequenceEqual(p.Models)) { p.Models = models; changed = true; }
 
-        // 模型清单缺失时向中转拉一次（Key 刚发卡，/v1/models 即可用）
+        // 模型清单缺失时向中转拉一次（Key 刚发卡，/v1/models 即可用）；全量模型入列，非对话模型发送时按类型拦截
         if (p.Models.Count == 0)
         {
             var fetched = await FetchModelsAsync(p.BaseUrl, p.ApiKey);
-            if (fetched.Count > 0) { p.Models = fetched; changed = true; }
+            if (fetched.Count > 0)
+            {
+                p.Models = fetched.Select(f => f.Id).ToList();
+                p.ModelTypes = fetched.ToDictionary(f => f.Id, f => f.ModelType);
+                p.ModelNames = fetched.Where(f => !string.IsNullOrWhiteSpace(f.Name)).ToDictionary(f => f.Id, f => f.Name!);
+                p.ModelEndpoints = fetched.Where(f => !string.IsNullOrWhiteSpace(f.Endpoints)).ToDictionary(f => f.Id, f => f.Endpoints);
+                p.ModelParams = fetched.Where(f => !string.IsNullOrWhiteSpace(f.Params)).ToDictionary(f => f.Id, f => f.Params);
+                changed = true;
+            }
         }
-        if (!p.Models.Contains(p.ActiveModel)) p.ActiveModel = p.Models.FirstOrDefault() ?? "";
+        if (!p.Models.Contains(p.ActiveModel))
+            // 默认激活优先文本对话模型，避免默认落到图像/视频模型
+            p.ActiveModel = p.Models.FirstOrDefault(m => p.IsChatModel(m)) ?? p.Models.FirstOrDefault() ?? "";
 
         // Key 可用则直接设为当前供应商；不可用保持原激活项
         var newActive = p.IsConfigured ? p.Name : active;
@@ -165,22 +188,34 @@ internal static class LocalApiServer
         return (0, changed ? "已写入 AgentBrook 配置" : "配置已是最新，无需更改");
     }
 
-    /// <summary>调中转 OpenAI 兼容 /v1/models 拉取可用模型（Bearer Key）。</summary>
-    private static async Task<List<string>> FetchModelsAsync(string baseUrl, string apiKey)
+    /// <summary>调中转 OpenAI 兼容 /v1/models 拉取可用模型（Bearer Key），保留类型与显示名供接口路由。</summary>
+    private sealed record RelayModelEntry(string Id, string? Name, int ModelType, string Endpoints, string Params);
+
+    private static async Task<List<RelayModelEntry>> FetchModelsAsync(string baseUrl, string apiKey)
     {
         try
         {
             var url = baseUrl.TrimEnd('/');
             if (!url.EndsWith("/v1", StringComparison.OrdinalIgnoreCase)) url += "/v1";
-            using var req = new HttpRequestMessage(HttpMethod.Get, url + "/models");
+            using var req = new HttpRequestMessage(HttpMethod.Get,
+                url + "/models?_=" + DateTimeOffset.Now.ToUnixTimeMilliseconds());
             req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
             req.Headers.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue { NoCache = true, NoStore = true };
             using var resp = await _http.SendAsync(req);
             if (!resp.IsSuccessStatusCode) return [];
             using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+            // 全量返回（含多模态）；model_type 缺失按 1=文本兼容旧服务端
             return doc.RootElement.GetProperty("data").EnumerateArray()
-                .Select(m => m.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "")
-                .Where(s => s.Length > 0).ToList();
+                .Select(m => new RelayModelEntry(
+                    m.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "",
+                    m.TryGetProperty("name", out var n) ? n.GetString() : null,
+                    m.TryGetProperty("model_type", out var mt) && mt.ValueKind == JsonValueKind.Number ? mt.GetInt32() : 1,
+                    m.TryGetProperty("endpoints", out var ep) && ep.ValueKind == JsonValueKind.Array
+                        ? string.Join(",", ep.EnumerateArray().Select(e => e.GetString()).Where(s => !string.IsNullOrEmpty(s)))
+                        : "",
+                    m.TryGetProperty("parameters", out var pp) && pp.ValueKind == JsonValueKind.Object
+                        ? pp.GetRawText() : ""))
+                .Where(e => e.Id.Length > 0).ToList();
         }
         catch
         {
@@ -191,15 +226,8 @@ internal static class LocalApiServer
     /// <summary>打开（或聚焦）设置窗口并定位到模型页的指定供应商。</summary>
     private static void ShowSettings(string providerName)
     {
-        if (_settingsWindow is null)
-        {
-            _settingsWindow = new ModelSettingsWindow();
-            _settingsWindow.Closed += (_, _) => _settingsWindow = null;
-        }
-        if (!_settingsWindow.IsVisible) _settingsWindow.Show();
-        _settingsWindow.ShowModelsPage(providerName);
-        _settingsWindow.Activate();
-        _settingsWindow.Focus();
+        var settings = ModelSettingsWindow.ShowSingle();
+        settings.ShowModelsPage(providerName);
     }
 
     private static string ModelsJsonPath()

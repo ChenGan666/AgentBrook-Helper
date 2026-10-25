@@ -197,14 +197,17 @@ public partial class MainWindow : Window
                             Foreground = new SolidColorBrush(Color.Parse("#8a8a8a")),
                             Margin = new Thickness(12, 8, 12, 2),
                         });
-                        foreach (var m in provider.Models)
+                        // 对话模型组（type<4）：点选切换主模型
+                        foreach (var m in provider.Models.Where(m => provider.IsChatModel(m)))
                         {
                             var isActive = m == currentModel && provider.Name == currentProvider;
                             var model = m;
+                            var label = provider.DisplayNameOf(model);
+                            if (label != model) label = $"{label}（{model}）";   // 显示名≠接口名时括注真实模型名
                             var b = new Button
                             {
                                 Classes = { "menuItem" },
-                                Content = isActive ? "✓  " + model : "      " + model,
+                                Content = isActive ? "✓  " + label : "      " + label,
                                 Foreground = new SolidColorBrush(Color.Parse(isActive ? "#4a9eff" : "#c8c8c8")),
                             };
                             b.Click += (_, _) =>
@@ -232,11 +235,84 @@ public partial class MainWindow : Window
                     manage.Click += (_, _) =>
                     {
                         _modelPopup?.IsOpen = false;
-                        new ModelSettingsWindow().Show();
+                        ModelSettingsWindow.ShowSingle();
                     };
                     panel.Children.Add(manage);
                 }
                 ShowDropdown(modelChip, panel, ref _modelPopup);
+            };
+        }
+
+        // 多模态独立下拉：只列 type≥4 模型 + “无”，点选即生效 ActiveMediaModel
+        var mediaChip = this.FindControl<Button>("MediaChip");
+        if (mediaChip is not null)
+        {
+            mediaChip.Click += (_, _) =>
+            {
+                var panel = new StackPanel { Margin = new Thickness(4) };
+                var providers = _controller.Providers;
+                var currentProvider = _controller.CurrentProvider;
+                var any = false;
+                foreach (var provider in providers)
+                {
+                    var mmModels = provider.Models.Where(m => !provider.IsChatModel(m)).ToList();
+                    if (mmModels.Count == 0) continue;
+                    any = true;
+                    panel.Children.Add(new TextBlock
+                    {
+                        Text = provider.Name,
+                        FontSize = 11.5,
+                        Foreground = new SolidColorBrush(Color.Parse("#8a8a8a")),
+                        Margin = new Thickness(12, 8, 12, 2),
+                    });
+                    // “无”项：不启用多模态子能力
+                    var noneActive = provider.Name == currentProvider && string.IsNullOrEmpty(provider.ActiveMediaModel);
+                    var noneBtn = new Button
+                    {
+                        Classes = { "menuItem" },
+                        Content = (noneActive ? "✓  " : "      ") + "无",
+                        Foreground = new SolidColorBrush(Color.Parse(noneActive ? "#4a9eff" : "#c8c8c8")),
+                    };
+                    noneBtn.Click += (_, _) =>
+                    {
+                        SelectMediaModel(provider, "");
+                        _mediaPopup?.IsOpen = false;
+                    };
+                    panel.Children.Add(noneBtn);
+                    foreach (var m in mmModels)
+                    {
+                        var isActive = provider.Name == currentProvider && provider.ActiveMediaModel == m;
+                        var mm = m;
+                        var label = provider.DisplayNameOf(mm);
+                        var typeTag = provider.TypeOf(mm) is >= 6 ? "视频" : "图像";
+                        if (label != mm) label = $"{label}（{mm}）";
+                        var mb = new Button
+                        {
+                            Classes = { "menuItem" },
+                            Content = (isActive ? "✓  " : "      ") + label + $"〔{typeTag}〕",
+                            Foreground = new SolidColorBrush(Color.Parse(isActive ? "#d29922" : "#c8c8c8")),
+                        };
+                        mb.Click += (_, _) =>
+                        {
+                            provider.ActiveMediaModel = mm;
+                            _ = PersistProvidersAsync();
+                            UpdateMediaChip();
+                            _mediaPopup?.IsOpen = false;
+                        };
+                        panel.Children.Add(mb);
+                    }
+                }
+                if (!any)
+                {
+                    panel.Children.Add(new TextBlock
+                    {
+                        Text = "无多模态模型（在模型设置中拉取）",
+                        Foreground = new SolidColorBrush(Color.Parse("#9a9a9a")),
+                        FontSize = 13.5,
+                        Margin = new Thickness(12, 8),
+                    });
+                }
+                ShowDropdown(mediaChip, panel, ref _mediaPopup);
             };
         }
 
@@ -355,6 +431,7 @@ public partial class MainWindow : Window
     }
 
     private Popup? _sessionPopup;
+    private Popup? _mediaPopup;
 
     /// <summary>会话切换下拉：最近会话（当前✓蓝高亮）＋ 开启新对话 ＋ 沉淀当前会话为技能。</summary>
     private void ShowSessionMenu(Button anchor)
@@ -1897,6 +1974,29 @@ public partial class MainWindow : Window
         popup.IsOpen = true;
     }
 
+    /// <summary>持久化供应商配置（多模态选择等即时生效，Agent.Core 侧 SaveProvidersAsync 负责写盘+热应用）。</summary>
+    private async Task PersistProvidersAsync(string? activeProvider = null)
+    {
+        try
+        {
+            if (_controller.Ready)
+                await _controller.SaveProvidersAsync(
+                    _controller.Providers.ToList(), activeProvider ?? _controller.CurrentProvider);
+        }
+        catch { /* 持久化失败不阻断 UI 选择 */ }
+    }
+
+    /// <summary>选择多模态模型（空串=无）；与对话模型供应商无关，可跨供应商自由组合；全局唯一，清除其他供应商的选择。</summary>
+    private void SelectMediaModel(AgentBrook.Agent.Infrastructure.ProviderConfig provider, string mediaModel)
+    {
+        foreach (var p in _controller.Providers)
+        {
+            p.ActiveMediaModel = p.Name == provider.Name ? mediaModel : "";
+        }
+        _ = PersistProvidersAsync();   // 激活供应商不变
+        UpdateMediaChip();
+    }
+
     /// <summary>同步输入区模型标签文字（Agent 未就绪时保持占位）。</summary>
     private void UpdateModelChip()
     {
@@ -1907,11 +2007,42 @@ public partial class MainWindow : Window
         }
         try
         {
-            chip.Text = _controller.Ready ? _controller.Agent!.CurrentModel : I18n.T("ui.model");
+            var model = _controller.Ready ? _controller.Agent!.CurrentModel : "";
+            var provider = _controller.Providers.FirstOrDefault(p => p.Name == _controller.CurrentProvider);
+            chip.Text = model.Length == 0
+                ? I18n.T("ui.model")
+                : provider?.DisplayNameOf(model) ?? model;
+            // 显示名≠接口名时 tooltip 标注真实模型名（参数用）
+            if (provider != null && provider.DisplayNameOf(model) != model)
+            {
+                ToolTip.SetTip(chip.Parent as Control, $"model = {model}");
+            }
         }
         catch
         {
             chip.Text = I18n.T("ui.model");
+        }
+        UpdateMediaChip();
+    }
+
+    /// <summary>同步多模态芯片：显示已选 media_generate 模型（未选显示“🎬无”，无多模态模型时隐藏）。</summary>
+    private void UpdateMediaChip()
+    {
+        var chip = this.FindControl<TextBlock>("MediaChipText");
+        if (chip is null) return;
+        try
+        {
+            var provider = _controller.Providers.FirstOrDefault(p => !string.IsNullOrEmpty(p.ActiveMediaModel));
+            var mm = provider?.ActiveMediaModel ?? "";
+            chip.Text = mm.Length == 0
+                ? "多媒体: 无"
+                : $"多媒体: {provider!.DisplayNameOf(mm)}";
+            var hasAny = _controller.Providers.Any(p => p.Models.Any(m => !p.IsChatModel(m)));
+            (chip.Parent?.Parent as Control)?.IsVisible = hasAny;
+        }
+        catch
+        {
+            chip.Text = "多媒体: 无";
         }
     }
 
@@ -2541,4 +2672,3 @@ public partial class MainWindow : Window
         base.OnClosing(e);
     }
 }
-

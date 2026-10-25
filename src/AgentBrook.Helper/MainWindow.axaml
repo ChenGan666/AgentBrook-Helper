@@ -276,7 +276,7 @@
                              FontSize="14.5" Foreground="#e6e6e6" Background="Transparent"
                              BorderThickness="0" MinHeight="40" MaxHeight="200" Padding="4,6"
                              TextWrapping="Wrap" AcceptsReturn="True" KeyDown="OnInputKeyDown"/>
-                    <Grid Grid.Row="2" ColumnDefinitions="Auto,Auto,*,Auto,Auto" ColumnSpacing="4">
+                    <Grid Grid.Row="2" ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto" ColumnSpacing="4">
                         <Button Grid.Column="0" x:Name="PlusBtn" Classes="toolChip" ToolTip.Tip="添加附件（或直接粘贴图片）">
                             <PathIcon Data="{StaticResource Icon.Plus}" Width="16" Height="16"/>
                         </Button>
@@ -287,13 +287,19 @@
                                 <PathIcon Data="{StaticResource Icon.ChevronDown}" Width="10" Height="10"/>
                             </StackPanel>
                         </Button>
-                        <Button Grid.Column="3" x:Name="ModelChip" Classes="toolChip" ToolTip.Tip="切换模型">
+                        <Button Grid.Column="3" x:Name="ModelChip" Classes="toolChip" ToolTip.Tip="切换对话模型">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <TextBlock x:Name="ModelChipText" Text="模型"/>
                                 <PathIcon Data="{StaticResource Icon.ChevronDown}" Width="10" Height="10"/>
                             </StackPanel>
                         </Button>
-                        <Button Grid.Column="4" x:Name="SendBtn" Classes="sendBtn"
+                        <Button Grid.Column="4" x:Name="MediaChip" Classes="toolChip" ToolTip.Tip="选择多模态模型（图像/视频生成）">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <TextBlock x:Name="MediaChipText" Text="多媒体: 无"/>
+                                <PathIcon Data="{StaticResource Icon.ChevronDown}" Width="10" Height="10"/>
+                            </StackPanel>
+                        </Button>
+                        <Button Grid.Column="5" x:Name="SendBtn" Classes="sendBtn"
                                 Width="34" Height="34" Margin="6,0,0,0" ToolTip.Tip="发送">
                             <Panel>
                                 <PathIcon x:Name="SendIcon" Data="{StaticResource Icon.Send}" Width="16" Height="16" Foreground="#111111"/>

@@ -13,6 +13,20 @@ internal static class Program
             RunMarkdownSelfTest();
             return;
         }
+
+        // 单实例约束：命名 Mutex 跨平台生效；已有实例则请其窗口前置后退出
+        using var instanceMutex = new Mutex(true, @"Global\AgentBrook.Helper.Singleton", out var createdNew);
+        if (!createdNew)
+        {
+            try
+            {
+                using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+                http.PostAsync("http://127.0.0.1:47852/focus", null).Wait(2000);
+            }
+            catch { /* 已运行实例未监听回环接口也直接退出 */ }
+            return;
+        }
+
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 

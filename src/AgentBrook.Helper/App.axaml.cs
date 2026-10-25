@@ -128,8 +128,7 @@ public partial class App : Application
                         return;
                     }
                     stTimer.Stop();
-                    var settings = new ModelSettingsWindow();
-                    settings.Show();
+                    ModelSettingsWindow.ShowSingle();
                 };
                 stTimer.Start();
             }
@@ -166,8 +165,7 @@ public partial class App : Application
                 ul.Tick += (_, _) =>
                 {
                     ul.Stop();
-                    var win = new ModelSettingsWindow();
-                    win.Show();
+                    var win = ModelSettingsWindow.ShowSingle();
                     win.DebugSelectUiLanguage("en");
                 };
                 ul.Start();

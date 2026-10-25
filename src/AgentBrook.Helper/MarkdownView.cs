@@ -119,36 +119,34 @@ public static class MarkdownView
         _ => RenderPlainText(block),
     };
 
-    /// <summary>段落仅含一张图片时：块级渲染本地图片；否则返回 null。</summary>
+    /// <summary>段落仅含一个媒体（图片/视频/音频链接）时：块级渲染 MediaBlock；否则返回 null。</summary>
     private static Control? TryExtractImageOnly(ParagraphBlock p)
     {
         if (p.Inline is null) return null;
-        var img = p.Inline.FirstOrDefault() as LinkInline;
-        if (img is not { IsImage: true } || img.FirstChild is not LiteralInline li) return null;
+        var link = p.Inline.FirstOrDefault() as LinkInline;
+        if (link is null) return null;
 
-        var src = li.Content.ToString();
-        var full = src.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+        // 媒体源是链接目标 url（![描述](url) 的 url），不是显示文字
+        var src = !string.IsNullOrWhiteSpace(link.Url)
+            ? link.Url
+            : link.FirstChild is LiteralInline li ? li.Content.ToString() : "";
+        var isRemote = MediaBlock.IsRemote(src);
+        var full = isRemote
             ? src
             : Path.Combine(App.Controller.Agent!.WorkspaceRoot, src.TrimStart('/'));
-        if (File.Exists(full))
+
+        // 图片：markdown ![]() 语法或按后缀识别；视频/音频：普通链接后缀识别
+        var kind = link.IsImage ? MediaBlock.Kind.Image : MediaBlock.Detect(full);
+        if (kind == MediaBlock.Kind.None) return null;
+        if (!isRemote && !File.Exists(full))
         {
-            var preview = new Image
+            return new TextBlock
             {
-                Source = new Bitmap(full),
-                MaxWidth = 380,
-                Margin = new Thickness(0, 4),
-                HorizontalAlignment = HorizontalAlignment.Left,
-                Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+                Text = $"[媒体：{src}（文件不存在）]",
+                Classes = { "procLine" },
             };
-            preview.PointerReleased += (_, _) => OpenTarget(full);
-            ToolTip.SetTip(preview, "点击打开原图");
-            return preview;
         }
-        return new TextBlock
-        {
-            Text = $"[图片：{src}（文件不存在）]",
-            Classes = { "procLine" },
-        };
+        return MediaBlock.Build(full);
     }
 
     /// <summary>可选中可复制的文本块：附右键"复制"菜单（有选区复制选区，否则复制全文）。供对话区各文本块复用。</summary>

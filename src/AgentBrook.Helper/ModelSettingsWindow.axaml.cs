@@ -21,6 +21,22 @@ namespace AgentBrook.Helper;
 /// </summary>
 public partial class ModelSettingsWindow : WindowBase
 {
+    /// <summary>单例窗口：已打开则聚焦复用，未打开则新建（菜单/对话窗/回环回填统一走此入口）。</summary>
+    private static ModelSettingsWindow? _current;
+
+    public static ModelSettingsWindow ShowSingle()
+    {
+        if (_current is null)
+        {
+            _current = new ModelSettingsWindow();
+            _current.Closed += (_, _) => _current = null;
+        }
+        if (!_current.IsVisible) _current.Show();
+        _current.Activate();
+        _current.Focus();
+        return _current;
+    }
+
     private List<ProviderConfig> _working = new();
     private string _activeName = "";
     private int _selectedIndex = -1;
@@ -174,8 +190,7 @@ public partial class ModelSettingsWindow : WindowBase
         this.FindControl<Button>("SaveApplyBtn")!.Click += async (_, _) => await SaveAndApplyAsync();
         this.FindControl<Button>("CloseBtn")!.Click += (_, _) => Close();
         this.FindControl<Button>("DeleteBtn")!.Click += (_, _) => DeleteSelected();
-        this.FindControl<Button>("TestBtn")!.Click += async (_, _) => await TestProviderAsync();
-        this.FindControl<Button>("FetchModelsBtn")!.Click += async (_, _) => await FetchModelsBtnAsync();
+        this.FindControl<Button>("UpdateBtn")!.Click += async (_, _) => await UpdateProviderAsync();
         this.FindControl<Button>("TokenRechargeBtn")!.Click += (_, _) => OpenTokenPurchasePage(recharge: true);
         NameBox.TextChanged += (_, _) => RefreshProviderSpecificUi();
         // 助手名字「取名」：用当前激活大模型生成，填入名称框（点「保存个人设置」后生效）
@@ -860,11 +875,9 @@ public partial class ModelSettingsWindow : WindowBase
         if (saveBtn is not null) saveBtn.Content = I18n.T("ui.save.general");
         var promptBox2 = this.FindControl<TextBox>("CustomPromptBox");
         if (promptBox2 is not null) promptBox2.Watermark = I18n.T("ui.e.g.keep.answers.brief.prefer.tables.for.data");
-        // 模型设置：测试/获取模型列表/Token卡充值
-        var testBtnL = this.FindControl<Button>("TestBtn");
-        if (testBtnL is not null) testBtnL.Content = I18n.T("ui.models.test");
-        var fetchBtnL = this.FindControl<Button>("FetchModelsBtn");
-        if (fetchBtnL is not null) fetchBtnL.Content = I18n.T("ui.models.fetch");
+        // 模型设置：更新（取模型+余额+测试）/Token卡充值
+        var updateBtnL = this.FindControl<Button>("UpdateBtn");
+        if (updateBtnL is not null) updateBtnL.Content = I18n.T("ui.models.update");
         var rechargeBtnL = this.FindControl<Button>("TokenRechargeBtn");
         if (rechargeBtnL is not null) rechargeBtnL.Content = I18n.T("ui.token.recharge.btn");
         var rechargeLabelL = this.FindControl<TextBlock>("TokenRechargeLabel");
@@ -907,7 +920,7 @@ public partial class ModelSettingsWindow : WindowBase
         var addBtn = this.FindControl<Button>("AddBtn");
         if (addBtn is not null) addBtn.Content = I18n.T("ui.add.provider");
         var delBtn = this.FindControl<Button>("DeleteBtn");
-        if (delBtn is not null) delBtn.Content = I18n.T("ui.delete.this.provider");
+        if (delBtn is not null) delBtn.Content = I18n.T("ui.delete");
         // 页面元素（空安全，缺 x:Name 的跳过）
         SetT("GeneralTitle", "ui.general");
         SetT("GeneralDesc", "ui.assistant.identity.reply.preferences");
@@ -1040,6 +1053,11 @@ public partial class ModelSettingsWindow : WindowBase
             ApiKey = p.ApiKey,
             Models = [.. p.Models],
             ActiveModel = p.ActiveModel,
+            ActiveMediaModel = p.ActiveMediaModel,
+            ModelTypes = new Dictionary<string, int>(p.ModelTypes),
+            ModelNames = new Dictionary<string, string>(p.ModelNames),
+            ModelEndpoints = new Dictionary<string, string>(p.ModelEndpoints),
+            ModelParams = new Dictionary<string, string>(p.ModelParams),
         }).ToList();
         _activeName = App.Controller.CurrentProvider;
     }
@@ -1235,10 +1253,14 @@ public partial class ModelSettingsWindow : WindowBase
             try
             {
                 var models = await FetchRelayModelsAsync(EffectiveApiBase(p), p.ApiKey);
+                p.ModelTypes = models.ToDictionary(m => m.Id, m => m.ModelType); // 记录类型（含多模态）
+                p.ModelNames = models.Where(m => !string.IsNullOrWhiteSpace(m.Name)).ToDictionary(m => m.Id, m => m.Name!);
+                p.ModelEndpoints = models.Where(m => !string.IsNullOrWhiteSpace(m.Endpoints)).ToDictionary(m => m.Id, m => m.Endpoints);
                 if (models.Count > 0)
                 {
-                    p.Models = models.Select(m => m.Id).ToList();
-                    p.ActiveModel = p.Models[0];
+                    p.Models = models.Select(m => m.Id).ToList();   // 全量入列
+                    // 默认激活优先文本模型，避免默认落到图像/视频
+                    p.ActiveModel = p.Models.FirstOrDefault(m => p.IsChatModel(m)) ?? p.Models[0];
                     ModelsBox.Text = string.Join(", ", p.Models);
                 }
             }
@@ -1253,12 +1275,6 @@ public partial class ModelSettingsWindow : WindowBase
             return;
         }
         var model = p.ActiveModel;
-        var testBtn = this.FindControl<Button>("TestBtn");
-        if (testBtn is not null)
-        {
-            testBtn.IsEnabled = false;
-            testBtn.Content = I18n.T("ui.models.testing");
-        }
         var sw = Stopwatch.StartNew();
         try
         {
@@ -1285,12 +1301,29 @@ public partial class ModelSettingsWindow : WindowBase
                 testHint.Text = I18n.T("ui.models.test.fail", FriendlyRelayError(ex.Message));
             }
         }
+    }
+
+    /// <summary>「更新」一键三连：拉取模型列表 → 刷新余额 → 连通性测试（复用各环节自身提示）。</summary>
+    private async Task UpdateProviderAsync()
+    {
+        var btn = this.FindControl<Button>("UpdateBtn");
+        if (btn is not null)
+        {
+            btn.IsEnabled = false;
+            btn.Content = I18n.T("ui.models.updating");
+        }
+        try
+        {
+            await FetchModelsBtnAsync();
+            await RefreshBalanceAsync();
+            await TestProviderAsync();
+        }
         finally
         {
-            if (testBtn is not null)
+            if (btn is not null)
             {
-                testBtn.IsEnabled = true;
-                testBtn.Content = I18n.T("ui.models.test");
+                btn.IsEnabled = true;
+                btn.Content = I18n.T("ui.models.update");
             }
         }
     }
@@ -1309,12 +1342,14 @@ public partial class ModelSettingsWindow : WindowBase
     private static readonly HttpClient TokenHttp = new() { Timeout = TimeSpan.FromSeconds(20) };
     
 
-    private sealed record RelayModelInfo(string Id, string? Name, long? ContextWindow, int? MaxOutput);
+    private sealed record RelayModelInfo(string Id, string? Name, long? ContextWindow, int? MaxOutput, int ModelType, string Endpoints, string Params);
 
     /// <summary>调 OpenAI 兼容 /models 获取模型列表与参数。</summary>
     private static async Task<List<RelayModelInfo>> FetchRelayModelsAsync(string apiBase, string apiKey)
     {
-        using var req = new HttpRequestMessage(HttpMethod.Get, $"{apiBase.TrimEnd('/')}/models");
+        // 附加一次性参数避开网关/nginx 的 GET 缓存（缓存键含 query，请求头不一定生效）
+        using var req = new HttpRequestMessage(HttpMethod.Get,
+            $"{apiBase.TrimEnd('/')}/models?_={DateTimeOffset.Now.ToUnixTimeMilliseconds()}");
         req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
         req.Headers.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue { NoCache = true, NoStore = true };
         using var resp = await TokenHttp.SendAsync(req);
@@ -1325,11 +1360,20 @@ public partial class ModelSettingsWindow : WindowBase
         var list = new List<RelayModelInfo>();
         foreach (var m in doc.RootElement.GetProperty("data").EnumerateArray())
         {
+            var endpoints = "";
+            if (m.TryGetProperty("endpoints", out var ep) && ep.ValueKind == JsonValueKind.Array)
+            {
+                endpoints = string.Join(",", ep.EnumerateArray().Select(e => e.GetString()).Where(s => !string.IsNullOrEmpty(s)));
+            }
+            var pars = m.TryGetProperty("parameters", out var pp) && pp.ValueKind == JsonValueKind.Object
+                ? pp.GetRawText() : "";
             list.Add(new RelayModelInfo(
                 m.GetProperty("id").GetString() ?? "",
                 m.TryGetProperty("name", out var n) ? n.GetString() : null,
                 m.TryGetProperty("context_window", out var cw) && cw.ValueKind == JsonValueKind.Number ? cw.GetInt64() : null,
-                m.TryGetProperty("max_output_tokens", out var mo) && mo.ValueKind == JsonValueKind.Number ? mo.GetInt32() : null));
+                m.TryGetProperty("max_output_tokens", out var mo) && mo.ValueKind == JsonValueKind.Number ? mo.GetInt32() : null,
+                m.TryGetProperty("model_type", out var mt) && mt.ValueKind == JsonValueKind.Number ? mt.GetInt32() : 1,
+                endpoints, pars));
         }
         return list;
     }
@@ -1346,8 +1390,6 @@ public partial class ModelSettingsWindow : WindowBase
         var isAgentBrook = name == "AgentBrook";
         var supportsFetch = isAgentBrook || name == "DeepSeek";
 
-        var fetchBtn = this.FindControl<Button>("FetchModelsBtn");
-        if (fetchBtn is not null) fetchBtn.IsVisible = supportsFetch;
         var rechargePanel = this.FindControl<StackPanel>("TokenRechargePanel");
         if (rechargePanel is not null) rechargePanel.IsVisible = isAgentBrook;
         var balanceText = this.FindControl<TextBlock>("BalanceText");
@@ -1394,7 +1436,14 @@ public partial class ModelSettingsWindow : WindowBase
         }
         try
         {
-            var models = await FetchRelayModelsAsync(EffectiveApiBase(p), p.ApiKey);
+            var all = await FetchRelayModelsAsync(EffectiveApiBase(p), p.ApiKey);
+            // 记录类型映射（发送选接口）与显示名映射（UI 展示）；全部模型入列
+            p.ModelTypes = all.ToDictionary(m => m.Id, m => m.ModelType);
+            p.ModelNames = all.Where(m => !string.IsNullOrWhiteSpace(m.Name)).ToDictionary(m => m.Id, m => m.Name!);
+            p.ModelEndpoints = all.Where(m => !string.IsNullOrWhiteSpace(m.Endpoints)).ToDictionary(m => m.Id, m => m.Endpoints);
+            p.ModelParams = all.Where(m => !string.IsNullOrWhiteSpace(m.Params)).ToDictionary(m => m.Id, m => m.Params);
+            var models = all;                    // 文本+多模态全部保留
+            var mmCount = all.Count(m => m.ModelType >= 4);  // 多模态数（仅提示用）
             if (models.Count == 0)
             {
                 Hint(I18n.T("ui.models.fetch.empty"));
@@ -1402,13 +1451,16 @@ public partial class ModelSettingsWindow : WindowBase
             }
             p.Models = models.Select(m => m.Id).ToList();
             if (string.IsNullOrEmpty(p.ActiveModel) || !p.Models.Contains(p.ActiveModel))
-                p.ActiveModel = p.Models[0];
+                // 默认激活优先文本模型；多模态模型发对话时由 ValidateActiveProvider 拦截提示
+                p.ActiveModel = p.Models.FirstOrDefault(m => p.IsChatModel(m)) ?? p.Models[0];
             ModelsBox.Text = string.Join(", ", p.Models);
             var first = models[0];
             var extra = first.ContextWindow.HasValue || first.MaxOutput.HasValue
                 ? I18n.T("ui.models.fetch.params", first.Id, first.ContextWindow?.ToString() ?? "-", first.MaxOutput?.ToString() ?? "-")
                 : "";
-            Hint(I18n.T("ui.models.fetch.ok", models.Count, extra));
+            var okMsg = I18n.T("ui.models.fetch.ok", models.Count, extra);
+            if (mmCount > 0) okMsg += I18n.T("ui.models.fetch.skipped.multimodal", mmCount);
+            Hint(okMsg);
         }
         catch (Exception ex)
         {
@@ -1435,6 +1487,8 @@ public partial class ModelSettingsWindow : WindowBase
         var root = p.BaseUrl.Trim().TrimEnd('/');
         if (root.EndsWith("/v1", StringComparison.OrdinalIgnoreCase)) root = root[..^3];
         var url = p.Name == "DeepSeek" ? root + "/user/balance" : root + "/api/get-card-balance";
+        // 附加一次性参数避开网关/nginx 的 GET 缓存
+        url += "?_=" + DateTimeOffset.Now.ToUnixTimeMilliseconds();
 
         try
         {

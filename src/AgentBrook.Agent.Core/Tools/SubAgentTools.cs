@@ -16,15 +16,18 @@ public sealed class SubAgentTools
 {
     private readonly string _workspaceRoot;
     private readonly Func<(string Model, IChatClient Client)> _resolveClient;
+    private readonly MediaGenerateTools? _mediaTools;
     private int _running;
 
     private const int MaxResultChars = 8_000;
     private static readonly TimeSpan DelegateTimeout = TimeSpan.FromMinutes(8);
 
-    public SubAgentTools(string workspaceRoot, Func<(string Model, IChatClient Client)> resolveClient)
+    public SubAgentTools(string workspaceRoot, Func<(string Model, IChatClient Client)> resolveClient,
+        MediaGenerateTools? mediaTools = null)
     {
         _workspaceRoot = workspaceRoot;
         _resolveClient = resolveClient;
+        _mediaTools = mediaTools;
     }
 
     [Description("把一个复杂子任务委派给子Agent独立完成（文献调研、多文件梳理、长报告撰写、批量整理等）。" +
@@ -93,6 +96,19 @@ public sealed class SubAgentTools
     private ChatClientAgent CreateDelegateAgent(IChatClient client, string scratchDir)
     {
         var fileTools = new FileTools(new Workspace(_workspaceRoot), 24_000);
+        var tools = new List<AITool>
+        {
+            AIFunctionFactory.Create(fileTools.list_dir),
+            AIFunctionFactory.Create(fileTools.read_file),
+            AIFunctionFactory.Create(fileTools.write_file),
+            AIFunctionFactory.Create(fileTools.append_file),
+        };
+        // 媒体生成能力：主 Agent 已在任务描述中写明获授权的模型名（model 参数），
+        // 子 Agent 直接按指定模型调用，无需再次确认
+        if (_mediaTools is not null)
+        {
+            tools.Add(AIFunctionFactory.Create(_mediaTools.media_generate));
+        }
         var options = new ChatOptions
         {
             Instructions = """
@@ -100,14 +116,9 @@ public sealed class SubAgentTools
                 1. 直接动手，用文件工具查证真实内容；不要询问、不要等待确认。
                 2. 过程产出写入指定产出目录；引用数据要注明来源文件。
                 3. 只输出最终结论：结果、关键数据、文件位置、未尽事项。不要寒暄。
+                4. 若任务含媒体生成环节：用 media_generate，model 参数严格按任务描述中指定的模型名填写，不得自行更换。
                 """,
-            Tools =
-            [
-                AIFunctionFactory.Create(fileTools.list_dir),
-                AIFunctionFactory.Create(fileTools.read_file),
-                AIFunctionFactory.Create(fileTools.write_file),
-                AIFunctionFactory.Create(fileTools.append_file),
-            ],
+            Tools = tools,
         };
         return new ChatClientAgent(client, new ChatClientAgentOptions
         {

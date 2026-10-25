@@ -38,7 +38,7 @@ public partial class BubbleWindow : Window
     /// <summary>轨道图标：工具/子Agent 执行期间绕气泡外圈显示，按启动顺序排布。</summary>
     private sealed record OrbitItem(string Tool, Border Chip);
     private readonly List<OrbitItem> _orbit = new();
-    private const double OrbitRadius = 52;
+    private const double OrbitRadius = 42;          // 轨道半径（本体缩至 0.72 后收近：42×0.9≈38dip，贴近气泡边缘）
     private const double OrbitChipSize = 20;
     private const double OrbitPeriodSeconds = 12;   // 绕圆一圈的时长
     private double _orbitPhase;                     // 当前环相位（弧度，0 = 第一个图标在正上方）
@@ -59,10 +59,11 @@ public partial class BubbleWindow : Window
         var root = this.FindControl<Panel>("Root")!;
 
         // 磁吸贴边：把 XAML 的纯缩放变换升级为「缩放+平移」组合，平移量由贴边逻辑驱动
-        // （Root 与 OrbitLayer 必须同步平移，轨道图标才能跟着气泡一起半隐/滑出）
+        // （Root 与 OrbitLayer 必须同步平移，轨道图标才能跟着气泡一起半隐/滑出；
+        //   Root 缩放 0.72=本体缩小20%，轨道图标维持 0.9）
         root.RenderTransform = new TransformGroup
         {
-            Children = { new ScaleTransform(0.9, 0.9), _rootShift },
+            Children = { new ScaleTransform(0.72, 0.72), _rootShift },
         };
         _orbitLayer.RenderTransform = new TransformGroup
         {
@@ -105,6 +106,17 @@ public partial class BubbleWindow : Window
         };
         root.PointerExited += (_, _) => ScheduleDockCollapse();
 
+        // 提示卡加入后 Bounds 才在布局完成时生效；逐次布局监听，尺寸变化即刷新命中区
+        // （否则 Windows 上 SetWindowRgn 会把新卡片裁成只剩一条边框）
+        _toastPanel.LayoutUpdated += (_, _) =>
+        {
+            if (_toastPanel.Bounds != _lastToastBounds)
+            {
+                _lastToastBounds = _toastPanel.Bounds;
+                UpdateClickThroughRegion();
+            }
+        };
+
         root.ContextRequested += (_, e) =>
         {
             var openItem = new MenuItem { Header = I18n.T("ui.open.chat") };
@@ -116,9 +128,7 @@ public partial class BubbleWindow : Window
             modelItem.Click += (_, _) => _controller.CycleModel();
             settingsItem.Click += (_, _) =>
             {
-                var settings = new ModelSettingsWindow();
-                settings.Show();
-                settings.Activate();
+                ModelSettingsWindow.ShowSingle();
             };
             exitItem.Click += (_, _) => _controller.Shutdown();
 
@@ -525,6 +535,7 @@ public partial class BubbleWindow : Window
     }
 
     private BrookRunState? _lastVisualState;
+    private Rect _lastToastBounds;
 
     private void SetState(BrookRunState state, string? detail)
     {
@@ -834,7 +845,7 @@ public partial class BubbleWindow : Window
     private DateTime _slideStart;
 
     private const double BubbleHalf = 48;          // 气泡布局半径（96/2），用于可视区夹取
-    private const double BubbleVisualRadius = 31.5; // 气泡可见圆半径（主体 70 × 0.9 缩放 / 2）：贴边与吸附以它为准，否则会留 16.5dip 间隙
+    private const double BubbleVisualRadius = 25.2; // 气泡可见圆半径（主体 70 × 0.72 缩放 / 2）：贴边与吸附以它为准
     private const double DockSnapSlack = 20;        // 可见圆边缘贴近/越过屏幕边 20dip 内吸附
 
     /// <summary>气泡圆心在窗口内的偏移与窗口宽度（随紧凑/展开模式）。</summary>
@@ -891,6 +902,7 @@ public partial class BubbleWindow : Window
         _rootShift.Y = y;
         _orbitShift.X = x;
         _orbitShift.Y = y;
+        UpdateClickThroughRegion();   // 半隐平移后可见半圆位置改变，命中区同步（否则 Windows 悬停穿透无法展开）
     }
 
     /// <summary>把窗口贴齐当前吸附边（另一轴保持不动）。</summary>
@@ -911,10 +923,6 @@ public partial class BubbleWindow : Window
     /// 未吸附时把越界气泡拉回完全可视（下方永不半隐，贴近下边自动弹回）。</summary>
     private void ApplyEdgeMagnet()
     {
-        if (!OperatingSystem.IsMacOS())
-        {
-            return;
-        }
         StopDockSlide();
         var raw = GetBubbleCenter();
         var visual = new PixelPoint(raw.X + (int)_rootShift.X, raw.Y + (int)_rootShift.Y);   // 含当前平移
@@ -981,7 +989,7 @@ public partial class BubbleWindow : Window
     /// <summary>悬停展开/收起：贴边状态下鼠标滑过把气泡滑入屏内全部可见（向边缘反方向平移），离开滑回半隐。</summary>
     private void SetDockExpanded(bool expand)
     {
-        if (!OperatingSystem.IsMacOS() || _dockEdge == DockEdge.None || _dockExpanded == expand)
+        if (_dockEdge == DockEdge.None || _dockExpanded == expand)
         {
             return;
         }
@@ -1167,19 +1175,21 @@ public partial class BubbleWindow : Window
         try
         {
             var scale = RenderScaling;
-            // 气泡本体 + 光晕 + 轨道图标大致覆盖范围：中心 (120,72) 半径 70
-            var bubbleLeft = (int)Math.Round((120 - 70) * scale);
-            var bubbleTop = (int)Math.Round((72 - 70) * scale);
-            var bubbleRight = (int)Math.Round((120 + 70) * scale);
-            var bubbleBottom = (int)Math.Round((72 + 70) * scale);
+            // 气泡本体 + 光晕 + 轨道图标大致覆盖范围：中心随贴边平移（_rootShift），半径 70
+            var cxd = 120 + _rootShift.X;
+            var cyd = 72 + _rootShift.Y;
+            var bubbleLeft = (int)Math.Round((cxd - 70) * scale);
+            var bubbleTop = (int)Math.Round((cyd - 70) * scale);
+            var bubbleRight = (int)Math.Round((cxd + 70) * scale);
+            var bubbleBottom = (int)Math.Round((cyd + 70) * scale);
             var hRgn = CreateEllipticRgn(bubbleLeft, bubbleTop, bubbleRight, bubbleBottom);
 
-            // 提示卡区域：居中 228 宽，从 y=140 开始，高度取实际渲染高度
+            // 提示卡区域：居中 228 宽，从 y=110 开始（气泡缩小后上贴），高度取实际渲染高度
             var toastHeight = _toastPanel.Bounds.Height;
             if (toastHeight > 0)
             {
                 const double toastWidth = 228;
-                const double toastTopDip = 140;
+                const double toastTopDip = 110;
                 const double toastLeftDip = (240 - toastWidth) / 2.0;
                 var toastLeft = (int)Math.Round(toastLeftDip * scale);
                 var toastTop = (int)Math.Round(toastTopDip * scale);

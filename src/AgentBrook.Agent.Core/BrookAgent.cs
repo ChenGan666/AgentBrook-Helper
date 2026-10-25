@@ -111,6 +111,14 @@ public sealed class BrookAgent : IAsyncDisposable
         {
             return "模型 BaseUrl 未配置：请在模型设置中填写。";
         }
+        // 模型类型校验：多模态模型（type>=4）不支持对话接口，发送前拦截避免上游 404
+        var activeModel = string.IsNullOrWhiteSpace(p.ActiveModel) ? CurrentModel : p.ActiveModel;
+        if (!p.IsChatModel(activeModel))
+        {
+            return $"模型「{activeModel}」是多模态模型（图像/视频），不支持对话接口。" +
+                   "请调用 /v1/tasks/submit（异步任务）或 /v1/images/generations（同步图片）端点，" +
+                   "或在模型设置中改选文本模型。";
+        }
         return null;
     }
     public IReadOnlyList<string> Models => _activeProvider.Models;
@@ -213,9 +221,18 @@ public sealed class BrookAgent : IAsyncDisposable
         // 子Agent 委派（客户端延迟解析：经由 brook 实例，供应商切换后自动跟随新路由）
         BrookAgent? brookRef = null;
         Action? brookRef2SetMasterIndex = null;
-        var subAgentTools = new Tools.SubAgentTools(
+        // 多模态生成：media_generate 默认用已选 ActiveMediaModel；显式 model 参数按名跨供应商解析
+        // （选择切换无需重建 Agent；须先创建：子 Agent 也要挂此工具）
+        var mediaTools = new Tools.MediaGenerateTools(
+            () => brookRef!._providers.Providers.FirstOrDefault(p => !string.IsNullOrEmpty(p.ActiveMediaModel))
+                  ?? brookRef!._activeProvider,
+            log,
+            () => brookRef!._providers.Providers);
+
+        var subAgentTools = new SubAgentTools(
             workspace.Root,
-            () => brookRef!._router.Resolve(ModelRouter.RoleSubAgent, brookRef!._chatClient));
+            () => brookRef!._router.Resolve(ModelRouter.RoleSubAgent, brookRef!._chatClient),
+            mediaTools);
 
         var fileTools = new FileTools(workspace, config.Agent.MaxToolOutputChars);
         var shellTools = new ShellTools(workspace, config.Agent.ShellTimeoutSeconds, config.Agent.MaxToolOutputChars);
@@ -290,6 +307,8 @@ public sealed class BrookAgent : IAsyncDisposable
             // MCP 配置管理
             AIFunctionFactory.Create(mcpTools.mcp_add_server),
             AIFunctionFactory.Create(mcpTools.mcp_list_servers),
+            // 多模态生成（子Agent能力：所选多模态模型，异步任务轮询）
+            AIFunctionFactory.Create(mediaTools.media_generate),
         };
         toolCatalog.AddRange(tools.Select(t => new ToolInfo(t.Name, "内置")));
 
@@ -326,7 +345,13 @@ public sealed class BrookAgent : IAsyncDisposable
             t is AIFunction f && approvalSet.Contains(t.Name)
                 ? new ApprovalRequiredAIFunction(f)
                 : t)];;
-        var capabilityBlock = SkillRegistry.BuildSummary(skills) + "\n\n" + mcpGate.BuildCatalogBlock() + delegateInstructions + teamInstructions
+        var mediaInstructions = """
+
+            # 多模态生成（media_generate）
+            用户要求生成图片/视频/音频等媒体内容时调用 media_generate：自行组装详细的 prompt（风格/画质/镜头/时长等），并按当前已选目标模型的接口要求把必要参数写进 parameters_json（如 size/ratio/duration；参数需求以回合上下文注入的模型信息为准，不确定参数名则只传 prompt）。参数取值不确定（时长/比例/分辨率等）先用 ask_user 与用户确认再提交，一次问清，不要反复追问。未选模型时工具会返回引导错误，此时告知用户在"多媒体"下拉选择。成功后用 markdown 媒体链接呈现返回的 url（图片 ![..](url)，视频/音频 [..](url)）。
+            """;
+
+        var capabilityBlock = SkillRegistry.BuildSummary(skills) + "\n\n" + mcpGate.BuildCatalogBlock() + delegateInstructions + teamInstructions + mediaInstructions
             + (additionalInstructions is { Length: > 0 } ? "\n\n" + additionalInstructions : "");
         var agent = AgentFactory.CreateAgent(config, chatClient, tools, capabilityBlock, memory);
 
@@ -678,6 +703,14 @@ public sealed class BrookAgent : IAsyncDisposable
                 if (m.Role == ChatRole.System) continue;   // 跳过前情摘要
                 var text = (m.Text ?? "").Trim();
                 if (text.Length == 0) continue;            // 工具调用/结果轮无正文
+                // 早期版本曾把多模态上下文注记合并进用户消息存入历史：回放时剥离该前缀
+                if (m.Role == ChatRole.User && text.StartsWith("[系统上下文·不计入回复]", StringComparison.Ordinal))
+                {
+                    const string noteEnd = "没有该工具。";
+                    var end = text.IndexOf(noteEnd, StringComparison.Ordinal);
+                    text = end >= 0 ? text[(end + noteEnd.Length)..].TrimStart() : "";
+                    if (text.Length == 0) continue;
+                }
                 if (m.Role == ChatRole.User) list.Add(("user", text));
                 else if (m.Role == ChatRole.Assistant) list.Add(("assistant", text));
             }
@@ -844,6 +877,28 @@ public sealed class BrookAgent : IAsyncDisposable
             SessionTitleChanged?.Invoke(title);
         }
 
+        // 多模态上下文：用户已选 media 模型时注入动态状态（独立 system 消息，transcript 过滤不显示），
+        // 主 Agent 据此直接调用 media_generate 并自动组装参数；不再混入用户消息本体
+        ChatMessage? mediaContext = null;
+        var mediaProvider = _providers.Providers.FirstOrDefault(p => !string.IsNullOrEmpty(p.ActiveMediaModel));
+        if (mediaProvider is not null)
+        {
+            var mm = mediaProvider.ActiveMediaModel;
+            var typeTag = mediaProvider.TypeOf(mm) switch { 4 or 5 => "图像", 6 or 7 => "视频", _ => "媒体" };
+            var eps = mediaProvider.ModelEndpoints.TryGetValue(mm, out var e) && e.Length > 0 ? e : "tasks";
+            var par = mediaProvider.ModelParams.TryGetValue(mm, out var pj) && pj.Length > 0 ? $"调用参数说明：{pj}。" : "";
+            var candidates = string.Join("、", _providers.Providers.SelectMany(x => x.Models
+                .Where(m => x.TypeOf(m) >= 4)
+                .Select(m => $"{m}@{x.Name}({x.TypeOf(m) switch { 4 or 5 => "图", 6 or 7 => "视", _ => "媒体" }})")));
+            mediaContext = new ChatMessage(ChatRole.System,
+                $"[系统上下文·不计入回复] 当前已启用多模态模型：{mm}（{typeTag}，endpoints={eps}，供应商={mediaProvider.Name}）。{par}" +
+                $"全部候选多模态模型：{(candidates.Length > 0 ? candidates : mm)}。" +
+                "生成媒体内容时调用 media_generate：默认用当前已选模型（不填 model 参数）；若任务更适合用其他候选模型，" +
+                "先用 ask_user 提出选用方案（模型名+理由）取得用户授权后，再以 model 参数指定调用；用户改选其他模型时按其选择执行。" +
+                "委派子Agent执行媒体生成时，在任务描述中写明已获授权的模型名。" +
+                "必要参数写进 parameters_json，取值不确定（时长、比例、分辨率等）时先用 ask_user 一次问清。");
+        }
+
         SanitizeOrphanApprovals(_session);   // 上回合中断可能留下孤儿审批请求，先清理
         var compacted = await AutoCompactContextAsync(ct); // 历史超阈值时自动压缩：早期对话转前情摘要，防上下文溢出
         if (compacted.RemovedMessages > 0)
@@ -864,9 +919,8 @@ public sealed class BrookAgent : IAsyncDisposable
             var approvals = new List<ToolApprovalRequestContent>();
             var roundUpdates = new List<Microsoft.Agents.AI.AgentResponseUpdate>();
 
-            var updates = followUp is null
-                ? _agent.RunStreamingAsync([userMessage], _session, BuildRunOptions())
-                : _agent.RunStreamingAsync(followUp, _session, BuildRunOptions());
+            List<ChatMessage> outgoing = mediaContext is null ? new List<ChatMessage> { userMessage } : new List<ChatMessage> { mediaContext, userMessage };
+            var updates = _agent.RunStreamingAsync(followUp ?? outgoing, _session, BuildRunOptions());
 
             // 每轮 stream 重置：TurnAnswer 只保留最后一轮（最终回答），不累积中间轮的过渡文本
             TurnAnswer = "";

@@ -53,6 +53,10 @@ A draggable, always-on-top bubble that does not steal focus. It breathes when id
 
 The bubble opens onto an agent that remembers. Markdown memory files under `workspace/memory/` are injected into context on every turn, and the model can write to them. Skills load progressively from `SKILL.md` files — and the agent can author new skills from workflows it has actually verified. MCP servers are wired in over stdio. Projects let it split a goal across worker agents with their own workspaces and a message bus.
 
+### Generate images, video, and audio in chat
+
+A 🎬 Multimedia dropdown sits next to the model selector, listing the image and video models your providers expose — type metadata comes from the fetched model list, and the media choice never mixes with the chat model. Pick one and just ask: the agent composes the prompt plus the model's required parameters and calls `media_generate` — an async task is submitted and polled for up to five minutes, then the result renders right in the bubble, images inline and video/audio as playable cards. Delegated sub-agents can generate media too, and switching to a media model other than the selected one asks for your approval first.
+
 ### Nothing runs without you
 
 Shell commands, skill installation, MCP server registration and worker spawning all pause for an approval card. The card leads with a plain-language summary of what is about to happen; the raw command sits folded underneath. You can approve, reject with a reason — which goes back to the model so it can replan — or grant full access for the session, which resets on restart.
@@ -71,7 +75,7 @@ The A2A session center discovers Helper nodes on your LAN, pairs with them, and 
 
 ### Token cards: 24-hour trial, pay-as-you-go top-ups
 
-First-launch onboarding automatically requests a trial card from the billing service — ¥5 of quota, valid for 24 hours, bound to your device and network — and fills the model config for you (provider "AgentBrook", endpoint `https://api.agentbrook.com`). The model settings page shows a "Top up Token card" shortcut for the AgentBrook provider (your card Key is the API Key; top-ups take effect automatically), plus a "Fetch models" action that pulls the live model list and specs from the relay. The deliver page even offers a one-click "auto-fill into Helper" — the Helper's local loopback service writes the Key into the model config and opens the settings window for you.
+First-launch onboarding automatically requests a trial card from the billing service — ¥5 of quota, valid for 24 hours, bound to your device and network — and fills the model config for you (provider "AgentBrook", endpoint `https://api.agentbrook.com`). The model settings page shows a "Top up Token card" shortcut for the AgentBrook provider (your card Key is the API Key; top-ups take effect automatically), plus a "Fetch models" action that pulls the live model list and specs from the relay. The deliver page even offers a one-click "auto-fill into Helper" — the Helper's local loopback service writes the Key into the model config and opens the settings window for you. The single-instance settings window also gained a one-click Update button that re-fetches the model list, refreshes your balance, and runs the connectivity test in one go.
 
 ### Automatic self-update
 
@@ -172,7 +176,7 @@ Runtime state is generated automatically and stays out of version control:
 
 ## Built-in tools
 
-Around 55 tools ship with the core, grouped by surface:
+Around 56 tools ship with the core, grouped by surface:
 
 | Surface | Tools |
 |---|---|
@@ -182,6 +186,7 @@ Around 55 tools ship with the core, grouped by surface:
 | **Skills** | `list_skills` `load_skill` `create_skill` `install_skill` `skill_market` |
 | **MCP** | `mcp_list_servers` `mcp_add_server` — plus every tool the configured servers expose |
 | **Team** | `start_project` `spawn_worker` `assign_task` `send_message` `broadcast_to_workers` `list_workers` `read_shared` `check_messages` |
+| **Media** | `media_generate` — image/video/audio generation through the selected media model (async task submit + polling; cross-model calls need approval) |
 | **Interaction** | `ask_user` — suspends the turn for a real answer |
 | **A2A** | `a2a_status` `a2a_list_peers` `a2a_pair` `a2a_send_message` `a2a_send_all` `a2a_send_file` `a2a_create_group` `a2a_group_send` `a2a_group_rename` `a2a_list_groups` — LAN discovery, pairing, messaging, files and groups |
 
