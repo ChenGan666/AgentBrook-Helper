@@ -222,7 +222,9 @@
                 BorderBrush="#333333" BorderThickness="0,0,0,1">
             <DockPanel>
                 <StackPanel Orientation="Horizontal" Spacing="4" DockPanel.Dock="Right" VerticalAlignment="Center">
-                    <Button x:Name="A2ABtn" Classes="toolChip" Content="A2A" ToolTip.Tip="打开 A2A 协作会话"/>
+                    <Button x:Name="A2ABtn" Classes="iconBtn" ToolTip.Tip="打开 A2A 协作会话">
+                        <PathIcon Data="{StaticResource Icon.Team}" Width="16" Height="16"/>
+                    </Button>
                     <Button x:Name="NewBtn" Classes="iconBtn" ToolTip.Tip="开启新对话">
                         <PathIcon Data="{StaticResource Icon.Compose}" Width="16" Height="16"/>
                     </Button>

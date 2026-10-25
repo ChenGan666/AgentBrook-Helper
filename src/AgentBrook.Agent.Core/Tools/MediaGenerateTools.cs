@@ -40,11 +40,14 @@ public sealed class MediaGenerateTools
     /// </summary>
     [Description("生成图片/视频/音频等媒体内容：当用户要求生成媒体且已选择多模态模型时调用。" +
                  "prompt 写完整详细的生成描述；parameters_json 写目标模型需要的附加参数 JSON（如 {\"size\":\"1080x1080\",\"duration\":6,\"ratio\":\"16:9\"}），" +
-                 "参数名必须匹配目标模型的接口要求。成功后请在回复中用 markdown 媒体链接呈现 url（图片用 ![描述](url)，视频/音频用 [下载/查看](url)）。")]
+                 "参数名必须匹配目标模型的接口要求。异步任务超时返回 task_id 时，再次调用本工具并把该值传入 task_id 参数即可查询状态" +
+                 "（对应服务端 GET /v1/tasks/status?task_id=xxx），不要自行拼接其他 /tasks/ 路径或用 run_command 探测。" +
+                 "成功后请在回复中用 markdown 媒体链接呈现 url（图片用 ![描述](url)，视频/音频用 [下载/查看](url)）。")]
     public async Task<string> media_generate(
         [Description("生成内容的完整详细描述（画质/风格/镜头/时长等），由主 Agent 组装")] string prompt,
         [Description("目标模型附加参数的 JSON 字符串；无附加参数传 \"\"")] string parameters_json = "",
         [Description("指定使用的多模态模型名（须已获用户授权）；留空使用用户当前已选的多模态模型")] string model = "",
+        [Description("查询已提交任务的状态：传此前返回的 task_id（此时 prompt/parameters_json 可传 \"\"），不会重复提交新任务")] string task_id = "",
         CancellationToken cancellationToken = default)
     {
         // 模型解析：显式指定 → 按名跨供应商查找；缺省 → 用户当前已选的 ActiveMediaModel
@@ -55,7 +58,9 @@ public sealed class MediaGenerateTools
             model = p?.ActiveMediaModel ?? "";
             if (string.IsNullOrWhiteSpace(model) || p is null)
             {
-                return Fail("当前未选择多模态模型，且未通过 model 参数指定。可用多模态模型：" + CandidateList());
+                // 仅查询任务状态时，模型可为空（凭据仍按供应商解析）
+                if (string.IsNullOrWhiteSpace(task_id) || p is null)
+                    return Fail("当前未选择多模态模型，且未通过 model 参数指定。可用多模态模型：" + CandidateList());
             }
         }
         else
@@ -95,6 +100,40 @@ public sealed class MediaGenerateTools
         }
         var submitUrl = apiBase + "/tasks/submit";
         var statusUrl = apiBase + "/tasks/status?task_id=";
+        var guide = "任务状态查询唯一正确方式：再次调用 media_generate 并把 task_id 传入 task_id 参数" +
+                    $"（服务端对应 GET {statusUrl}<task_id>）。不要自行拼接 /tasks/... 其他路径，也不要用 run_command 探测接口。";
+
+        // ---- 仅查询既有任务：传了 task_id 时跳过提交，单次查询返回当前状态 ----
+        if (!string.IsNullOrWhiteSpace(task_id))
+        {
+            try
+            {
+                using var qReq = new HttpRequestMessage(HttpMethod.Get, statusUrl + Uri.EscapeDataString(task_id));
+                qReq.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", p.ApiKey);
+                using var qResp = await Http.SendAsync(qReq, cancellationToken);
+                var qBody = await qResp.Content.ReadAsStringAsync(cancellationToken);
+                if (!qResp.IsSuccessStatusCode)
+                {
+                    return Fail($"任务状态查询失败 HTTP {(int)qResp.StatusCode}：{Truncate(qBody, 300)}。" + guide);
+                }
+                var qStatus = ExtractStatus(qBody);
+                var qUrl = ExtractMediaUrl(qBody);
+                return JsonSerializer.Serialize(new
+                {
+                    ok = true, task_id, model, status = qStatus,
+                    url = qUrl ?? "",
+                    note = qUrl is not null ? "任务已完成，请在回复中用 markdown 媒体链接呈现该 url"
+                        : (qStatus.Equals("Failure", StringComparison.OrdinalIgnoreCase) ||
+                           qStatus.Equals("Failed", StringComparison.OrdinalIgnoreCase))
+                          ? "任务已失败，详情见 raw" : "任务仍在进行中，稍后可用同一 task_id 再查",
+                    raw = qUrl is null ? Truncate(qBody, 800) : null,
+                });
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                return Fail($"任务状态查询请求失败：{ex.Message}。" + guide);
+            }
+        }
 
         // ---- 图像分流：endpoints 声明含 images（或 type 4/5）走同步 /images/generations，一次返回 url 无需轮询 ----
         var eps = p.ModelEndpoints.TryGetValue(model, out var ep) ? ep : "";
@@ -159,7 +198,8 @@ public sealed class MediaGenerateTools
         var taskId = ExtractTaskId(submitBody);
         if (taskId is null)
         {
-            return Fail($"提交响应中未找到 task_id：{Truncate(submitBody, 400)}");
+            // 上游可能已直接返回结果或异构结构：给出查询指引便于主 Agent 判断
+            return Fail($"提交响应中未找到 task_id：{Truncate(submitBody, 400)}。" + guide);
         }
         _log($"🎬 媒体任务已提交 task={taskId} model={model}");
 
@@ -202,10 +242,17 @@ public sealed class MediaGenerateTools
                 status.Equals("Cancelled", StringComparison.OrdinalIgnoreCase) ||
                 status.Equals("Canceled", StringComparison.OrdinalIgnoreCase))
             {
-                return Fail($"任务终态 {status}：{Truncate(lastBody, 400)}");
+                return Fail($"任务终态 {status}：{Truncate(lastBody, 400)}。如需再查可用 task_id={taskId}。" + guide);
             }
         }
-        return Fail($"任务超时（5 分钟未终态）task_id={taskId}，最后一次状态：{Truncate(lastBody, 400)}");
+        return JsonSerializer.Serialize(new
+        {
+            ok = false,
+            error = $"任务提交成功但 5 分钟内未达终态（task_id={taskId}），任务可能仍在后台执行。",
+            task_id = taskId,
+            guide,
+            last = Truncate(lastBody, 300),
+        });
     }
 
     // ---------- JSON 解析（容忍不同上游响应结构） ----------

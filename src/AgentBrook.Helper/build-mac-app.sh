@@ -1,8 +1,8 @@
 #!/bin/zsh
 # 构建 macOS .app 包（bundle 身份、麦克风/语音识别权限归因必需）。
 # 默认一次产出三个包：
-#   /Users/chengan/Dev/AI/AgentBrook3.0/src/publish/osx-arm64/AgentBrook.Helper-arm64.app
-#   /Users/chengan/Dev/AI/AgentBrook3.0/src/publish/osx-x64/AgentBrook.Helper-x64.app
+#   /Users/chengan/Dev/AI/AgentBrook3.0/src/publish/osx-arm64/AgentBrook.Helper.app
+#   /Users/chengan/Dev/AI/AgentBrook3.0/src/publish/osx-x64/AgentBrook.Helper.app
 #   /Users/chengan/Dev/AI/AgentBrook3.0/src/publish/osx-universal/AgentBrook.Helper.app
 # 同时会生成对应的 zip 分发包（最终产物根：src/publish/updated/）。
 # 均为 self-contained（自带 .NET 运行时，目标机零依赖）。
@@ -46,8 +46,8 @@ write_plist() {
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>Brook 助手</string>
-  <key>CFBundleDisplayName</key><string>Brook 助手</string>
+  <key>CFBundleName</key><string>AgentBrook.Helper</string>
+  <key>CFBundleDisplayName</key><string>AgentBrook.Helper</string>
   <key>CFBundleIdentifier</key><string>com.agentbrook.helper</string>
   <key>CFBundleExecutable</key><string>AgentBrook.Helper</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
@@ -134,14 +134,14 @@ package_app() {
 
 if [ "$MODE" = "all" ] || [ "$MODE" = "arm64" ]; then
   publish osx-arm64 "$PUBLISH_BASE/osx-arm64/publish"
-  build_one "$PUBLISH_BASE/osx-arm64/AgentBrook.Helper-arm64.app" arm64 "$PUBLISH_BASE/osx-arm64/publish"
-  echo "✔ $PUBLISH_BASE/osx-arm64/AgentBrook.Helper-arm64.app（Apple Silicon）"
+  build_one "$PUBLISH_BASE/osx-arm64/AgentBrook.Helper.app" arm64 "$PUBLISH_BASE/osx-arm64/publish"
+  echo "✔ $PUBLISH_BASE/osx-arm64/AgentBrook.Helper.app（Apple Silicon）"
 fi
 
 if [ "$MODE" = "all" ] || [ "$MODE" = "x64" ]; then
   publish osx-x64 "$PUBLISH_BASE/osx-x64/publish"
-  build_one "$PUBLISH_BASE/osx-x64/AgentBrook.Helper-x64.app" x64 "$PUBLISH_BASE/osx-x64/publish"
-  echo "✔ $PUBLISH_BASE/osx-x64/AgentBrook.Helper-x64.app（Intel）"
+  build_one "$PUBLISH_BASE/osx-x64/AgentBrook.Helper.app" x64 "$PUBLISH_BASE/osx-x64/publish"
+  echo "✔ $PUBLISH_BASE/osx-x64/AgentBrook.Helper.app（Intel）"
 fi
 
 if [ "$MODE" = "all" ] || [ "$MODE" = "universal" ]; then
@@ -159,7 +159,7 @@ fi
 #      （实测漏签会让 codesign --deep 校验失败 → 带隔离属性时必弹"已损坏"）；
 #   3. 签名自检不过直接中止构建；
 #   4. 打包（zip）放在最终签名之后，保证 zip 内签名状态与最终产物一致。
-for app in "$PUBLISH_BASE"/osx-*/AgentBrook.Helper-*.app "$PUBLISH_BASE"/osx-universal/AgentBrook.Helper.app
+for app in "$PUBLISH_BASE"/osx-*/AgentBrook.Helper.app
 do
   [ -d "$app" ] || continue
   python3 - "$app/Contents/MacOS/appsettings.json" << 'PY'
@@ -190,7 +190,7 @@ PY
   rm -rf "$app"
 done
 
-if grep -rlE 'sk-[A-Za-z0-9]{16,}' "$PUBLISH_BASE"/*/AgentBrook.Helper-*.app/Contents/MacOS >/dev/null 2>&1; then
+if grep -rlE 'sk-[A-Za-z0-9]{16,}' "$PUBLISH_BASE"/*/AgentBrook.Helper.app/Contents/MacOS >/dev/null 2>&1; then
   echo "✖ 发布包中仍检测到疑似 API 密钥，构建中止（请检查 appsettings.json / models.json / mcp-user.json）"
   exit 1
 fi

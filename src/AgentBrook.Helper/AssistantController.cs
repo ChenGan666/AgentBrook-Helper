@@ -259,6 +259,7 @@ public sealed class AssistantController : IBrookInteraction
             RaiseState(BrookRunState.Idle, null);
             Console.Error.WriteLine($"[init] {DateTime.Now:HH:mm:ss.fff} RaiseState(Idle) invoked");
             _ = GenerateGreetingAsync();   // 就绪后生成启动问候语（失败静默）
+            _ = AutoRefreshModelListsAsync();   // 后台拉取各供应商模型列表（静默，仅变化时气泡提示）
         }
         catch (Exception ex)
         {
@@ -562,6 +563,92 @@ public sealed class AssistantController : IBrookInteraction
 
     public string CurrentProvider => Ready ? Agent!.CurrentProvider : "";
     public IReadOnlyList<AgentBrook.Agent.Infrastructure.ProviderConfig> Providers => Ready ? Agent!.Providers : [];
+
+    /// <summary>
+    /// 启动后台任务：对每个已配置（BaseUrl+Key 非空）供应商拉取 /v1/models 刷新模型列表与类型元数据，
+    /// 全部静默执行不阻塞启动；仅在有变化时气泡提示“供应商 + 新增/移除模型”，并持久化保存。
+    /// </summary>
+    private sealed record StartupModelEntry(string Id, string? Name, int ModelType, string Endpoints, string Params);
+
+    private async Task AutoRefreshModelListsAsync()
+    {
+        try
+        {
+            if (!Ready) return;
+            var providers = Agent!.Providers.ToList();
+            var changes = new List<string>();
+            foreach (var p in providers)
+            {
+                if (string.IsNullOrWhiteSpace(p.BaseUrl) || string.IsNullOrWhiteSpace(p.ApiKey)) continue;
+                var fetched = await FetchModelEntriesAsync(p);
+                if (fetched.Count == 0) continue;
+
+                var added = fetched.Select(f => f.Id).Where(id => !p.Models.Contains(id)).ToList();
+                var removed = p.Models.Where(m => !fetched.Any(f => f.Id == m)).ToList();
+                if (added.Count == 0 && removed.Count == 0) continue;
+
+                p.Models = fetched.Select(f => f.Id).ToList();
+                p.ModelTypes = fetched.ToDictionary(f => f.Id, f => f.ModelType);
+                p.ModelNames = fetched.Where(f => !string.IsNullOrWhiteSpace(f.Name)).ToDictionary(f => f.Id, f => f.Name!);
+                p.ModelEndpoints = fetched.Where(f => !string.IsNullOrWhiteSpace(f.Endpoints)).ToDictionary(f => f.Id, f => f.Endpoints);
+                p.ModelParams = fetched.Where(f => !string.IsNullOrWhiteSpace(f.Params)).ToDictionary(f => f.Id, f => f.Params);
+                // 激活模型被下架则回退到首个文本模型（发送前另有拦截兜底）
+                if (!p.Models.Contains(p.ActiveModel))
+                    p.ActiveModel = p.Models.FirstOrDefault(m => p.IsChatModel(m)) ?? p.Models[0];
+                if (!p.Models.Contains(p.ActiveMediaModel)) p.ActiveMediaModel = "";
+
+                var parts = new List<string>();
+                if (added.Count > 0) parts.Add("新增 " + string.Join("、", added.Take(5)) + (added.Count > 5 ? $" 等{added.Count}个" : ""));
+                if (removed.Count > 0) parts.Add("下架 " + string.Join("、", removed.Take(5)) + (removed.Count > 5 ? $" 等{removed.Count}个" : ""));
+                changes.Add($"{p.Name}：{string.Join("；", parts)}");
+            }
+            if (changes.Count == 0) return;
+
+            await Agent!.SaveProvidersAsync(providers, Agent!.CurrentProvider);
+            var line = "🔄 模型列表已自动更新——" + string.Join("；", changes);
+            Console.Error.WriteLine($"[models-refresh] {line}");
+            // 气泡/对话窗可见提示（与初始化日志同通道）
+            EventRaised?.Invoke(new BrookEvent.ToolStarted("log:" + line, null));
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[models-refresh] failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>拉取供应商 /v1/models（补 /v1 前缀、带缓存穿透参数）；失败返回空列表由调用方静默跳过。</summary>
+    private static async Task<List<StartupModelEntry>> FetchModelEntriesAsync(
+        AgentBrook.Agent.Infrastructure.ProviderConfig p)
+    {
+        try
+        {
+            var url = (p.BaseUrl ?? "").TrimEnd('/');
+            if (!url.EndsWith("/v1", StringComparison.OrdinalIgnoreCase)) url += "/v1";
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            using var req = new HttpRequestMessage(HttpMethod.Get,
+                $"{url}/models?_={DateTimeOffset.Now.ToUnixTimeMilliseconds()}");
+            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", p.ApiKey);
+            req.Headers.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue { NoCache = true, NoStore = true };
+            using var resp = await http.SendAsync(req);
+            if (!resp.IsSuccessStatusCode) return [];
+            using var doc = System.Text.Json.JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+            return doc.RootElement.GetProperty("data").EnumerateArray()
+                .Select(m => new StartupModelEntry(
+                    m.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "",
+                    m.TryGetProperty("name", out var n) ? n.GetString() : null,
+                    m.TryGetProperty("model_type", out var mt) && mt.ValueKind == System.Text.Json.JsonValueKind.Number ? mt.GetInt32() : 1,
+                    m.TryGetProperty("endpoints", out var ep) && ep.ValueKind == System.Text.Json.JsonValueKind.Array
+                        ? string.Join(",", ep.EnumerateArray().Select(e => e.GetString()).Where(s => !string.IsNullOrEmpty(s)))
+                        : "",
+                    m.TryGetProperty("parameters", out var pp) && pp.ValueKind == System.Text.Json.JsonValueKind.Object
+                        ? pp.GetRawText() : ""))
+                .Where(e => e.Id.Length > 0).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
 
     public IReadOnlyList<AgentBrook.Agent.Skills.SkillInfo> GetSkills() => Ready ? Agent!.SkillStore.Current : [];
 
