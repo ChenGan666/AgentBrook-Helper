@@ -37,6 +37,7 @@ public sealed class AssistantController : IBrookInteraction
     public event Action<BrookEvent>? EventRaised;
     /// <summary>全局运行状态变化，气泡与对话窗状态条订阅。</summary>
     public event Action<BrookRunState, string?>? StateChanged;
+    public event Action? ModelsChanged;
     /// <summary>用户说了一句什么（对话窗渲染用户气泡）。</summary>
     public event Action<string>? UserSaid;
     /// <summary>工具执行完成的结果预览（执行反馈）。</summary>
@@ -198,16 +199,50 @@ public sealed class AssistantController : IBrookInteraction
         return (name, error);
     }
 
+    private readonly SemaphoreSlim _initializationGate = new(1, 1);
+    public bool ModelConfigurationRequired { get; private set; }
+    public event Action? ModelConfigurationChanged;
+
+    internal static AppConfig LoadStartupConfig() => new ConfigurationBuilder()
+        .SetBasePath(AppContext.BaseDirectory)
+        .AddJsonFile("appsettings.json", optional: false)
+        .AddEnvironmentVariables("AGENTBROOK_")
+        .Build().Get<AppConfig>() ?? new AppConfig();
+
+    internal static ProviderSettings LoadProviders(AppConfig config, string workspaceDir)
+    {
+        var settings = ProviderSettings.Load(Path.Combine(workspaceDir, "models.json"));
+        settings.EnsureDefaultProvider(config.LLM);
+        return settings;
+    }
+
+    internal static bool HasUsableChatModel(ProviderSettings settings) => settings.HasUsableChatModel();
+
+    private void SetModelConfigurationRequired(bool required)
+    {
+        if (ModelConfigurationRequired == required) return;
+        ModelConfigurationRequired = required;
+        ModelConfigurationChanged?.Invoke();
+    }
+
     public async Task InitializeAsync()
+    {
+        await _initializationGate.WaitAsync();
+        try
+        {
+            if (!Ready) await InitializeCoreAsync();
+        }
+        finally
+        {
+            _initializationGate.Release();
+        }
+    }
+
+    private async Task InitializeCoreAsync()
     {
         try
         {
-            var configuration = new ConfigurationBuilder()
-                .SetBasePath(AppContext.BaseDirectory)
-                .AddJsonFile("appsettings.json", optional: false)
-                .AddEnvironmentVariables("AGENTBROOK_")
-                .Build();
-            var config = configuration.Get<AppConfig>() ?? new AppConfig();
+            var config = LoadStartupConfig();
             var appRoot = Workspace.LocateAppRoot();
 
             // ── 环境自检与自动初始化（此前打包到新机器后静默失败，卡在"启动中"） ──
@@ -234,6 +269,14 @@ public sealed class AssistantController : IBrookInteraction
                 config.Agent.WorkspaceRoot = Path.GetRelativePath(appRoot, resolvedWs);
             }
             Console.Error.WriteLine($"[init] {DateTime.Now:HH:mm:ss.fff} config+workspace ok");
+
+            if (!HasUsableChatModel(LoadProviders(config, resolvedWs)))
+            {
+                SetModelConfigurationRequired(true);
+                StartupStatus?.Invoke(I18n.T("ui.model.configuration.required"));
+                return;
+            }
+            SetModelConfigurationRequired(false);
 
             // A2A 协作工具（晚绑定 App.A2A：组合根先创建 Controller 再创建 A2A 宿主）
             var a2aTools = new A2AAgentTools(() => App.A2A?.Controller);
@@ -561,21 +604,26 @@ public sealed class AssistantController : IBrookInteraction
         QueueChanged?.Invoke(_queuedInput.Count);
     }
 
-    public string CurrentProvider => Ready ? Agent!.CurrentProvider : "";
-    public IReadOnlyList<AgentBrook.Agent.Infrastructure.ProviderConfig> Providers => Ready ? Agent!.Providers : [];
+    public string CurrentProvider => Ready ? Agent!.CurrentProvider : LoadProviders(LoadStartupConfig(), UiPrefs.WorkspaceDir()).Active?.Name ?? "";
+    public IReadOnlyList<AgentBrook.Agent.Infrastructure.ProviderConfig> Providers => Ready ? Agent!.Providers
+        : LoadProviders(LoadStartupConfig(), UiPrefs.WorkspaceDir()).Providers;
 
     /// <summary>
-    /// 启动后台任务：对每个已配置（BaseUrl+Key 非空）供应商拉取 /v1/models 刷新模型列表与类型元数据，
-    /// 全部静默执行不阻塞启动；仅在有变化时气泡提示“供应商 + 新增/移除模型”，并持久化保存。
+    /// 启动后台任务：对每个已配置（BaseUrl+Key 非空）供应商拉取模型目录刷新模型列表与类型元数据，
+    /// 全部静默执行不阻塞启动；仅在有变化时气泡提示“供应商 + 新增/移除模型或元数据更新”，并持久化保存。
     /// </summary>
-    private sealed record StartupModelEntry(string Id, string? Name, int ModelType, string Endpoints, string Params);
+    private long _providerRevision;
 
     private async Task AutoRefreshModelListsAsync()
     {
         try
         {
             if (!Ready) return;
-            var providers = Agent!.Providers.ToList();
+            var agent = Agent!;
+            var revision = Interlocked.Read(ref _providerRevision);
+            var baseline = agent.Providers.Select(ModelCatalog.Fingerprint).ToList();
+            var providers = agent.Providers.Select(ModelCatalog.Clone).ToList();
+            var activeProvider = agent.CurrentProvider;
             var changes = new List<string>();
             foreach (var p in providers)
             {
@@ -585,26 +633,31 @@ public sealed class AssistantController : IBrookInteraction
 
                 var added = fetched.Select(f => f.Id).Where(id => !p.Models.Contains(id)).ToList();
                 var removed = p.Models.Where(m => !fetched.Any(f => f.Id == m)).ToList();
-                if (added.Count == 0 && removed.Count == 0) continue;
-
-                p.Models = fetched.Select(f => f.Id).ToList();
-                p.ModelTypes = fetched.ToDictionary(f => f.Id, f => f.ModelType);
-                p.ModelNames = fetched.Where(f => !string.IsNullOrWhiteSpace(f.Name)).ToDictionary(f => f.Id, f => f.Name!);
-                p.ModelEndpoints = fetched.Where(f => !string.IsNullOrWhiteSpace(f.Endpoints)).ToDictionary(f => f.Id, f => f.Endpoints);
-                p.ModelParams = fetched.Where(f => !string.IsNullOrWhiteSpace(f.Params)).ToDictionary(f => f.Id, f => f.Params);
                 // 激活模型被下架则回退到首个文本模型（发送前另有拦截兜底）
-                if (!p.Models.Contains(p.ActiveModel))
-                    p.ActiveModel = p.Models.FirstOrDefault(m => p.IsChatModel(m)) ?? p.Models[0];
-                if (!p.Models.Contains(p.ActiveMediaModel)) p.ActiveMediaModel = "";
+                if (!ModelCatalog.Apply(p, fetched)) continue;
 
                 var parts = new List<string>();
                 if (added.Count > 0) parts.Add("新增 " + string.Join("、", added.Take(5)) + (added.Count > 5 ? $" 等{added.Count}个" : ""));
                 if (removed.Count > 0) parts.Add("下架 " + string.Join("、", removed.Take(5)) + (removed.Count > 5 ? $" 等{removed.Count}个" : ""));
+                if (parts.Count == 0) parts.Add("模型元数据更新");
                 changes.Add($"{p.Name}：{string.Join("；", parts)}");
             }
             if (changes.Count == 0) return;
 
-            await Agent!.SaveProvidersAsync(providers, Agent!.CurrentProvider);
+            await _initializationGate.WaitAsync();
+            try
+            {
+                if (!ReferenceEquals(agent, Agent) || revision != Interlocked.Read(ref _providerRevision)
+                    || activeProvider != agent.CurrentProvider
+                    || !baseline.SequenceEqual(agent.Providers.Select(ModelCatalog.Fingerprint))) return;
+                await agent.SaveProvidersAsync(providers, activeProvider);
+                Interlocked.Increment(ref _providerRevision);
+            }
+            finally
+            {
+                _initializationGate.Release();
+            }
+            Dispatcher.UIThread.Post(() => ModelsChanged?.Invoke());
             var line = "🔄 模型列表已自动更新——" + string.Join("；", changes);
             Console.Error.WriteLine($"[models-refresh] {line}");
             // 气泡/对话窗可见提示（与初始化日志同通道）
@@ -620,33 +673,13 @@ public sealed class AssistantController : IBrookInteraction
         }
     }
 
-    /// <summary>拉取供应商 /v1/models（补 /v1 前缀、带缓存穿透参数）；失败返回空列表由调用方静默跳过。</summary>
-    private static async Task<List<StartupModelEntry>> FetchModelEntriesAsync(
+    /// <summary>按设置页端点规则拉取供应商模型目录（带缓存穿透参数）；失败返回空列表由调用方静默跳过。</summary>
+    private static async Task<List<ModelCatalog.Entry>> FetchModelEntriesAsync(
         AgentBrook.Agent.Infrastructure.ProviderConfig p)
     {
         try
         {
-            var url = (p.BaseUrl ?? "").TrimEnd('/');
-            if (!url.EndsWith("/v1", StringComparison.OrdinalIgnoreCase)) url += "/v1";
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-            using var req = new HttpRequestMessage(HttpMethod.Get,
-                $"{url}/models?_={DateTimeOffset.Now.ToUnixTimeMilliseconds()}");
-            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", p.ApiKey);
-            req.Headers.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue { NoCache = true, NoStore = true };
-            using var resp = await http.SendAsync(req);
-            if (!resp.IsSuccessStatusCode) return [];
-            using var doc = System.Text.Json.JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
-            return doc.RootElement.GetProperty("data").EnumerateArray()
-                .Select(m => new StartupModelEntry(
-                    m.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "",
-                    m.TryGetProperty("name", out var n) ? n.GetString() : null,
-                    m.TryGetProperty("model_type", out var mt) && mt.ValueKind == System.Text.Json.JsonValueKind.Number ? mt.GetInt32() : 1,
-                    m.TryGetProperty("endpoints", out var ep) && ep.ValueKind == System.Text.Json.JsonValueKind.Array
-                        ? string.Join(",", ep.EnumerateArray().Select(e => e.GetString()).Where(s => !string.IsNullOrEmpty(s)))
-                        : "",
-                    m.TryGetProperty("parameters", out var pp) && pp.ValueKind == System.Text.Json.JsonValueKind.Object
-                        ? pp.GetRawText() : ""))
-                .Where(e => e.Id.Length > 0).ToList();
+            return await ModelCatalog.FetchAsync(p);
         }
         catch
         {
@@ -663,10 +696,40 @@ public sealed class AssistantController : IBrookInteraction
     /// <summary>启用/停用技能（停用不再预加载、不进入 list_skills/load_skill/主索引，文件保留）。</summary>
     public bool SetSkillEnabled(string name, bool enabled) => Ready && Agent!.SetSkillEnabled(name, enabled);
 
-    public Task SetProviderAsync(string name) => Agent!.SwitchProviderAsync(name);
+    public async Task SetProviderAsync(string name)
+    {
+        Interlocked.Increment(ref _providerRevision);
+        await _initializationGate.WaitAsync();
+        try
+        {
+            await Agent!.SwitchProviderAsync(name);
+        }
+        finally
+        {
+            _initializationGate.Release();
+        }
+    }
 
-    public Task SaveProvidersAsync(List<AgentBrook.Agent.Infrastructure.ProviderConfig> providers, string activeProvider)
-        => Agent!.SaveProvidersAsync(providers, activeProvider);
+    public async Task SaveProvidersAsync(List<AgentBrook.Agent.Infrastructure.ProviderConfig> providers, string activeProvider)
+    {
+        Interlocked.Increment(ref _providerRevision);
+        await _initializationGate.WaitAsync();
+        try
+        {
+            if (Ready)
+            {
+                await Agent!.SaveProvidersAsync(providers.Select(ModelCatalog.Clone).ToList(), activeProvider);
+                return;
+            }
+            var settings = new ProviderSettings { Providers = providers, ActiveProvider = activeProvider };
+            settings.Save(Path.Combine(UiPrefs.WorkspaceDir(), "models.json"));
+            await InitializeCoreAsync();
+        }
+        finally
+        {
+            _initializationGate.Release();
+        }
+    }
 
     /// <summary>应用助手个性化（名字/语言/默认提示词）。未就绪时静默跳过（下次启动设置窗口可再应用）。</summary>
     public async Task ApplyAssistantSettingsAsync(string name, string language, string customPrompt)

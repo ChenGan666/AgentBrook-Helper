@@ -57,7 +57,7 @@ public partial class ModelSettingsWindow : WindowBase
         _skillsHint = this.FindControl<TextBlock>("SkillsHint");
         BuildSkillsList();
         WireCollaborationAndUpdateSettings();
-        this.FindControl<Button>("SetupWizardBtn")?.Click += (_, _) => new OnboardingWindow().Show();
+        this.FindControl<Button>("SetupWizardBtn")?.Click += (_, _) => OnboardingWindow.ShowSingle();
 
         var currentVersionText = this.FindControl<TextBlock>("CurrentVersionText");
         if (currentVersionText is not null)
@@ -1094,6 +1094,7 @@ public partial class ModelSettingsWindow : WindowBase
         _working = App.Controller.Providers.Select(p => new ProviderConfig
         {
             Name = p.Name,
+            Protocol = p.Protocol,
             BaseUrl = p.BaseUrl,
             ApiKey = p.ApiKey,
             Models = [.. p.Models],
@@ -1230,10 +1231,11 @@ public partial class ModelSettingsWindow : WindowBase
         p.Models = (ModelsBox.Text ?? "")
             .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
             .ToList();
-        if (p.ActiveModel is null || p.ActiveModel.Length == 0 || !p.Models.Contains(p.ActiveModel))
+        if (p.ActiveModel is null || p.ActiveModel.Length == 0 || !p.Models.Contains(p.ActiveModel) || !p.IsChatModel(p.ActiveModel))
         {
-            p.ActiveModel = p.Models.FirstOrDefault() ?? "";
+            p.ActiveModel = p.Models.FirstOrDefault(p.IsChatModel) ?? "";
         }
+        if (!p.Models.Contains(p.ActiveMediaModel) || p.IsChatModel(p.ActiveMediaModel)) p.ActiveMediaModel = "";
     }
 
     private async Task SaveAndApplyAsync()
@@ -1279,7 +1281,7 @@ public partial class ModelSettingsWindow : WindowBase
     }
 
     /// <summary>模型连通性测试：用表单当前填写的参数直连一次对话补全（不落盘、不影响已保存配置）。</summary>
-    private async Task TestProviderAsync()
+    private async Task TestProviderAsync(bool fetchIfEmpty = true)
     {
         var testHint = this.FindControl<TextBlock>("ModelTestHint");
         if (testHint is not null)
@@ -1292,20 +1294,17 @@ public partial class ModelSettingsWindow : WindowBase
             return;
         }
         var p = _working[_selectedIndex];
-        if (p.Models.Count == 0)
+        if (fetchIfEmpty && p.Models.Count == 0)
         {
             // 自动获取模型列表与参数（AgentBrook.API /models，OpenAI 兼容）
             try
             {
-                var models = await FetchRelayModelsAsync(EffectiveApiBase(p), p.ApiKey);
-                p.ModelTypes = models.ToDictionary(m => m.Id, m => m.ModelType); // 记录类型（含多模态）
-                p.ModelNames = models.Where(m => !string.IsNullOrWhiteSpace(m.Name)).ToDictionary(m => m.Id, m => m.Name!);
-                p.ModelEndpoints = models.Where(m => !string.IsNullOrWhiteSpace(m.Endpoints)).ToDictionary(m => m.Id, m => m.Endpoints);
+                var models = await FetchRelayModelsAsync(p);
+                ModelCatalog.Apply(p, models); // 记录类型（含多模态）
                 if (models.Count > 0)
                 {
-                    p.Models = models.Select(m => m.Id).ToList();   // 全量入列
+                    // 全量入列
                     // 默认激活优先文本模型，避免默认落到图像/视频
-                    p.ActiveModel = p.Models.FirstOrDefault(m => p.IsChatModel(m)) ?? p.Models[0];
                     ModelsBox.Text = string.Join(", ", p.Models);
                 }
             }
@@ -1361,7 +1360,7 @@ public partial class ModelSettingsWindow : WindowBase
         {
             await FetchModelsBtnAsync();
             await RefreshBalanceAsync();
-            await TestProviderAsync();
+            await TestProviderAsync(fetchIfEmpty: false);
         }
         finally
         {
@@ -1378,49 +1377,23 @@ public partial class ModelSettingsWindow : WindowBase
     /// <summary>AgentBrook 中转端点规范化：补 /v1 前缀（OpenAI SDK 只按 Endpoint 直拼 /chat/completions）。</summary>
     private static string EffectiveApiBase(ProviderConfig p)
     {
-        var url = (p.BaseUrl ?? "").TrimEnd('/');
-        return p.Name == "AgentBrook" && !url.EndsWith("/v1", StringComparison.OrdinalIgnoreCase)
-            ? url + "/v1"
-            : url;
+        return ModelCatalog.EffectiveApiBase(p);
     }
 
     private static readonly HttpClient TokenHttp = new() { Timeout = TimeSpan.FromSeconds(20) };
     
 
-    private sealed record RelayModelInfo(string Id, string? Name, long? ContextWindow, int? MaxOutput, int ModelType, string Endpoints, string Params);
-
     /// <summary>调 OpenAI 兼容 /models 获取模型列表与参数。</summary>
-    private static async Task<List<RelayModelInfo>> FetchRelayModelsAsync(string apiBase, string apiKey)
+    private async Task<List<ModelCatalog.Entry>> FetchRelayModelsAsync(ProviderConfig p)
     {
         // 附加一次性参数避开网关/nginx 的 GET 缓存（缓存键含 query，请求头不一定生效）
-        using var req = new HttpRequestMessage(HttpMethod.Get,
-            $"{apiBase.TrimEnd('/')}/models?_={DateTimeOffset.Now.ToUnixTimeMilliseconds()}");
-        req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
-        req.Headers.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue { NoCache = true, NoStore = true };
-        using var resp = await TokenHttp.SendAsync(req);
-        var text = await resp.Content.ReadAsStringAsync();
-        if (!resp.IsSuccessStatusCode)
-            throw new InvalidOperationException($"HTTP {(int)resp.StatusCode}: {(text.Length > 120 ? text[..120] : text)}");
-        using var doc = JsonDocument.Parse(text);
-        var list = new List<RelayModelInfo>();
-        foreach (var m in doc.RootElement.GetProperty("data").EnumerateArray())
-        {
-            var endpoints = "";
-            if (m.TryGetProperty("endpoints", out var ep) && ep.ValueKind == JsonValueKind.Array)
-            {
-                endpoints = string.Join(",", ep.EnumerateArray().Select(e => e.GetString()).Where(s => !string.IsNullOrEmpty(s)));
-            }
-            var pars = m.TryGetProperty("parameters", out var pp) && pp.ValueKind == JsonValueKind.Object
-                ? pp.GetRawText() : "";
-            list.Add(new RelayModelInfo(
-                m.GetProperty("id").GetString() ?? "",
-                m.TryGetProperty("name", out var n) ? n.GetString() : null,
-                m.TryGetProperty("context_window", out var cw) && cw.ValueKind == JsonValueKind.Number ? cw.GetInt64() : null,
-                m.TryGetProperty("max_output_tokens", out var mo) && mo.ValueKind == JsonValueKind.Number ? mo.GetInt32() : null,
-                m.TryGetProperty("model_type", out var mt) && mt.ValueKind == JsonValueKind.Number ? mt.GetInt32() : 1,
-                endpoints, pars));
-        }
-        return list;
+        var before = ModelCatalog.Fingerprint(p);
+        var entries = await ModelCatalog.FetchAsync(ModelCatalog.Clone(p));
+        SyncFormIntoWorking();
+        if (_selectedIndex < 0 || _selectedIndex >= _working.Count || !ReferenceEquals(p, _working[_selectedIndex])
+            || before != ModelCatalog.Fingerprint(p))
+            throw new InvalidOperationException("供应商配置已变化，请重新更新模型列表。");
+        return entries;
     }
 
     /// <summary>
@@ -1481,12 +1454,9 @@ public partial class ModelSettingsWindow : WindowBase
         }
         try
         {
-            var all = await FetchRelayModelsAsync(EffectiveApiBase(p), p.ApiKey);
+            var all = await FetchRelayModelsAsync(p);
             // 记录类型映射（发送选接口）与显示名映射（UI 展示）；全部模型入列
-            p.ModelTypes = all.ToDictionary(m => m.Id, m => m.ModelType);
-            p.ModelNames = all.Where(m => !string.IsNullOrWhiteSpace(m.Name)).ToDictionary(m => m.Id, m => m.Name!);
-            p.ModelEndpoints = all.Where(m => !string.IsNullOrWhiteSpace(m.Endpoints)).ToDictionary(m => m.Id, m => m.Endpoints);
-            p.ModelParams = all.Where(m => !string.IsNullOrWhiteSpace(m.Params)).ToDictionary(m => m.Id, m => m.Params);
+            ModelCatalog.Apply(p, all);
             var models = all;                    // 文本+多模态全部保留
             var mmCount = all.Count(m => m.ModelType >= 4);  // 多模态数（仅提示用）
             if (models.Count == 0)
@@ -1494,10 +1464,7 @@ public partial class ModelSettingsWindow : WindowBase
                 Hint(I18n.T("ui.models.fetch.empty"));
                 return;
             }
-            p.Models = models.Select(m => m.Id).ToList();
-            if (string.IsNullOrEmpty(p.ActiveModel) || !p.Models.Contains(p.ActiveModel))
-                // 默认激活优先文本模型；多模态模型发对话时由 ValidateActiveProvider 拦截提示
-                p.ActiveModel = p.Models.FirstOrDefault(m => p.IsChatModel(m)) ?? p.Models[0];
+            // 默认激活优先文本模型；多模态模型发对话时由 ValidateActiveProvider 拦截提示
             ModelsBox.Text = string.Join(", ", p.Models);
             var first = models[0];
             var extra = first.ContextWindow.HasValue || first.MaxOutput.HasValue
@@ -1610,9 +1577,7 @@ public partial class ModelSettingsWindow : WindowBase
         var warningCount = _environmentResults.Count(r => r.Status == CheckStatus.Warning);
         if (summary is not null)
         {
-            summary.Text = errorCount == 0 && warningCount == 0
-                ? I18n.T("ui.all.passed")
-                : I18n.T("ui.check.complete.value.error.s.value.warning.s", errorCount, warningCount);
+            summary.Text = EnvironmentResultView.Summary(_environmentResults);
         }
         if (_repairAllBtn is not null) _repairAllBtn.IsEnabled = errorCount > 0 || warningCount > 0;
         if (checkBtn is not null) checkBtn.IsEnabled = true;
@@ -1648,9 +1613,7 @@ public partial class ModelSettingsWindow : WindowBase
         var stillWarning = _environmentResults.Count(r => r.Status == CheckStatus.Warning);
         if (summary is not null)
         {
-            summary.Text = stillError == 0 && stillWarning == 0
-                ? I18n.T("ui.all.passed.after.repair")
-                : I18n.T("ui.after.repair.value.error.s.value.warning.s", stillError, stillWarning);
+            summary.Text = EnvironmentResultView.Summary(_environmentResults, repaired: true);
         }
         if (hint is not null)
         {
@@ -1676,99 +1639,13 @@ public partial class ModelSettingsWindow : WindowBase
         if (list is null) return;
         list.Children.Clear();
 
-        foreach (var r in results)
+        EnvironmentResultView.Render(list, results, RepairSingleAsync, async r =>
         {
-            var (dotColor, statusText) = r.Status switch
-            {
-                CheckStatus.Ok => ("#4cc38a", I18n.T("ui.ok")),
-                CheckStatus.Warning => ("#e0a030", I18n.T("ui.warning")),
-                CheckStatus.Error => ("#ff6b6b", I18n.T("ui.error")),
-                _ => ("#8a8a8a", I18n.T("ui.unknown")),
-            };
-
-            var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
-
-            var dot = new Border
-            {
-                Width = 10, Height = 10, CornerRadius = new CornerRadius(5),
-                Background = new SolidColorBrush(Color.Parse(dotColor)),
-                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
-                Margin = new Thickness(0, 0, 10, 0),
-            };
-            Grid.SetColumn(dot, 0);
-            grid.Children.Add(dot);
-
-            var content = new StackPanel { Spacing = 2 };
-            Grid.SetColumn(content, 1);
-            content.Children.Add(new TextBlock
-            {
-                Text = r.Title,
-                FontSize = 13.5,
-                Foreground = new SolidColorBrush(Color.Parse("#f0f0f0")),
-                FontWeight = FontWeight.SemiBold,
-            });
-            content.Children.Add(new TextBlock
-            {
-                Text = r.Message,
-                FontSize = 12,
-                Foreground = new SolidColorBrush(Color.Parse("#b0b0b0")),
-                TextWrapping = TextWrapping.Wrap,
-            });
-            if (!string.IsNullOrWhiteSpace(r.Solution))
-            {
-                content.Children.Add(new TextBlock
-                {
-                    Text = I18n.T("ui.solution.value", r.Solution),
-                    FontSize = 11.5,
-                    Foreground = new SolidColorBrush(Color.Parse("#d29922")),
-                    TextWrapping = TextWrapping.Wrap,
-                });
-            }
-            grid.Children.Add(content);
-
-            if (r.CanRepair)
-            {
-                var repairBtn = new Button
-                {
-                    Classes = { "ghostBtn" },
-                    Content = I18n.T("ui.repair"),
-                    Margin = new Thickness(8, 0, 0, 0),
-                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
-                };
-                repairBtn.Click += async (_, _) => await RepairSingleAsync(r);
-                Grid.SetColumn(repairBtn, 2);
-                grid.Children.Add(repairBtn);
-            }
-            else if (r.Status == CheckStatus.Error && r.Id.StartsWith("Mcp-", StringComparison.OrdinalIgnoreCase))
-            {
-                var mcpRepairBtn = new Button
-                {
-                    Classes = { "ghostBtn" },
-                    Content = I18n.T("ui.repair"),
-                    Margin = new Thickness(8, 0, 0, 0),
-                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
-                };
-                mcpRepairBtn.Click += async (_, _) => await RepairMcpViaChatAsync(r.Title, r.Extra);
-                Grid.SetColumn(mcpRepairBtn, 2);
-                grid.Children.Add(mcpRepairBtn);
-            }
-            else if (r.Status == CheckStatus.Error && r.Id == "CommandExecution")
-            {
-                var cmdRepairBtn = new Button
-                {
-                    Classes = { "ghostBtn" },
-                    Content = I18n.T("ui.repair"),
-                    Margin = new Thickness(8, 0, 0, 0),
-                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
-                };
-                cmdRepairBtn.Click += async (_, _) => await RepairCommandViaChatAsync(r.Title, r.Message, r.Extra);
-                Grid.SetColumn(cmdRepairBtn, 2);
-                grid.Children.Add(cmdRepairBtn);
-            }
-
-            list.Children.Add(grid);
-            list.Children.Add(new Border { Height = 1, Background = new SolidColorBrush(Color.Parse("#333333")), Margin = new Thickness(0, 6, 0, 0) });
-        }
+            if (r.Id.StartsWith("Mcp-", StringComparison.OrdinalIgnoreCase))
+                await RepairMcpViaChatAsync(r.Title, r.Extra);
+            else
+                await RepairCommandViaChatAsync(r.Title, r.Message, r.Extra);
+        });
     }
 
     private async Task RepairSingleAsync(EnvironmentCheckResult item)
@@ -1783,9 +1660,7 @@ public partial class ModelSettingsWindow : WindowBase
         var warningCount = _environmentResults.Count(r => r.Status == CheckStatus.Warning);
         if (summary is not null)
         {
-            summary.Text = errorCount == 0 && warningCount == 0
-                ? I18n.T("ui.all.passed")
-                : I18n.T("ui.check.complete.value.error.s.value.warning.s", errorCount, warningCount);
+            summary.Text = EnvironmentResultView.Summary(_environmentResults);
         }
         if (_repairAllBtn is not null) _repairAllBtn.IsEnabled = errorCount > 0 || warningCount > 0;
     }

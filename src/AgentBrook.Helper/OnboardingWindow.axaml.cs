@@ -27,11 +27,30 @@ public partial class OnboardingWindow : WindowBase
         "🧠", "🔮", "🔥", "🛸", "👑", "🌈", "🍀", "💎", "🎧", "🧩", "✨", "🌏",
     ];
 
+    private static OnboardingWindow? _current;
+
+    public static OnboardingWindow ShowSingle()
+    {
+        if (_current is null)
+        {
+            _current = new OnboardingWindow();
+            _current.Closed += (_, _) => _current = null;
+        }
+        if (!_current.IsVisible) _current.Show();
+        _current.Activate();
+        _current.Focus();
+        return _current;
+    }
+
     private int _step;
     private string _icon = "🦊";
+    private string? _loadedProviderName;
     private bool _providerSaved;   // 步骤 1 的大模型是否已落盘（取名按钮依赖它激活模型）
     private string? _trialKey;     // 试用卡 Key（申请成功后填充）
     private bool _trialFilled;    // 试用卡已自动填充大模型配置（保存时类型名固定 AgentBrook）
+    private int _catalogFetchSeq;              // 拉模型防串号：拉取期间表单被编辑/切换预设则结果作废不回写
+    private ProviderConfig? _catalogProvider;  // 按当前端点+Key 拉到的完整模型元数据（保存沿用类型/名称/端点/参数）
+    private string? _catalogKey;               // _catalogProvider 对应的表单指纹（预设+端点+Key）
 
     public OnboardingWindow()
     {
@@ -45,8 +64,8 @@ public partial class OnboardingWindow : WindowBase
         {
             presets.Items.Add(new ComboBoxItem { Content = name });
         }
-        presets.SelectedIndex = 0;
         presets.SelectionChanged += (_, _) => ApplyPreset();
+        presets.SelectedIndex = Array.FindIndex(Presets, p => p.Name == "AgentBrook");
 
         // 试用卡由按钮手动触发（仅 AgentBrook 预设显示该按钮）
         this.FindControl<Button>("TrialBtn")!.Click += async (_, _) => await RequestTrialAsync();
@@ -76,6 +95,7 @@ public partial class OnboardingWindow : WindowBase
         };
 
         this.FindControl<Button>("RunCheckBtn")!.Click += async (_, _) => await RunEnvironmentCheckAsync();
+        this.FindControl<Button>("RepairEnvironmentBtn")!.Click += async (_, _) => await RepairEnvironmentAsync();
 
         this.FindControl<Button>("ModelTestBtn")!.Click += async (_, _) => await TestProviderInputsAsync();
 
@@ -86,8 +106,21 @@ public partial class OnboardingWindow : WindowBase
         {
             if (_step == 0)
             {
+                next.IsEnabled = false;
+                var saved = false;
+                try
+                {
+                    saved = await SaveProviderFromInputsAsync();   // 大模型先行落盘：第 2 步的「取名」才能调用模型
+                }
+                finally
+                {
+                    next.IsEnabled = true;
+                }
+                if (!saved)
+                {
+                    return;   // 配置不完整/模型拉取失败：提示已显示在 ModelTestHint，停在本步
+                }
                 _step = 1;
-                SaveProviderFromInputs();   // 大模型先行落盘：第 2 步的「取名」才能调用模型
                 ShowStep(_step);
                 return;
             }
@@ -133,24 +166,17 @@ public partial class OnboardingWindow : WindowBase
         // 大模型：workspace/models.json 的激活供应商
         try
         {
-            var modelsPath = Path.Combine(UiPrefs.WorkspaceDir(), "models.json");
-            if (File.Exists(modelsPath))
+            var settings = AssistantController.LoadProviders(AssistantController.LoadStartupConfig(), UiPrefs.WorkspaceDir());
+            var active = settings.Active;
+            if (active is not null && active.IsConfigured && !ProviderConfig.IsPlaceholderApiKey(active.ApiKey))
             {
-                var settings = ProviderSettings.Load(modelsPath);
-                var active = settings.Providers.FirstOrDefault(p => p.Name == settings.ActiveProvider)
-                    ?? settings.Providers.FirstOrDefault(p => p.IsConfigured);
-                if (active is not null)
-                {
-                    this.FindControl<TextBox>("BaseUrlBox")!.Text = active.BaseUrl;
-                    this.FindControl<TextBox>("ApiKeyBox")!.Text = active.ApiKey;
-                    this.FindControl<TextBox>("ModelsBox")!.Text = string.Join(", ", active.Models);
-                    var presetIndex = Presets.ToList().FindIndex(p => p.Name == active.Name);
-                    if (presetIndex >= 0)
-                    {
-                        this.FindControl<ComboBox>("PresetBox")!.SelectedIndex = presetIndex;
-                    }
-                    _providerSaved = true;
-                }
+                var presetIndex = Presets.ToList().FindIndex(p => p.Name == active.Name);
+                this.FindControl<ComboBox>("PresetBox")!.SelectedIndex = presetIndex >= 0 ? presetIndex : Presets.Length - 1;
+                _loadedProviderName = active.Name;
+                this.FindControl<TextBox>("BaseUrlBox")!.Text = active.BaseUrl;
+                this.FindControl<TextBox>("ApiKeyBox")!.Text = active.ApiKey;
+                this.FindControl<TextBox>("ModelsBox")!.Text = string.Join(", ", active.Models);
+                _providerSaved = AssistantController.HasUsableChatModel(settings);
             }
         }
         catch
@@ -178,8 +204,15 @@ public partial class OnboardingWindow : WindowBase
         {
             return false;
         }
-        var modelsPath = Path.Combine(UiPrefs.WorkspaceDir(), "models.json");
-        return !File.Exists(modelsPath);
+        try
+        {
+            return !AssistantController.HasUsableChatModel(AssistantController.LoadProviders(
+                AssistantController.LoadStartupConfig(), UiPrefs.WorkspaceDir()));
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private sealed record OnboardingState(string State);
@@ -194,31 +227,74 @@ public partial class OnboardingWindow : WindowBase
     }
 
     /// <summary>运行环境检测：结果就地渲染到列表（标题 + 说明）。</summary>
+    private List<EnvironmentCheckResult> _environmentResults = new();
+    private bool _environmentBusy;
+    private bool _environmentChecked;
+    private bool _environmentRepaired;
+
+    private void RefreshEnvironmentView()
+    {
+        EnvironmentResultView.Render(this.FindControl<StackPanel>("EnvList")!, _environmentResults,
+            item => RepairEnvironmentAsync(item), busy: _environmentBusy);
+        this.FindControl<Button>("RunCheckBtn")!.IsEnabled = !_environmentBusy;
+        SetB("RunCheckBtn", _environmentChecked ? "ui.recheck" : "onboarding.s5.run");
+        this.FindControl<Button>("RepairEnvironmentBtn")!.IsEnabled = !_environmentBusy && _environmentResults.Any(r => r.CanRepair);
+        this.FindControl<TextBlock>("CheckSummary")!.Text = _environmentBusy
+            ? I18n.T(_environmentRepaired ? "ui.repairing" : "onboarding.s5.running")
+            : _environmentChecked ? EnvironmentResultView.Summary(_environmentResults, _environmentRepaired) : "";
+    }
+
     private async Task RunEnvironmentCheckAsync()
     {
-        var hint = this.FindControl<TextBlock>("CheckHint");
-        var list = this.FindControl<ItemsControl>("EnvList")!;
-        var btn = this.FindControl<Button>("RunCheckBtn")!;
-        btn.IsEnabled = false;
-        if (hint is not null)
-        {
-            hint.Text = I18n.T("onboarding.s5.running");
-        }
+        if (_environmentBusy) return;
+        _environmentBusy = true;
+        _environmentRepaired = false;
+        _environmentChecked = false;
+        this.FindControl<TextBlock>("CheckHint")!.Text = "";
+        _environmentResults.Clear();
+        RefreshEnvironmentView();
         try
         {
-            var results = await EnvironmentChecker.CheckAllAsync(App.Controller.Agent);
-            list.ItemsSource = results;
+            _environmentResults = await EnvironmentChecker.CheckAllAsync(App.Controller.Ready ? App.Controller.Agent : null);
+            _environmentChecked = true;
         }
         catch (Exception ex)
         {
-            if (hint is not null)
-            {
-                hint.Text = ex.Message;
-            }
+            this.FindControl<TextBlock>("CheckHint")!.Text = ex.Message;
         }
         finally
         {
-            btn.IsEnabled = true;
+            _environmentBusy = false;
+            RefreshEnvironmentView();
+        }
+    }
+
+    private async Task RepairEnvironmentAsync(EnvironmentCheckResult? item = null)
+    {
+        if (_environmentBusy) return;
+        _environmentBusy = true;
+        _environmentRepaired = true;
+        this.FindControl<TextBlock>("CheckHint")!.Text = "";
+        RefreshEnvironmentView();
+        try
+        {
+            var items = item is null ? _environmentResults.Where(r => r.CanRepair).ToList() : new List<EnvironmentCheckResult> { item };
+            foreach (var current in items)
+            {
+                var result = await EnvironmentChecker.RepairAsync(current);
+                var index = _environmentResults.FindIndex(r => r.Id == result.Id);
+                if (index >= 0) _environmentResults[index] = result;
+            }
+            this.FindControl<TextBlock>("CheckHint")!.Text = I18n.T("ui.tried.to.repair.value.item.s.please.follow.the.tips.if.issues.remain", items.Count);
+        }
+        catch (Exception ex)
+        {
+            this.FindControl<TextBlock>("CheckHint")!.Text = ex.Message;
+        }
+        finally
+        {
+            _environmentBusy = false;
+            RefreshEnvironmentView();
         }
     }
 
@@ -233,7 +309,7 @@ public partial class OnboardingWindow : WindowBase
         var st = this.FindControl<TextBlock>("StepText");
         if (st is not null)
         {
-            st.Text = I18n.T("onboarding.step", _step + 1, 5);
+            st.Text = I18n.T(_step == 4 ? "onboarding.step.last" : "onboarding.step", _step + 1, 5);
         }
         SetT("S1Welcome", "onboarding.welcome");
         SetT("S1NameLabel", "onboarding.s1.name");
@@ -241,6 +317,10 @@ public partial class OnboardingWindow : WindowBase
         SetT("S1Hint", "onboarding.s1.hint");
         SetT("S2Title", "onboarding.s2.title");
         SetT("S2Desc", "onboarding.s2.desc");
+        SetT("TitleText", "onboarding.title");
+        SetB("NameGenBtn", "ui.naming");
+        SetB("ModelTestBtn", "onboarding.s2.test");
+        this.FindControl<TextBox>("PromptBox")!.Watermark = I18n.T("onboarding.s3.placeholder");
         SetT("S2PresetLabel", "onboarding.s2.preset");
         SetT("S2BaseUrlLabel", "onboarding.s2.baseurl");
         SetT("S2ApiKeyLabel", "onboarding.s2.apikey");
@@ -254,10 +334,12 @@ public partial class OnboardingWindow : WindowBase
         SetT("S4Desc", "onboarding.s4.desc");
         SetT("S4Label", "onboarding.s4.label");
         SetB("WorkspacePickBtn", "onboarding.s4.choose");
-        SetT("S4Hint", "onboarding.s4.hint");
+        SetT("WorkspaceHint", "onboarding.s4.hint");
         SetT("S5Title", "onboarding.s5.title");
         SetT("S5Desc", "onboarding.s5.desc");
-        SetB("RunCheckBtn", "onboarding.s5.run");
+        SetB("RunCheckBtn", _environmentChecked ? "ui.recheck" : "onboarding.s5.run");
+        SetB("RepairEnvironmentBtn", "ui.repair.all");
+        RefreshEnvironmentView();
         SetT("DoneTitle", "onboarding.done.title");
         SetT("DoneDesc", "onboarding.done.desc");
         SetB("RestartBtn", "onboarding.restart");
@@ -433,13 +515,17 @@ public partial class OnboardingWindow : WindowBase
             ActiveModel = "",
         };
         provider.ActiveModel = provider.Models.FirstOrDefault() ?? "";
-        await App.Controller.SaveProvidersAsync([provider], provider.Name);
+        var existing = App.Controller.Providers.Select(ModelCatalog.Clone).ToList();
+        var index = existing.FindIndex(p => p.Name == provider.Name);
+        if (index >= 0) existing[index] = provider; else existing.Add(provider);
+        await App.Controller.SaveProvidersAsync(existing, provider.Name);
         _providerSaved = true;
     }
 
     // ── 预设 → 填充端点/模型（“自定义”不覆盖手输内容） ──
     private void ApplyPreset()
     {
+        _loadedProviderName = null;
         var index = this.FindControl<ComboBox>("PresetBox")!.SelectedIndex;
         if (index < 0 || index >= Presets.Length)
         {
@@ -501,47 +587,167 @@ public partial class OnboardingWindow : WindowBase
         ShowDone();
     }
 
-    /// <summary>把步骤 1 输入的供应商配置落盘（热应用到当前会话）。返回是否保存成功。</summary>
-    private bool SaveProviderFromInputs()
+    /// <summary>当前表单对应的供应商类型名（试用卡固定 AgentBrook，已加载配置优先原名）。</summary>
+    private string CurrentPresetName() => _trialFilled ? "AgentBrook"
+        : _loadedProviderName ?? (this.FindControl<ComboBox>("PresetBox")!.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "自定义";
+
+    /// <summary>表单指纹：预设+端点+Key；任一变化即视为缓存元数据失效。</summary>
+    private string FormCatalogKey() =>
+        $"{CurrentPresetName()}\n{this.FindControl<TextBox>("BaseUrlBox")!.Text?.Trim()}\n{this.FindControl<TextBox>("ApiKeyBox")!.Text?.Trim()}";
+
+    /// <summary>表单指纹未变时返回已拉取的模型元数据缓存，否则 null（编辑字段后自动失效）。</summary>
+    private ProviderConfig? FormCatalog() =>
+        _catalogProvider is not null && _catalogKey == FormCatalogKey() ? _catalogProvider : null;
+
+    /// <summary>错误信息脱敏：抹掉可能回显的 API Key。</summary>
+    private static string MaskKey(string? message, string apiKey) =>
+        string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(message)
+            ? message ?? ""
+            : message.Replace(apiKey, "***", StringComparison.Ordinal);
+
+    /// <summary>端点+Key 已填但模型清单为空时，复用 ModelCatalog.FetchAsync/Apply 拉取并填充 ModelsBox，
+    /// 同时缓存完整元数据（类型/名称/端点/参数）供测试选对话模型与保存沿用。
+    /// 拉取期间表单被编辑或切换预设则结果作废、不回写。返回是否已有可用模型清单。</summary>
+    private async Task<bool> FetchModelsIntoFormAsync(TextBlock? hint)
     {
+        var modelsBox = this.FindControl<TextBox>("ModelsBox")!;
+        var preset = CurrentPresetName();
         var baseUrl = this.FindControl<TextBox>("BaseUrlBox")!.Text?.Trim() ?? "";
         var apiKey = this.FindControl<TextBox>("ApiKeyBox")!.Text?.Trim() ?? "";
-        var modelsText = this.FindControl<TextBox>("ModelsBox")!.Text?.Trim() ?? "";
+        var modelsBefore = modelsBox.Text ?? "";
+        var seq = ++_catalogFetchSeq;
+        var probe = new ProviderConfig { Name = preset, BaseUrl = baseUrl, ApiKey = apiKey };
+        List<ModelCatalog.Entry> entries;
+        try
+        {
+            entries = await ModelCatalog.FetchAsync(probe);
+        }
+        catch (Exception ex)
+        {
+            if (seq == _catalogFetchSeq && hint is not null)
+            {
+                hint.Text = "⚠ " + I18n.T("ui.models.fetch.fail", FriendlyRelayError(MaskKey(ex.Message, apiKey)));
+            }
+            return false;
+        }
+        // 拉取期间用户改了表单/切换了预设：结果作废，不覆盖当前输入
+        if (seq != _catalogFetchSeq
+            || FormCatalogKey() != $"{preset}\n{baseUrl}\n{apiKey}"
+            || (modelsBox.Text ?? "") != modelsBefore)
+        {
+            return false;
+        }
+        if (entries.Count == 0)
+        {
+            if (hint is not null)
+            {
+                hint.Text = "⚠ " + I18n.T("ui.models.fetch.empty");
+            }
+            return false;
+        }
+        ModelCatalog.Apply(probe, entries);   // 全量入列并记录类型/名称/端点/参数
+        _catalogProvider = probe;
+        _catalogKey = FormCatalogKey();
+        modelsBox.Text = string.Join(", ", probe.Models);
+        return true;
+    }
+
+    /// <summary>把步骤 1 输入的供应商配置落盘（热应用到当前会话）。返回是否可进入下一步：
+    /// 地址与 Key 全空视为用户跳过（放行）；填写了但缺项/模型拉取失败/无对话模型则提示并返回 false。</summary>
+    private async Task<bool> SaveProviderFromInputsAsync()
+    {
+        var hint = this.FindControl<TextBlock>("ModelTestHint");
+        var baseUrl = this.FindControl<TextBox>("BaseUrlBox")!.Text?.Trim() ?? "";
+        var apiKey = this.FindControl<TextBox>("ApiKeyBox")!.Text?.Trim() ?? "";
+        if (string.IsNullOrEmpty(baseUrl) && string.IsNullOrEmpty(apiKey))
+        {
+            return true;   // 用户跳过了大模型配置
+        }
         if (string.IsNullOrEmpty(baseUrl) || string.IsNullOrEmpty(apiKey))
         {
-            return false;   // 用户跳过了大模型配置
+            if (hint is not null)
+            {
+                hint.Text = "⚠ " + I18n.T("ui.models.fetch.need.url.key");
+            }
+            return false;
         }
-        var models = modelsText
+        var models = (this.FindControl<TextBox>("ModelsBox")!.Text ?? "")
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(m => m.Length > 0)
             .ToList();
         if (models.Count == 0)
         {
+            // 未点「测试」直接下一步：同样自动拉取模型清单，失败则留在本步
+            if (!await FetchModelsIntoFormAsync(hint))
+            {
+                return false;
+            }
+            models = (this.FindControl<TextBox>("ModelsBox")!.Text ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(m => m.Length > 0)
+                .ToList();
+            if (models.Count == 0)
+            {
+                return false;
+            }
+        }
+        var presetName = CurrentPresetName();
+        var catalog = FormCatalog();
+        var provider = catalog is not null ? ModelCatalog.Clone(catalog) : new ProviderConfig();
+        provider.Name = string.IsNullOrWhiteSpace(presetName) ? "自定义" : presetName;
+        provider.BaseUrl = baseUrl;
+        provider.ApiKey = apiKey;
+        provider.Models = models;
+        // 元数据按表单清单取交集（用户可能删减了部分模型）；无缓存时保持空，未知模型按文本处理
+        provider.ModelTypes = provider.ModelTypes.Where(kv => models.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value);
+        provider.ModelNames = provider.ModelNames.Where(kv => models.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value);
+        provider.ModelEndpoints = provider.ModelEndpoints.Where(kv => models.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value);
+        provider.ModelParams = provider.ModelParams.Where(kv => models.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value);
+        provider.ActiveModel = models.FirstOrDefault(provider.IsChatModel) ?? "";
+        if (provider.ActiveModel.Length == 0)
+        {
+            if (hint is not null)
+            {
+                hint.Text = "⚠ " + I18n.T("ui.models.fetch.only.multimodal", models.Count);
+            }
             return false;
         }
-        var presetName = _trialFilled ? "AgentBrook"
-            : (this.FindControl<ComboBox>("PresetBox")!.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "自定义";
-        var provider = new ProviderConfig
-        {
-            Name = string.IsNullOrWhiteSpace(presetName) ? "自定义" : presetName,
-            BaseUrl = baseUrl,
-            ApiKey = apiKey,
-            Models = models,
-            ActiveModel = models.FirstOrDefault() ?? "",
-        };
         try
         {
             // 合并保存：保留其他已有供应商，仅替换/追加当前这一个（避免覆盖用户原有配置）
-            var existing = App.Controller.Providers.ToList();
+            var existing = App.Controller.Providers.Select(ModelCatalog.Clone).ToList();
             var idx = existing.FindIndex(p => p.Name == provider.Name);
-            if (idx >= 0) existing[idx] = provider; else existing.Add(provider);
-            App.Controller.SaveProvidersAsync(existing, provider.Name).GetAwaiter().GetResult();
+            if (idx >= 0)
+            {
+                var saved = existing[idx];
+                saved.BaseUrl = provider.BaseUrl;
+                saved.ApiKey = provider.ApiKey;
+                saved.Models = provider.Models;
+                if (catalog is not null)
+                {
+                    // 有本次拉取的元数据则刷新；否则保留已存配置，避免清空类型/名称/端点/参数
+                    saved.ModelTypes = provider.ModelTypes;
+                    saved.ModelNames = provider.ModelNames;
+                    saved.ModelEndpoints = provider.ModelEndpoints;
+                    saved.ModelParams = provider.ModelParams;
+                }
+                if (!saved.Models.Contains(saved.ActiveModel) || !saved.IsChatModel(saved.ActiveModel))
+                    saved.ActiveModel = saved.Models.FirstOrDefault(saved.IsChatModel) ?? "";
+                if (!saved.Models.Contains(saved.ActiveMediaModel) || saved.IsChatModel(saved.ActiveMediaModel))
+                    saved.ActiveMediaModel = "";
+            }
+            else existing.Add(provider);
+            await App.Controller.SaveProvidersAsync(existing, provider.Name);
             _providerSaved = true;
             return true;
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[onboarding] provider save failed: {ex.Message}");
+            if (hint is not null)
+            {
+                hint.Text = "✗ " + I18n.T("ui.save.failed.value", MaskKey(ex.Message, apiKey));
+            }
             return false;
         }
     }
@@ -570,7 +776,7 @@ public partial class OnboardingWindow : WindowBase
                     PostHint(hint, I18n.T("onboarding.s1.naming.failed") + " " + ex.Message);
                     break;
                 }
-                PostHint(hint, I18n.T("onboarding.s1.naming.failed") + " " + ex.Message + "，自动重试…");
+                PostHint(hint, I18n.T("onboarding.s1.naming.failed") + " " + ex.Message + " " + I18n.T("onboarding.retry"));
                 await Task.Delay(2500);
             }
             finally
@@ -584,24 +790,19 @@ public partial class OnboardingWindow : WindowBase
     private async Task GenerateNameOnce()
     {
         var hint = this.FindControl<TextBlock>("S1Hint")!;
-        if (!SaveProviderFromInputs() && !_providerSaved)
+        if (!await SaveProviderFromInputsAsync() && !_providerSaved)
         {
             throw new InvalidOperationException(I18n.T("onboarding.s1.naming.need.key"));
         }
         var assistant = App.Controller;
-        if (assistant.Ready is false || assistant.Agent is null)
+        var settings = new ProviderSettings { Providers = assistant.Providers.ToList(), ActiveProvider = assistant.CurrentProvider };
+        if (!AssistantController.HasUsableChatModel(settings))
         {
             throw new InvalidOperationException(I18n.T("onboarding.s1.naming.need.key"));
         }
-        var providers = assistant.Providers;
-        var active = providers.FirstOrDefault(p => p.Name == assistant.CurrentProvider)
-            ?? providers.FirstOrDefault(p => p.IsConfigured);
-        if (active is null || !active.IsConfigured)
-        {
-            throw new InvalidOperationException(I18n.T("onboarding.s1.naming.need.key"));
-        }
-        var (model, client) = (active.ActiveModel,
-            AgentFactory.CreateChatClient(active.BaseUrl, active.ApiKey, active.ActiveModel, maxRetries: 0));
+        var active = settings.Active!;
+        var model = string.IsNullOrEmpty(active.ActiveModel) ? active.Models[0] : active.ActiveModel;
+        var client = AgentFactory.CreateChatClient(active.BaseUrl, active.ApiKey, model, maxRetries: 0);
         // 名字语言跟随当前界面语言（auto 模式下即系统语言）；风格每次随机
         var style = new[] { "文艺风网名：诗意满满，彰显格调", "搞笑网名：幽默诙谐，轻松有趣", "二次元风格网名：赛博未来，个性吸睛", "著名小说角色：江湖英雄，柔美清纯" }[Random.Shared.Next(4)];
         var langRule = I18n.Lang switch
@@ -665,7 +866,8 @@ public partial class OnboardingWindow : WindowBase
         }
     }
 
-    /// <summary>大模型连通性测试：用表单当前填写的参数直连一次对话补全（不落盘）。</summary>
+    /// <summary>大模型连通性测试：用表单当前填写的参数直连一次对话补全（不落盘）。
+    /// 地址+Key 已填但模型为空时先自动拉取清单并缓存元数据；测试优先挑对话模型，避免落到图像/视频。</summary>
     private async Task TestProviderInputsAsync()
     {
         var baseUrl = this.FindControl<TextBox>("BaseUrlBox")!.Text?.Trim() ?? "";
@@ -678,7 +880,8 @@ public partial class OnboardingWindow : WindowBase
         {
             hint.Text = "";
         }
-        if (string.IsNullOrEmpty(baseUrl) || string.IsNullOrEmpty(apiKey) || models.Count == 0)
+        var testBtn = this.FindControl<Button>("ModelTestBtn")!;
+        if (string.IsNullOrEmpty(baseUrl) || string.IsNullOrEmpty(apiKey))
         {
             if (hint is not null)
             {
@@ -686,9 +889,39 @@ public partial class OnboardingWindow : WindowBase
             }
             return;
         }
-        var model = models[0];
-        var testBtn = this.FindControl<Button>("ModelTestBtn")!;
         testBtn.IsEnabled = false;
+        if (models.Count == 0)
+        {
+            // 地址与 Key 已填但模型清单为空（如 AgentBrook 预设默认空）：先拉取，失败直接提示原因
+            testBtn.Content = I18n.T("onboarding.s2.fetching");
+            if (!await FetchModelsIntoFormAsync(hint))
+            {
+                testBtn.IsEnabled = true;
+                testBtn.Content = I18n.T("onboarding.s2.test");
+                return;
+            }
+            models = (this.FindControl<TextBox>("ModelsBox")!.Text ?? "")
+                .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                .ToList();
+        }
+        var catalog = FormCatalog();
+        var probe = catalog is not null ? ModelCatalog.Clone(catalog) : new ProviderConfig();
+        probe.Name = CurrentPresetName();
+        probe.BaseUrl = baseUrl;
+        probe.ApiKey = apiKey;
+        probe.Models = models;
+        var model = models.FirstOrDefault(probe.IsChatModel) ?? "";
+        if (model.Length == 0)
+        {
+            if (hint is not null)
+            {
+                hint.Text = "⚠ " + I18n.T("ui.models.fetch.only.multimodal", models.Count);
+            }
+            testBtn.IsEnabled = true;
+            testBtn.Content = I18n.T("onboarding.s2.test");
+            return;
+        }
+        var apiBase = ModelCatalog.EffectiveApiBase(probe);
         // DeepSeek 服务端偶发过载（503）会挂起请求：最多 3 次尝试，间隔 2.5 秒，进度显示在提示行
         for (var attempt = 1; ; attempt++)
         {
@@ -696,7 +929,7 @@ public partial class OnboardingWindow : WindowBase
             var sw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
-                var reply = await PingModelAsync(baseUrl, apiKey, model);
+                var reply = await PingModelAsync(apiBase, apiKey, model);
                 sw.Stop();
                 if (hint is not null)
                 {
@@ -717,7 +950,7 @@ public partial class OnboardingWindow : WindowBase
             {
                 if (hint is not null)
                 {
-                    hint.Text = $"⚠ {I18n.T("ui.models.test.fail", FriendlyRelayError(ex.Message))}（第 {attempt} 次），自动重试…";
+                    hint.Text = $"⚠ {I18n.T("ui.models.test.fail", FriendlyRelayError(MaskKey(ex.Message, apiKey)))} ({I18n.T("onboarding.attempt", attempt)}) {I18n.T("onboarding.retry")}";
                 }
                 await Task.Delay(2500);
             }
@@ -725,7 +958,7 @@ public partial class OnboardingWindow : WindowBase
             {
                 if (hint is not null)
                 {
-                    hint.Text = "✗ " + I18n.T("ui.models.test.fail", FriendlyRelayError(ex.Message));
+                    hint.Text = "✗ " + I18n.T("ui.models.test.fail", FriendlyRelayError(MaskKey(ex.Message, apiKey)));
                 }
                 break;
             }

@@ -112,8 +112,7 @@ public partial class App : Application
             // 首次启动初始化向导（新安装弹出；已配置模型的旧安装自动跳过）
             if (OnboardingWindow.IsNeeded() || (desktop.Args is not null && desktop.Args.Contains("--onboarding")))
             {
-                var onboarding = new OnboardingWindow();
-                onboarding.Show();
+                OnboardingWindow.ShowSingle();
             }
 
             // --fullaccess：完全访问模式启动（审批自动通过，测试钩子）

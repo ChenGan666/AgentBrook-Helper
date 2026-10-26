@@ -97,15 +97,18 @@ public sealed class BrookAgent : IAsyncDisposable
             return "模型供应商配置为空：请在模型设置中添加供应商。";
         }
         var key = p.ApiKey ?? "";
-        Console.Error.WriteLine($"[validate] provider「{p.Name}」BaseUrl={p.BaseUrl} key 前 6 位={key[..Math.Min(6, key.Length)]}… 长度={key.Length} 非ASCII={key.Any(c => c > 127)}");
+        Console.Error.WriteLine($"[validate] provider「{p.Name}」BaseUrl={p.BaseUrl} key 长度={key.Length} 非ASCII={key.Any(c => c > 127)}");
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return "尚未填写 API Key：请在模型设置中填入你的 Key。";
+        }
         if (key.Any(c => c > 127))
         {
             return "API Key 含非 ASCII 字符（可能是占位符）：请在模型设置中填写你的真实 Key。";
         }
-        if (key.Contains("请", StringComparison.OrdinalIgnoreCase) ||
-            key.Contains("please-fill", StringComparison.OrdinalIgnoreCase))
+        if (ProviderConfig.IsPlaceholderApiKey(key))
         {
-            return "尚未填写 API Key：请在模型设置中填入你的 Key。";
+            return "尚未填写 API Key（当前为占位符）：请在模型设置中填入你的真实 Key。";
         }
         if (string.IsNullOrWhiteSpace(p.BaseUrl))
         {
@@ -189,17 +192,8 @@ public sealed class BrookAgent : IAsyncDisposable
 
         // 模型供应商：优先用户配置（workspace/models.json），否则从 appsettings 派生默认供应商
         var providers = ProviderSettings.Load(workspace.ProvidersFile);
-        if (providers.Providers.Count == 0)
+        if (providers.EnsureDefaultProvider(config.LLM))
         {
-            providers.Providers.Add(new ProviderConfig
-            {
-                Name = "默认",
-                BaseUrl = config.LLM.BaseUrl,
-                ApiKey = config.LLM.ApiKey,
-                Models = [.. config.LLM.Models],
-                ActiveModel = config.LLM.DefaultModel,
-            });
-            providers.ActiveProvider = "默认";
             providers.Save(workspace.ProvidersFile);
         }
         var activeProvider = providers.Active
@@ -591,7 +585,8 @@ public sealed class BrookAgent : IAsyncDisposable
 
         var switched = target.Name != _activeProvider.Name
             || target.BaseUrl != _activeProvider.BaseUrl
-            || target.ApiKey != _activeProvider.ApiKey;
+            || target.ApiKey != _activeProvider.ApiKey
+            || target.ActiveModel != CurrentModel;
         if (switched)
         {
             System.Text.Json.JsonElement? carried = null;
@@ -637,11 +632,11 @@ public sealed class BrookAgent : IAsyncDisposable
         _activeProvider = target;
         _chatClient = AgentFactory.CreateChatClient(
             target.BaseUrl, target.ApiKey,
-            string.IsNullOrEmpty(target.ActiveModel) ? target.Models.FirstOrDefault() ?? "" : target.ActiveModel);
+            string.IsNullOrEmpty(target.ActiveModel) ? target.Models.FirstOrDefault(target.IsChatModel) ?? "" : target.ActiveModel);
         _router.Reset();   // 辅助客户端按旧供应商缓存，全部失效重建
         _agent = AgentFactory.CreateAgent(_config, _chatClient, _tools, _skillInstructions, _memory);
         CurrentModel = string.IsNullOrEmpty(target.ActiveModel)
-            ? target.Models.FirstOrDefault() ?? ""
+            ? target.Models.FirstOrDefault(target.IsChatModel) ?? ""
             : target.ActiveModel;
         _providers.ActiveProvider = target.Name;
         _providers.Save(_workspace.ProvidersFile);

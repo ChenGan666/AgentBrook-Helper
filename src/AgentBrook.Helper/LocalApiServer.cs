@@ -130,7 +130,7 @@ internal static class LocalApiServer
         {
             providers = App.Controller.Providers.Select(p => new ProviderConfig
             {
-                Name = p.Name, BaseUrl = p.BaseUrl, ApiKey = p.ApiKey,
+                Name = p.Name, Protocol = p.Protocol, BaseUrl = p.BaseUrl, ApiKey = p.ApiKey,
                 Models = [.. p.Models], ActiveModel = p.ActiveModel,
                 ActiveMediaModel = p.ActiveMediaModel,
                 ModelTypes = new Dictionary<string, int>(p.ModelTypes),
@@ -162,20 +162,15 @@ internal static class LocalApiServer
         // 模型清单缺失时向中转拉一次（Key 刚发卡，/v1/models 即可用）；全量模型入列，非对话模型发送时按类型拦截
         if (p.Models.Count == 0)
         {
-            var fetched = await FetchModelsAsync(p.BaseUrl, p.ApiKey);
+            var fetched = await FetchModelsAsync(p);
             if (fetched.Count > 0)
             {
-                p.Models = fetched.Select(f => f.Id).ToList();
-                p.ModelTypes = fetched.ToDictionary(f => f.Id, f => f.ModelType);
-                p.ModelNames = fetched.Where(f => !string.IsNullOrWhiteSpace(f.Name)).ToDictionary(f => f.Id, f => f.Name!);
-                p.ModelEndpoints = fetched.Where(f => !string.IsNullOrWhiteSpace(f.Endpoints)).ToDictionary(f => f.Id, f => f.Endpoints);
-                p.ModelParams = fetched.Where(f => !string.IsNullOrWhiteSpace(f.Params)).ToDictionary(f => f.Id, f => f.Params);
-                changed = true;
+                changed |= ModelCatalog.Apply(p, fetched);
             }
         }
-        if (!p.Models.Contains(p.ActiveModel))
+        if (!p.Models.Contains(p.ActiveModel) || !p.IsChatModel(p.ActiveModel))
             // 默认激活优先文本对话模型，避免默认落到图像/视频模型
-            p.ActiveModel = p.Models.FirstOrDefault(m => p.IsChatModel(m)) ?? p.Models.FirstOrDefault() ?? "";
+            p.ActiveModel = p.Models.FirstOrDefault(m => p.IsChatModel(m)) ?? "";
 
         // Key 可用则直接设为当前供应商；不可用保持原激活项
         var newActive = p.IsConfigured ? p.Name : active;
@@ -189,33 +184,12 @@ internal static class LocalApiServer
     }
 
     /// <summary>调中转 OpenAI 兼容 /v1/models 拉取可用模型（Bearer Key），保留类型与显示名供接口路由。</summary>
-    private sealed record RelayModelEntry(string Id, string? Name, int ModelType, string Endpoints, string Params);
-
-    private static async Task<List<RelayModelEntry>> FetchModelsAsync(string baseUrl, string apiKey)
+    private static async Task<List<ModelCatalog.Entry>> FetchModelsAsync(ProviderConfig provider)
     {
         try
         {
-            var url = baseUrl.TrimEnd('/');
-            if (!url.EndsWith("/v1", StringComparison.OrdinalIgnoreCase)) url += "/v1";
-            using var req = new HttpRequestMessage(HttpMethod.Get,
-                url + "/models?_=" + DateTimeOffset.Now.ToUnixTimeMilliseconds());
-            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
-            req.Headers.CacheControl = new System.Net.Http.Headers.CacheControlHeaderValue { NoCache = true, NoStore = true };
-            using var resp = await _http.SendAsync(req);
-            if (!resp.IsSuccessStatusCode) return [];
-            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
             // 全量返回（含多模态）；model_type 缺失按 1=文本兼容旧服务端
-            return doc.RootElement.GetProperty("data").EnumerateArray()
-                .Select(m => new RelayModelEntry(
-                    m.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "",
-                    m.TryGetProperty("name", out var n) ? n.GetString() : null,
-                    m.TryGetProperty("model_type", out var mt) && mt.ValueKind == JsonValueKind.Number ? mt.GetInt32() : 1,
-                    m.TryGetProperty("endpoints", out var ep) && ep.ValueKind == JsonValueKind.Array
-                        ? string.Join(",", ep.EnumerateArray().Select(e => e.GetString()).Where(s => !string.IsNullOrEmpty(s)))
-                        : "",
-                    m.TryGetProperty("parameters", out var pp) && pp.ValueKind == JsonValueKind.Object
-                        ? pp.GetRawText() : ""))
-                .Where(e => e.Id.Length > 0).ToList();
+            return await ModelCatalog.FetchAsync(provider);
         }
         catch
         {

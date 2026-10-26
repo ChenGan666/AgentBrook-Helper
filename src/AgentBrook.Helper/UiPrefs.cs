@@ -25,6 +25,7 @@ internal static class UiPrefs
             var configuration = new ConfigurationBuilder()
                 .SetBasePath(AppContext.BaseDirectory)
                 .AddJsonFile("appsettings.json", optional: false)
+                .AddEnvironmentVariables("AGENTBROOK_")
                 .Build();
             var config = configuration.Get<AppConfig>() ?? new AppConfig();
             var appRoot = Workspace.LocateAppRoot();

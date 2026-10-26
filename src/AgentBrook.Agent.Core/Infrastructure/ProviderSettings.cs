@@ -26,6 +26,17 @@ public sealed class ProviderConfig
     /// <summary>模型名 → 调用参数说明（API /v1/models 的 parameters 字段 JSON，含 endpoint/required/optional）；注入上下文供 Agent 组装请求。</summary>
     public Dictionary<string, string> ModelParams { get; set; } = new();
 
+    /// <summary>Key 是否为占位符（示例值/未替换的默认文案）；空 Key 由调用方另行判定。</summary>
+    public static bool IsPlaceholderApiKey(string? key)
+    {
+        if (string.IsNullOrWhiteSpace(key)) return false;
+        if (key.Any(c => c > 127)) return true;
+        return key.Contains("请", StringComparison.OrdinalIgnoreCase)
+            || key.Contains("please-fill", StringComparison.OrdinalIgnoreCase)
+            || key.Contains("replace-with", StringComparison.OrdinalIgnoreCase)
+            || key.Contains("your-api-key", StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>模型显示名：无映射时回退真实模型名</summary>
     public string DisplayNameOf(string model) =>
         ModelNames.TryGetValue(model, out var n) && !string.IsNullOrWhiteSpace(n) ? n : model;
@@ -41,6 +52,9 @@ public sealed class ProviderConfig
 /// <summary>模型供应商集合的持久化（workspace/models.json）。</summary>
 public sealed class ProviderSettings
 {
+    /// <summary>appsettings 派生兜底供应商的统一名称（Helper 按此名识别 AgentBrook 中转端点的充值/拉模型等能力）。</summary>
+    public const string DefaultProviderName = "AgentBrook";
+
     public List<ProviderConfig> Providers { get; set; } = new();
     public string ActiveProvider { get; set; } = "";
 
@@ -77,4 +91,43 @@ public sealed class ProviderSettings
     }
 
     public ProviderConfig? Active => Providers.FirstOrDefault(p => p.Name == ActiveProvider) ?? Providers.FirstOrDefault();
+
+    /// <summary>由 appsettings LLM 配置派生兜底供应商（Helper 与 Core 共用，保证两处默认生成一致）。</summary>
+    public static ProviderConfig CreateDefaultProvider(Configuration.LlmOptions llm) => new()
+    {
+        Name = DefaultProviderName,
+        BaseUrl = llm.BaseUrl,
+        ApiKey = llm.ApiKey,
+        Models = [.. llm.Models],
+        ActiveModel = llm.DefaultModel,
+    };
+
+    /// <summary>清单为空时补入 appsettings 兜底供应商并设为激活；已有用户供应商时不动。返回是否新增。</summary>
+    public bool EnsureDefaultProvider(Configuration.LlmOptions llm)
+    {
+        if (Providers.Count != 0)
+        {
+            return false;
+        }
+        Providers.Add(CreateDefaultProvider(llm));
+        ActiveProvider = DefaultProviderName;
+        return true;
+    }
+
+    /// <summary>激活供应商是否具备可用对话模型：端点为合法 http(s) 地址、Key 非空且非占位符、激活模型为文本（chat）模型。</summary>
+    public bool HasUsableChatModel()
+    {
+        var provider = Active;
+        if (provider is null
+            || !Uri.TryCreate(provider.BaseUrl, UriKind.Absolute, out var uri)
+            || uri.Scheme is not ("http" or "https")
+            || string.IsNullOrWhiteSpace(provider.ApiKey)
+            || ProviderConfig.IsPlaceholderApiKey(provider.ApiKey))
+        {
+            return false;
+        }
+        var model = string.IsNullOrEmpty(provider.ActiveModel)
+            ? provider.Models.FirstOrDefault() ?? "" : provider.ActiveModel;
+        return !string.IsNullOrWhiteSpace(model) && provider.Models.Contains(model) && provider.IsChatModel(model);
+    }
 }

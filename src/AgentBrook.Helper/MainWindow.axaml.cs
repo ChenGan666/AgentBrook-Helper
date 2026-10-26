@@ -52,6 +52,7 @@ public sealed record MentionItem(string Display, string InsertText, string Icon,
 public partial class MainWindow : Window
 {
     private readonly AssistantController _controller;
+    private Border? _modelConfigurationCard;
     private StackPanel? _chatPanel;
     private ScrollViewer? _chatScroll;
     // ── 历史滚动加载：会话记录可视光标（从末尾计数已渲染条数）与加载状态 ──
@@ -328,6 +329,8 @@ public partial class MainWindow : Window
         _controller.EventRaised += OnControllerEvent;
         _controller.StateChanged -= OnStateChanged;
         _controller.StateChanged += OnStateChanged;
+        _controller.ModelsChanged -= OnModelsChanged;
+        _controller.ModelsChanged += OnModelsChanged;
         _controller.StateChanged += (_, _) => Dispatcher.UIThread.Post(SyncHistoryCursor);   // 回合结束对账记录增量（滚动加载历史的游标）
         _controller.QueueChanged += n =>
         {
@@ -347,12 +350,14 @@ public partial class MainWindow : Window
             AppendToolLine("✔ " + (text.Length > 160 ? text[..160] + "…" : text)));
 
         // 启动过程（连接 MCP/恢复会话/就绪）改在顶栏状态胶囊展示，不进对话流
+        _controller.ModelConfigurationChanged += () => Dispatcher.UIThread.Post(UpdateModelConfigurationCard);
         _controller.StartupStatus += line => Dispatcher.UIThread.Post(() => ShowStartupStatus(line));
         _controller.ReadyChanged += () => Dispatcher.UIThread.Post(OnReadyForHistory);   // 就绪后标题取真实值；并回放当前会话最近记录
 
         I18n.LanguageChanged += () => Dispatcher.UIThread.Post(() =>
         {
             ApplyStaticTexts();
+            UpdateModelConfigurationCard();
             SetStatus(_lastState, _lastDetail, _lastWithModel);
         });
 
@@ -593,6 +598,34 @@ public partial class MainWindow : Window
             panel.Children.Add(distillItem);
         }
         ShowDropdown(anchor, panel, ref _sessionPopup);
+    }
+
+    private void UpdateModelConfigurationCard()
+    {
+        if (_chatPanel is null) return;
+        if (_modelConfigurationCard is not null)
+            _chatPanel.Children.Remove(_modelConfigurationCard);
+        _modelConfigurationCard = null;
+        if (!_controller.ModelConfigurationRequired) return;
+        var content = new StackPanel { Spacing = 12 };
+        content.Children.Add(new TextBlock
+        {
+            Text = I18n.T("ui.model.configuration.required"),
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = new SolidColorBrush(Color.Parse("#e5e5e5")),
+        });
+        var button = new Button { Content = I18n.T("ui.model.configuration.open.wizard") };
+        button.Click += (_, _) => OnboardingWindow.ShowSingle();
+        content.Children.Add(button);
+        _modelConfigurationCard = new Border
+        {
+            Child = content,
+            Padding = new Thickness(16),
+            Margin = new Thickness(0, 12),
+            CornerRadius = new CornerRadius(10),
+            Background = new SolidColorBrush(Color.Parse("#292929")),
+        };
+        _chatPanel.Children.Insert(0, _modelConfigurationCard);
     }
 
     private bool _startupReplayed;
@@ -865,6 +898,8 @@ public partial class MainWindow : Window
                 break;
         }
     }
+
+    private void OnModelsChanged() => UpdateModelChip();
 
     private void OnStateChanged(BrookRunState state, string? detail)
     {
