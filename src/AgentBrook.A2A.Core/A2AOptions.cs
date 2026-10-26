@@ -10,7 +10,7 @@ public sealed class A2AOptions
     public int MaxConcurrentRemoteTasks { get; set; } = 1;
     public TimeSpan PresenceHeartbeatInterval { get; set; } = TimeSpan.FromSeconds(10);
     public TimeSpan PresenceStaleAfter { get; set; } = TimeSpan.FromSeconds(30);
-    public TimeSpan PresenceOfflineAfter { get; set; } = TimeSpan.FromSeconds(60);
+    public TimeSpan PresenceOfflineAfter { get; set; } = TimeSpan.FromSeconds(30);
     public int OutboxMaxAttempts { get; set; } = 8;
     public TimeSpan OutboxBaseDelay { get; set; } = TimeSpan.FromSeconds(2);
 

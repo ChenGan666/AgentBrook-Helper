@@ -49,8 +49,8 @@ internal static class LanPeerBubbleOptions
     public const double HoverScale = 1.08;
     /// <summary>头像按下后移动超过该距离视为拖动气泡，而非点击。</summary>
     public const double DragThreshold = 4;
-    /// <summary>与 A2A 会话中心一致：65 秒内收到发现信标视为在线。</summary>
-    public static readonly TimeSpan BeaconAliveWindow = TimeSpan.FromSeconds(65);
+    /// <summary>信标兜底在线窗口：Presence 30 秒未跳即过期，信标兜底再给 5 秒余量取 35 秒。</summary>
+    public static readonly TimeSpan BeaconAliveWindow = TimeSpan.FromSeconds(35);
     /// <summary>超时离线检查间隔（仅存在在线伙伴时运行）。</summary>
     public static readonly TimeSpan ExpiryCheckInterval = TimeSpan.FromSeconds(5);
     /// <summary>A2A Changed 事件合并窗口（信标每 2 秒到达，避免频繁读库）。</summary>

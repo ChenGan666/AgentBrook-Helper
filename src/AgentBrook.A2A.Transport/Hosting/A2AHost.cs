@@ -138,6 +138,15 @@ public sealed class A2AHost : IAsyncDisposable
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
         await _stopCts.CancelAsync();
+        try
+        {
+            // 临终心跳：先广播离线，再停发现与 Web 服务，让对端立即下线。
+            await Presence.GoOfflineAsync();
+        }
+        catch
+        {
+            // 关网/对端不可达等情况不影响关停流程。
+        }
         if (Discovery is IAsyncDisposable discoveryAsync)
         {
             await discoveryAsync.DisposeAsync();

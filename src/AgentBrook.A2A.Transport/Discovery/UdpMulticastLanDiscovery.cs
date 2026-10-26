@@ -11,6 +11,8 @@ namespace AgentBrook.A2A.Transport.Discovery;
 
 public sealed class UdpMulticastLanDiscovery : ILanDiscovery, IAsyncDisposable
 {
+    /// <summary>信标新鲜度：信标每 2 秒发送一次，超过 15 秒未收到即视为该节点已离线，不再重播。</summary>
+    private static readonly TimeSpan BeaconFreshness = TimeSpan.FromSeconds(15);
     private readonly NodeIdentityService _identity;
     private readonly A2AHostOptions _options;
     private readonly A2AHost _host;
@@ -82,11 +84,17 @@ public sealed class UdpMulticastLanDiscovery : ILanDiscovery, IAsyncDisposable
         // - 每次收到信标 → 刷新 last_seen 存活信号（UI 的"在线"判定依据）
         // 历史教训：曾用"每节点只上报一次/端点变化才上报"两种去重，
         // 前者导致端口变化永不传播、后者导致存活信号冻结被误判离线。
+        // 另：只重播近期真正收到信标的节点——对端死亡后信标停止，若继续重播
+        // 会让消费端不断刷新 last_seen，导致离线节点被永久误判在线。
         while (!cancellationToken.IsCancellationRequested)
         {
+            var cutoff = DateTimeOffset.UtcNow - BeaconFreshness;
             foreach (var ep in _discovered.Values)
             {
-                yield return ep;
+                if (ep.DiscoveredAt > cutoff)
+                {
+                    yield return ep;
+                }
             }
             await Task.Delay(500, cancellationToken);
         }

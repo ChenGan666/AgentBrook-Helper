@@ -87,7 +87,8 @@ public sealed class PresenceService : IDisposable
         var snapshot = dto.ToCore();
         _remotePresences[dto.NodeId] = snapshot;
         var peer = await _store.GetPeerAsync(dto.NodeId);
-        if (peer is not null)
+        // 离线心跳不刷新存活信号：否则 Presence 过期后信标兜底又会让刚下线的节点短暂"复活"。
+        if (peer is not null && snapshot.Availability != PresenceAvailability.Offline)
         {
             peer.LastSeenAt = DateTimeOffset.UtcNow;
             await _store.UpsertPeerAsync(peer);
@@ -117,6 +118,14 @@ public sealed class PresenceService : IDisposable
     {
         _heartbeatTimer.Start();
         return Task.CompletedTask;
+    }
+
+    /// <summary>停服前向已配对伙伴发送最后一条"离线"心跳，让对端立即下线（崩溃/杀进程仍靠超时兜底）。</summary>
+    public async Task GoOfflineAsync()
+    {
+        _heartbeatTimer.Stop();
+        _availability = PresenceAvailability.Offline;
+        await SendHeartbeatAsync();
     }
 
     public void Stop()
