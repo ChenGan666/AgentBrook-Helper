@@ -654,9 +654,14 @@ public sealed class AssistantController : IBrookInteraction
         }
     }
 
-    public IReadOnlyList<AgentBrook.Agent.Skills.SkillInfo> GetSkills() => Ready ? Agent!.SkillStore.Current : [];
+    /// <param name="includeDisabled">true 返回含已停用技能的完整清单（Skill管理界面用）。</param>
+    public IReadOnlyList<AgentBrook.Agent.Skills.SkillInfo> GetSkills(bool includeDisabled = false)
+        => Ready ? (includeDisabled ? Agent!.SkillStore.All : Agent!.SkillStore.Current) : [];
 
     public bool DeleteSkill(string name) => Ready && Agent!.DeleteSkill(name);
+
+    /// <summary>启用/停用技能（停用不再预加载、不进入 list_skills/load_skill/主索引，文件保留）。</summary>
+    public bool SetSkillEnabled(string name, bool enabled) => Ready && Agent!.SetSkillEnabled(name, enabled);
 
     public Task SetProviderAsync(string name) => Agent!.SwitchProviderAsync(name);
 

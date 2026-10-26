@@ -12,12 +12,21 @@ public sealed record SkillInfo(
     /// <summary>技能目录内除 SKILL.md 之外的支撑文件（脚本、模板等），相对工作区。</summary>
     public IReadOnlyList<string> SupportingFiles { get; private set; } = [];
 
+    /// <summary>是否启用：目录内存在 .disabled 标记文件即停用（清单/主索引/list_skills 均不预加载）。</summary>
+    public bool Enabled { get; private set; } = true;
+
+    /// <summary>停用标记文件名：写于技能目录根，存在即视为停用。</summary>
+    public const string DisabledMarker = ".disabled";
+
     public static SkillInfo From(string skillDir)
     {
         var skillFilePath = Path.Combine(skillDir, "SKILL.md");
         var (name, description) = ParseFrontmatter(skillFilePath);
         name = string.IsNullOrWhiteSpace(name) ? Path.GetFileName(skillDir) : name;
-        return new SkillInfo(name, description, skillDir, skillFilePath);
+        return new SkillInfo(name, description, skillDir, skillFilePath)
+        {
+            Enabled = !File.Exists(Path.Combine(skillDir, DisabledMarker)),
+        };
     }
 
     /// <summary>刷新支撑文件列表。</summary>
@@ -25,7 +34,8 @@ public sealed record SkillInfo(
     {
         SupportingFiles = System.IO.Directory.Exists(SkillDirectory)
             ? System.IO.Directory.EnumerateFiles(SkillDirectory, "*", SearchOption.AllDirectories)
-                .Where(f => !f.Equals(SkillFilePath, StringComparison.OrdinalIgnoreCase))
+                .Where(f => !f.Equals(SkillFilePath, StringComparison.OrdinalIgnoreCase)
+                         && !Path.GetFileName(f).Equals(DisabledMarker, StringComparison.OrdinalIgnoreCase))
                 .Select(f => Path.GetRelativePath(workspaceRoot, f).Replace('\\', '/'))
                 .Order(StringComparer.OrdinalIgnoreCase)
                 .ToList()
@@ -77,7 +87,8 @@ public sealed record SkillInfo(
 /// <summary>扫描技能目录，构建可用技能清单。</summary>
 public static class SkillRegistry
 {
-    public static IReadOnlyList<SkillInfo> Load(string skillsDir, string workspaceRoot)
+    /// <param name="includeDisabled">管理界面用：true 时连已停用技能一并返回；默认 false 只返回启用项。</param>
+    public static IReadOnlyList<SkillInfo> Load(string skillsDir, string workspaceRoot, bool includeDisabled = false)
     {
         if (!Directory.Exists(skillsDir))
         {
@@ -88,6 +99,7 @@ public static class SkillRegistry
             .Where(d => File.Exists(Path.Combine(d, "SKILL.md")))
             .Select(SkillInfo.From)
             .Select(s => s.WithSupportingFiles(workspaceRoot))
+            .Where(s => includeDisabled || s.Enabled)
             .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }

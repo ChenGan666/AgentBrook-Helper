@@ -99,6 +99,8 @@ public partial class MainWindow : Window
         var newBtn = this.FindControl<Button>("NewBtn");
         var a2aBtn = this.FindControl<Button>("A2ABtn");
         if (a2aBtn is not null) a2aBtn.Click += (_, _) => App.ShowA2AWindow();
+        var settingsBtn = this.FindControl<Button>("SettingsBtn");
+        if (settingsBtn is not null) settingsBtn.Click += (_, _) => ModelSettingsWindow.ShowSingle();
         var plusBtn = this.FindControl<Button>("PlusBtn");
         var fullAccessBtn = this.FindControl<Button>("FullAccessBtn");
         var modelChip = this.FindControl<Button>("ModelChip");
@@ -379,19 +381,16 @@ public partial class MainWindow : Window
             };
         }
 
-        // 窗口位置记忆：启动恢复上次位置/尺寸（带可见性校验），移动/缩放后防抖保存
-        RestoreWindowBounds();
-        PositionChanged += (_, _) => ScheduleSaveBounds();
-        PropertyChanged += (_, e) =>
-        {
-            if (e.Property == WidthProperty || e.Property == HeightProperty)
-            {
-                ScheduleSaveBounds();
-            }
-        };
+        // 会话窗不做位置记忆（只记气泡位置）：每次打开按黄金分割高度居中（见 ShowFromBubble）；清理旧版遗留的位置偏好
+        UiPrefs.Delete("conv-win.json");
 
         Opened += (_, _) =>
         {
+            if (!_everShown)
+            {
+                _everShown = true;
+                CenterOnScreen();   // 首次显示后句柄已建立，兜底校正确保落在屏幕正中
+            }
             ApplyStaticTexts();
             SetStatus(BrookRunState.Idle, null, withModel: true);
             UpdateModelChip();
@@ -754,57 +753,48 @@ public partial class MainWindow : Window
     /// <summary>测试入口：模拟粘贴（读取当前剪贴板为附件）。</summary>
     public async Task DebugPasteAsync() => await TryAttachFromClipboardAsync();
 
+    private bool _everShown;    // 窗口实例全程复用（关闭=隐藏），只在首次显示时居中定位一次
+
     /// <summary>供气泡打开对话窗。</summary>
     public void ShowFromBubble()
     {
+        if (!_everShown)
+        {
+            ApplyGoldenHeightAndCenter();   // 首次打开按黄金分割高度居中；此后保留用户拖动的位置
+        }
         Show();
         Activate();
         _inputBox?.Focus();
     }
 
-    private DispatcherTimer? _boundsSaveTimer;
-
-    /// <summary>恢复上次关闭时的窗口位置与尺寸；首启或保存的位置不可见时保持 XAML 默认。</summary>
-    private void RestoreWindowBounds()
+    /// <summary>创建默认布局：窗高 = 工作区高度 / φ（黄金分割 ≈0.618），上下各留约 19% 边距，水平垂直居中。</summary>
+    private void ApplyGoldenHeightAndCenter()
     {
-        var saved = UiPrefs.Load<ConvWinBounds>("conv-win.json");
-        if (saved is null || saved.Width < MinWidth || saved.Height < MinHeight)
+        var screen = Screens.ScreenFromWindow(this) ?? Screens.Primary;
+        if (screen is null)
         {
             return;
         }
-        Width = saved.Width;
-        Height = saved.Height;
-        var target = new PixelPoint(saved.X, saved.Y);
-        // 可见性保护：标题栏区域必须落在任一显示器工作区内（如外接屏被拔掉时回落默认位置）
-        if (Screens.All.Any(s => s.WorkingArea.Intersects(new PixelRect(target, new PixelSize(80, 40)))))
-        {
-            Position = target;
-        }
+        const double phi = 1.618033988749895;
+        var workDip = screen.WorkingArea.Height / screen.Scaling;
+        Height = Math.Clamp(workDip / phi, MinHeight, workDip);
+        CenterOnScreen();
     }
 
-    /// <summary>移动/缩放后防抖保存（拖动过程中 PositionChanged 高频触发，避免每次写盘）。</summary>
-    private void ScheduleSaveBounds()
+    /// <summary>在所在/主屏工作区内水平垂直居中（WorkingArea 为物理像素，需按缩放换算 DIP 尺寸）。</summary>
+    private void CenterOnScreen()
     {
-        if (_boundsSaveTimer is null)
+        var screen = Screens.ScreenFromWindow(this) ?? Screens.Primary;
+        if (screen is null)
         {
-            _boundsSaveTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
-            _boundsSaveTimer.Tick += (_, _) =>
-            {
-                _boundsSaveTimer!.Stop();
-                SaveBoundsNow();
-            };
+            return;
         }
-        _boundsSaveTimer.Stop();
-        _boundsSaveTimer.Start();
-    }
-
-    /// <summary>把当前窗口位置/尺寸写入偏好（仅 Normal 状态；最大化时的坐标无记忆价值）。</summary>
-    private void SaveBoundsNow()
-    {
-        if (WindowState == WindowState.Normal)
-        {
-            UiPrefs.Save("conv-win.json", new ConvWinBounds(Position.X, Position.Y, Width, Height));
-        }
+        var scale = screen.Scaling;
+        var width = ClientSize.Width > 0 ? ClientSize.Width * scale : Width * scale;
+        var height = ClientSize.Height > 0 ? ClientSize.Height * scale : Height * scale;
+        var x = screen.WorkingArea.X + (screen.WorkingArea.Width - width) / 2;
+        var y = screen.WorkingArea.Y + (screen.WorkingArea.Height - height) / 2;
+        Position = new PixelPoint((int)x, (int)y);
     }
 
     // ───────────────────────── 控制器事件 → 渲染 ─────────────────────────
@@ -2661,7 +2651,6 @@ public partial class MainWindow : Window
     protected override void OnClosing(WindowClosingEventArgs e)
     {
         // 点关闭 = 隐藏（气泡仍常驻；退出走气泡右键菜单）；系统退出请求（App 已判定空闲）放行真正关闭
-        SaveBoundsNow();
         if (App.IsQuitting)
         {
             base.OnClosing(e);

@@ -487,7 +487,7 @@ public partial class ModelSettingsWindow : WindowBase
     {
         if (SkillsListPanel is null) return;
         SkillsListPanel.Children.Clear();
-        var skills = App.Controller.GetSkills();
+        var skills = App.Controller.GetSkills(includeDisabled: true);
         if (skills.Count == 0)
         {
             SkillsListPanel.Children.Add(new TextBlock
@@ -526,17 +526,62 @@ public partial class ModelSettingsWindow : WindowBase
                 });
             }
             Grid.SetColumn(textPanel, 0);
+            var name = skill.Name;
+            var actions = new StackPanel
+            {
+                Orientation = Avalonia.Layout.Orientation.Horizontal,
+                Spacing = 10,
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+            };
+            // 启用开关：停用不删文件，仅从技能清单/主索引中屏蔽（减少预加载 token）
+            var toggle = new ToggleSwitch
+            {
+                IsChecked = skill.Enabled,
+                OnContent = "",
+                OffContent = "",
+                MinWidth = 0,
+            };
+            var isMaster = string.Equals(name, AgentBrook.Agent.Skills.MasterIndex.SkillName, StringComparison.OrdinalIgnoreCase);
+            ToolTip.SetTip(toggle, I18n.T(isMaster ? "ui.skill.master.tip" : "ui.skill.toggle.tip"));
+            if (isMaster)
+            {
+                toggle.IsEnabled = false;
+            }
+            toggle.IsCheckedChanged += (_, _) =>
+            {
+                if (isMaster) return;
+                var on = toggle.IsChecked == true;
+                try
+                {
+                    if (App.Controller.SetSkillEnabled(name, on))
+                    {
+                        card.Opacity = on ? 1 : 0.55;
+                        if (_skillsHint is not null) _skillsHint.Text =
+                            I18n.T(on ? "ui.skill.enabled.value" : "ui.skill.disabled.value", name);
+                    }
+                    else if (_skillsHint is not null)
+                    {
+                        _skillsHint.Text = I18n.T("ui.skill.not.found");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    if (_skillsHint is not null) _skillsHint.Text = ex.Message;
+                }
+            };
             var delBtn = new Button
             {
                 Content = I18n.T("ui.delete.skill"),
                 Classes = { "dangerBtn" },
                 VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
             };
-            var name = skill.Name;
             delBtn.Click += (_, _) => DeleteSkill(name);
-            Grid.SetColumn(delBtn, 1);
+            actions.Children.Add(toggle);
+            actions.Children.Add(delBtn);
+            Grid.SetColumn(actions, 1);
+            if (!skill.Enabled) card.Opacity = 0.55;
             grid.Children.Add(textPanel);
-            grid.Children.Add(delBtn);
+            grid.Children.Add(actions);
             card.Child = grid;
             SkillsListPanel.Children.Add(card);
         }

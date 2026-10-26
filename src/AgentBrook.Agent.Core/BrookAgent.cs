@@ -160,6 +160,17 @@ public sealed class BrookAgent : IAsyncDisposable
         return false;
     }
 
+    /// <summary>启用/停用技能并重建主能力索引（停用后不再预加载，文件保留可随时恢复）。</summary>
+    public bool SetSkillEnabled(string name, bool enabled)
+    {
+        if (_skillStore.SetEnabled(name, enabled))
+        {
+            _refreshMasterIndex?.Invoke();
+            return true;
+        }
+        return false;
+    }
+
     /// <summary>创建并初始化智能体（模型客户端、MCP、记忆、技能、会话恢复）。</summary>
     public static async Task<BrookAgent> CreateAsync(
         AppConfig config,

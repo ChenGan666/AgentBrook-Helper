@@ -85,8 +85,6 @@ internal static class UiPrefs
 /// <summary>悬浮气泡位置（屏幕逻辑坐标）。</summary>
 internal sealed record BubblePos(int X, int Y);
 
-/// <summary>对话窗口位置与尺寸（PixelPoint 全局像素坐标 + DIP 宽高）。</summary>
-internal sealed record ConvWinBounds(int X, int Y, double Width, double Height);
 
 /// <summary>个性化设置：助手名字与气泡图标（提示音偏好带默认值，旧配置文件缺字段时自动补全）。</summary>
 internal sealed record AssistantSettings(

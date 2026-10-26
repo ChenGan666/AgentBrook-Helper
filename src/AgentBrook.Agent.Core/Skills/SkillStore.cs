@@ -21,8 +21,40 @@ public sealed class SkillStore
         _workspaceRoot = workspaceRoot;
     }
 
-    /// <summary>实时扫描技能清单。</summary>
+    /// <summary>实时扫描技能清单（仅启用项，模型侧使用）。</summary>
     public IReadOnlyList<SkillInfo> Current => SkillRegistry.Load(_skillsDir, _workspaceRoot);
+
+    /// <summary>实时扫描技能清单（含已停用项，管理界面使用）。</summary>
+    public IReadOnlyList<SkillInfo> All => SkillRegistry.Load(_skillsDir, _workspaceRoot, includeDisabled: true);
+
+    /// <summary>启用/停用技能：停用写入 .disabled 标记，启用则移除。主索引等清单立即生效（下次会话不再预加载）。</summary>
+    public bool SetEnabled(string name, bool enabled)
+    {
+        var skill = All.FirstOrDefault(s =>
+            string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(Path.GetFileName(s.SkillDirectory), name, StringComparison.OrdinalIgnoreCase));
+        if (skill is null)
+        {
+            return false;
+        }
+        var marker = Path.Combine(skill.SkillDirectory, SkillInfo.DisabledMarker);
+        try
+        {
+            if (enabled)
+            {
+                if (File.Exists(marker)) File.Delete(marker);
+            }
+            else if (!File.Exists(marker))
+            {
+                File.WriteAllText(marker, "");
+            }
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     /// <summary>技能名规范化：小写、空格转连字符、剔除非法字符。</summary>
     public static string SanitizeName(string name)
@@ -190,7 +222,7 @@ public sealed class SkillStore
     /// <summary>删除指定技能（按名称，不区分大小写），成功返回 true。</summary>
     public bool DeleteSkill(string name)
     {
-        var skill = Current.FirstOrDefault(s =>
+        var skill = All.FirstOrDefault(s =>
             string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));
         if (skill is null)
         {
