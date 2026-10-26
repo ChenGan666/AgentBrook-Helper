@@ -20,7 +20,8 @@ public partial class App : Application
     /// <summary>空闲时收到系统退出请求即置位；气泡/对话窗 OnClosing 据此放行真正关闭。</summary>
     public static bool IsQuitting { get; private set; }
 
-    public static void ShowA2AWindow()
+    /// <param name="focusNodeId">可选：按伙伴 NodeId 选中与其已有的 Peer 会话（伙伴气泡点击入口）。</param>
+    public static void ShowA2AWindow(string? focusNodeId = null)
     {
         try
         {
@@ -37,6 +38,10 @@ public partial class App : Application
 
             _a2aWindow.Activate();
             _a2aWindow.Focus();
+            if (!string.IsNullOrWhiteSpace(focusNodeId))
+            {
+                _a2aWindow.FocusPeer(focusNodeId);
+            }
         }
         catch (Exception ex)
         {

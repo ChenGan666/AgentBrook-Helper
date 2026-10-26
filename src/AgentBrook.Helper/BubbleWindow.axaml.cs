@@ -44,6 +44,13 @@ public partial class BubbleWindow : Window
     private double _orbitPhase;                     // 当前环相位（弧度，0 = 第一个图标在正上方）
     private DispatcherTimer? _orbitTimer;
 
+    /// <summary>伙伴气泡：局域网在线已配对 Helper 头像（状态/布局/动画见 LanPeerBubbles.cs）。</summary>
+    private readonly LanPeerBubbleController _peerBubbles;
+    private readonly Canvas _peerLayer;
+    private readonly Canvas _peerHoverLayer;
+    private readonly TranslateTransform _peerShift = new();
+    private readonly TranslateTransform _peerHoverShift = new();
+
     public BubbleWindow()
     {
         InitializeComponent();
@@ -57,6 +64,10 @@ public partial class BubbleWindow : Window
         _orbitLayer = this.FindControl<Canvas>("OrbitLayer")!;
         _toastPanel = this.FindControl<StackPanel>("ToastPanel")!;
         var root = this.FindControl<Panel>("Root")!;
+        _peerLayer = this.FindControl<Canvas>("PeerLayer")!;
+        _peerHoverLayer = this.FindControl<Canvas>("PeerHoverLayer")!;
+        _peerLayer.RenderTransform = _peerShift;
+        _peerHoverLayer.RenderTransform = _peerHoverShift;
 
         // 磁吸贴边：把 XAML 的纯缩放变换升级为「缩放+平移」组合，平移量由贴边逻辑驱动
         // （Root 与 OrbitLayer 必须同步平移，轨道图标才能跟着气泡一起半隐/滑出；
@@ -105,6 +116,46 @@ public partial class BubbleWindow : Window
             SetDockExpanded(true);    // 磁吸贴边：鼠标滑过滑入屏内全部可见
         };
         root.PointerExited += (_, _) => ScheduleDockCollapse();
+
+        // 伙伴气泡：主球与头像区域视为同一交互区，在两者间移动不会误收拢
+        _peerBubbles = new LanPeerBubbleController(_peerLayer, _peerHoverLayer, PeerCenter, PeerExpandBounds,
+            IsPointerInPeerZone, App.A2A.Controller);
+        _peerBubbles.FootprintChanged += () =>
+        {
+            UpdateToastOffset();
+            EnsureAutoHeight();
+            UpdateWindowLayoutMode();
+            UpdateClickThroughRegion();
+        };
+        _peerBubbles.PeerClicked += nodeId => App.ShowA2AWindow(nodeId);
+        _peerBubbles.MoreClicked += () => App.ShowA2AWindow();
+        _peerBubbles.DragRequested += e =>
+        {
+            try
+            {
+                BeginMoveDrag(e);
+            }
+            catch
+            {
+                // 拖动不可用时忽略，不影响头像交互
+            }
+        };
+        root.PointerEntered += (_, _) => _peerBubbles.OnPointerEntered();
+        root.PointerExited += (_, _) => _peerBubbles.OnPointerExited();
+        foreach (var layer in new[] { _peerLayer, _peerHoverLayer })
+        {
+            layer.PointerEntered += (_, _) =>
+            {
+                _collapseTimer?.Stop();
+                _peerBubbles.OnPointerEntered();
+            };
+            layer.PointerExited += (_, _) =>
+            {
+                _peerBubbles.OnPointerExited();
+                ScheduleDockCollapse();
+            };
+        }
+        Closed += (_, _) => _peerBubbles.Dispose();
 
         // 提示卡加入后 Bounds 才在布局完成时生效；逐次布局监听，尺寸变化即刷新命中区
         // （否则 Windows 上 SetWindowRgn 会把新卡片裁成只剩一条边框）
@@ -319,6 +370,7 @@ public partial class BubbleWindow : Window
     {
         _collapseTimer?.Stop();
         SetDockExpanded(true);   // 贴边半隐时来提示卡：先滑出全部，避免卡片被屏幕边裁掉
+        EnsureAutoHeight();      // 窗口高度若被固定，恢复随内容增长，否则新卡片会被窗口底边裁掉
         var card = new Border
         {
             Background = new SolidColorBrush(Color.Parse("#ee2a2a2a")),
@@ -405,6 +457,7 @@ public partial class BubbleWindow : Window
         _toastPanel.Children.Remove(card);
         // 强制重新测量并收缩窗口，避免卡片移除后仍残留透明命中区
         _toastPanel.InvalidateMeasure();
+        EnsureAutoHeight();
         this.InvalidateMeasure();
         Dispatcher.UIThread.Post(() =>
         {
@@ -592,7 +645,7 @@ public partial class BubbleWindow : Window
     {
         if (!OperatingSystem.IsMacOS()) return;
         StopDockSlide();   // 紧凑/展开切换的位置补偿与滑动动画互斥，先停
-        var needCompact = _toastPanel.Children.Count == 0 && _orbit.Count == 0;
+        var needCompact = _toastPanel.Children.Count == 0 && _orbit.Count == 0 && !(_peerBubbles?.NeedsFullWindow ?? false);
         if (needCompact == _compactMode || !IsVisible) return;
 
         const double compactSize = 120.0;
@@ -629,7 +682,74 @@ public partial class BubbleWindow : Window
             _compactMode = false;
         }
         ReapplyDock();   // 贴边中：窗口按新模式重新贴齐、平移量重算
+        _peerBubbles?.Reposition();   // 圆心随模式变化，伙伴头像同步坐标
     }
+
+    // ───────────────────────── 伙伴气泡：圆心 / 展开边界 / 交互区 ─────────────────────────
+    /// <summary>气泡圆心在伙伴画布中的坐标（贴边平移由画布变换承担）。</summary>
+    private Point PeerCenter()
+    {
+        var (cx, cy, _) = BubbleLayout();
+        return new Point(cx, cy);
+    }
+
+    /// <summary>展开可用矩形（相对可见圆心，DIP）：窗口范围（向下可加高）∩ 圆心所在显示器工作区。</summary>
+    private Rect PeerExpandBounds()
+    {
+        var (cx, cy, w) = BubbleLayout();
+        const double m = LanPeerBubbleOptions.EdgeMargin;
+        var vx = cx + _rootShift.X;
+        var vy = cy + _rootShift.Y;
+        var left = -vx + m;
+        var right = w - vx - m;
+        var top = -vy + m;
+        var bottom = LanPeerBubbleOptions.ExpandedMaxBottom;
+        // Windows 的 PixelPoint/WorkingArea 为物理像素需按缩放换算；macOS 为点单位（与贴边逻辑一致）
+        var scale = OperatingSystem.IsMacOS() ? 1.0 : RenderScaling;
+        var centerPx = new PixelPoint(Position.X + (int)Math.Round(vx * scale), Position.Y + (int)Math.Round(vy * scale));
+        var screen = Screens.All.FirstOrDefault(s => s.WorkingArea.Contains(centerPx)) ?? Screens.Primary;
+        if (screen is not null)
+        {
+            var a = screen.WorkingArea;
+            left = Math.Max(left, (a.X - centerPx.X) / scale + m);
+            right = Math.Min(right, (a.Right - centerPx.X) / scale - m);
+            top = Math.Max(top, (a.Y - centerPx.Y) / scale + m);
+            bottom = Math.Min(bottom, (a.Bottom - centerPx.Y) / scale - m);
+        }
+        return new Rect(left, top, Math.Max(0, right - left), Math.Max(0, bottom - top));
+    }
+
+    /// <summary>
+    /// 窗口高度自适应守护：Avalonia 在原生拖动循环中收到尺寸变化时会把它当作用户调整，
+    /// 自动关闭 SizeToContent 并固定当时的高度（头像展开/收拢会改变窗口高度），之后提示卡就会被裁掉。
+    /// 非紧凑模式下发现被关闭即恢复。
+    /// </summary>
+    private void EnsureAutoHeight()
+    {
+        if (_compactMode || SizeToContent == SizeToContent.Height)
+        {
+            return;
+        }
+        ClearValue(HeightProperty);
+        SizeToContent = SizeToContent.Height;
+    }
+
+    /// <summary>有在线伙伴时把提示卡下移到收拢头像下方，互不遮挡。</summary>
+    private void UpdateToastOffset()
+    {
+        const double defaultTop = 110;
+        var top = _peerBubbles?.HasPeers == true
+            ? Math.Max(defaultTop, 72 + LanPeerBubbleOptions.CollapsedArcRadius + LanPeerBubbleOptions.CollapsedSize / 2 + 6)
+            : defaultTop;
+        if (Math.Abs(_toastPanel.Margin.Top - top) > 0.1)
+        {
+            _toastPanel.Margin = new Thickness(0, top, 0, 0);
+        }
+    }
+
+    /// <summary>指针是否仍在主球或伙伴气泡区域内。</summary>
+    private bool IsPointerInPeerZone() =>
+        this.FindControl<Panel>("Root")!.IsPointerOver || _peerLayer.IsPointerOver || _peerHoverLayer.IsPointerOver;
 
     // ───────────────────────── 处理中：中心齿轮慢速自转 ─────────────────────────
     private const int GearFrameCount = 72;        // 预生成帧数（每帧 5°）
@@ -902,6 +1022,10 @@ public partial class BubbleWindow : Window
         _rootShift.Y = y;
         _orbitShift.X = x;
         _orbitShift.Y = y;
+        _peerShift.X = x;
+        _peerShift.Y = y;
+        _peerHoverShift.X = x;
+        _peerHoverShift.Y = y;
         UpdateClickThroughRegion();   // 半隐平移后可见半圆位置改变，命中区同步（否则 Windows 悬停穿透无法展开）
     }
 
@@ -1045,7 +1169,7 @@ public partial class BubbleWindow : Window
     private void CollapseTick(object? sender, EventArgs e)
     {
         _collapseTimer!.Stop();
-        if (_toastPanel.Children.Count == 0)
+        if (_toastPanel.Children.Count == 0 && !IsPointerInPeerZone())
         {
             SetDockExpanded(false);   // 离开且无提示卡时滑回半隐
         }
@@ -1086,6 +1210,8 @@ public partial class BubbleWindow : Window
     {
         base.OnPointerReleased(e);
         ApplyEdgeMagnet();   // 磁吸：靠近左右上边缘自动贴边半隐；越界（含下方）弹回可视区
+        EnsureAutoHeight();        // 拖动结束：拖动期间若高度被固定则恢复自适应
+        _peerBubbles.Relayout();   // 位置变化后按新屏幕边界重算展开布局
         SavePosition();      // 拖动/点击结束：记录贴边后的位置
     }
 
@@ -1184,12 +1310,12 @@ public partial class BubbleWindow : Window
             var bubbleBottom = (int)Math.Round((cyd + 70) * scale);
             var hRgn = CreateEllipticRgn(bubbleLeft, bubbleTop, bubbleRight, bubbleBottom);
 
-            // 提示卡区域：居中 228 宽，从 y=110 开始（气泡缩小后上贴），高度取实际渲染高度
+            // 提示卡区域：居中 228 宽，从 y=110 开始（气泡缩小后上贴；有伙伴头像时下移），高度取实际渲染高度
             var toastHeight = _toastPanel.Bounds.Height;
             if (toastHeight > 0)
             {
                 const double toastWidth = 228;
-                const double toastTopDip = 110;
+                var toastTopDip = _toastPanel.Margin.Top;
                 const double toastLeftDip = (240 - toastWidth) / 2.0;
                 var toastLeft = (int)Math.Round(toastLeftDip * scale);
                 var toastTop = (int)Math.Round(toastTopDip * scale);
@@ -1198,6 +1324,17 @@ public partial class BubbleWindow : Window
                 var hRect = CreateRectRgn(toastLeft, toastTop, toastRight, toastBottom);
                 CombineRgn(hRgn, hRgn, hRect, RGN_OR);
                 DeleteObject(hRect);
+            }
+
+            // 伙伴气泡展开区：展开/收拢动画期间并入圆形命中区（收拢态头像在原半径 70 范围内）
+            var peerRadius = _peerBubbles?.HitRadius ?? 0;
+            if (peerRadius > 0)
+            {
+                var hPeer = CreateEllipticRgn(
+                    (int)Math.Round((cxd - peerRadius) * scale), (int)Math.Round((cyd - peerRadius) * scale),
+                    (int)Math.Round((cxd + peerRadius) * scale), (int)Math.Round((cyd + peerRadius) * scale));
+                CombineRgn(hRgn, hRgn, hPeer, RGN_OR);
+                DeleteObject(hPeer);
             }
 
             SetWindowRgn(hwnd, hRgn, true);

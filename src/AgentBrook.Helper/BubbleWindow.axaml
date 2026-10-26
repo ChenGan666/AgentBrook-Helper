@@ -27,6 +27,9 @@
             </Canvas.RenderTransform>
         </Canvas>
 
+        <!-- 伙伴气泡命中垫层：展开时放置近透明圆垫，填补主球与头像间空隙（位于本体之下，不抢本体事件） -->
+        <Canvas x:Name="PeerHoverLayer" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+
         <!-- 气泡本体（原 96x96 结构不动，顶部居中下移 24px；0.72 视觉缩放：本体缩小20%） -->
         <Panel x:Name="Root" Width="96" Height="96"
                HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,24,0,0"
@@ -86,6 +89,9 @@
                   HorizontalAlignment="Center" VerticalAlignment="Center"
                   Fill="#ffffff" Stretch="Uniform"/>
         </Panel>
+
+        <!-- 伙伴气泡层：局域网在线已配对 Helper 头像（收拢叠放于本体下半部，悬停展开） -->
+        <Canvas x:Name="PeerLayer" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
 
         <!-- 提示卡堆（问候语 / 审批快捷操作 / 提问提醒），气泡下方 -->
         <StackPanel x:Name="ToastPanel" Width="228" Spacing="8"

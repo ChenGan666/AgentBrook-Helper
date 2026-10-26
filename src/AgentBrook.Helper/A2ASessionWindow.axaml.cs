@@ -32,6 +32,9 @@ public partial class A2ASessionWindow : Window
     private TextBox? _sendBox;
     private int _mentionStart = -1;
     private bool _suppressMentionUpdate;
+    // 伙伴气泡点击：待定位的伙伴 NodeId（会话索引首次加载完成后应用）
+    private string? _pendingFocusNodeId;
+    private bool _loadedOnce;
 
     public A2ASessionWindow()
     {
@@ -174,6 +177,8 @@ public partial class A2ASessionWindow : Window
         {
             ApplyWindowLanguage();
             await _viewModel.RefreshAsync();
+            _loadedOnce = true;
+            ApplyPendingFocus();
             _timer.Start();
         };
         Closed += (_, _) =>
@@ -182,6 +187,33 @@ public partial class A2ASessionWindow : Window
             I18n.LanguageChanged -= ApplyWindowLanguage;
             _viewModel.Dispose();
         };
+    }
+
+    /// <summary>按伙伴 NodeId 选中与其已有的 Peer 会话；没有会话时仅打开窗口（不新建会话、不改协议）。</summary>
+    public void FocusPeer(string nodeId)
+    {
+        _pendingFocusNodeId = nodeId;
+        if (_loadedOnce)
+        {
+            ApplyPendingFocus();
+        }
+    }
+
+    private void ApplyPendingFocus()
+    {
+        var nodeId = _pendingFocusNodeId;
+        _pendingFocusNodeId = null;
+        if (nodeId is null || _peerSessionList is null)
+        {
+            return;
+        }
+        var item = _viewModel.PeerSessions.FirstOrDefault(x =>
+            x.Session.Kind != AgentBrook.A2A.Core.Sessions.SessionKind.Group &&
+            x.Session.Members.Any(m => string.Equals(m.NodeId, nodeId, StringComparison.Ordinal)));
+        if (item is not null)
+        {
+            _peerSessionList.SelectedItem = item;
+        }
     }
 
     /// <summary>刷新 A2A 窗口中的静态文案；列表模板中的按钮在虚拟化后也会被覆盖。</summary>
