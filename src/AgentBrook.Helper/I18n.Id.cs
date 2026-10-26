@@ -432,6 +432,7 @@ internal static partial class I18n
         ["peer.state.busy"] = "Sibuk",
         ["peer.state.awaiting"] = "Menunggu pengguna",
         ["peer.state.unavailable"] = "Tidak tersedia",
+        ["models.refreshed"] = "Daftar model diperbarui: {0}",
         ["a2a.peer.sessions"] = "SESI PEER",
         ["a2a.group.sessions"] = "SESI GRUP",
         ["a2a.pair"] = "Pasangkan",

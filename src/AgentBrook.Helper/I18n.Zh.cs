@@ -432,6 +432,7 @@ internal static partial class I18n
         ["peer.state.busy"] = "忙碌",
         ["peer.state.awaiting"] = "等待用户",
         ["peer.state.unavailable"] = "不可用",
+        ["models.refreshed"] = "模型列表已更新：{0}",
         ["a2a.peer.sessions"] = "PEER SESSIONS",
         ["a2a.group.sessions"] = "GROUP SESSIONS",
         ["a2a.pair"] = "配对",

@@ -432,6 +432,7 @@ internal static partial class I18n
         ["peer.state.busy"] = "Busy",
         ["peer.state.awaiting"] = "Awaiting user",
         ["peer.state.unavailable"] = "Unavailable",
+        ["models.refreshed"] = "Model list updated: {0}",
         ["a2a.peer.sessions"] = "PEER SESSIONS",
         ["a2a.group.sessions"] = "GROUP SESSIONS",
         ["a2a.pair"] = "Pair",

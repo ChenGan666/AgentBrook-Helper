@@ -609,6 +609,10 @@ public sealed class AssistantController : IBrookInteraction
             Console.Error.WriteLine($"[models-refresh] {line}");
             // 气泡/对话窗可见提示（与初始化日志同通道）
             EventRaised?.Invoke(new BrookEvent.ToolStarted("log:" + line, null));
+            // 气泡弹出提示卡：新增/下架摘要，自动关闭；点击不弹对话窗
+            var summary = I18n.T("models.refreshed", string.Join("；", changes));
+            Dispatcher.UIThread.Post(() =>
+                Bubble?.ShowToast(summary, "#4a9eff", autoClose: TimeSpan.FromSeconds(15)));
         }
         catch (Exception ex)
         {
