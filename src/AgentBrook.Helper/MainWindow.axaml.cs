@@ -77,11 +77,15 @@ public partial class MainWindow : Window
     private DateTime _lastPasteAttempt = DateTime.MinValue;
     private ChatMessage? _lastUserMessage;
 
-    // 执行过程折叠组：同一回合的工具调用/结果/自动批准收进一组，默认收起
-    private Expander? _execGroup;
-    private TextBlock? _execHeader;
+    // 统一交互容器类型图标
+    private const string IconTerminal = "M4 5h16v14H4V5zm2 3v2l2 2-2 2v2l4-4-4-4zm7 7h4v2h-4v-2z";
+    private const string IconShield = "M12 2l8 3v6c0 5-3.5 9.5-8 11-4.5-1.5-8-6-8-11V5l8-3z";
+    private const string IconQuestion = "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1.2 15.2v-2.4h2.4v2.4h-2.4zm.3-10.9a3.9 3.9 0 0 1 4 3.9c0 1.7-1.1 2.4-2 3-.6.4-1 .7-1 1.5h-2.2c0-1.6.9-2.3 1.8-2.9.7-.5 1.2-.9 1.2-1.6a1.9 1.9 0 0 0-3.8 0H7.2a3.9 3.9 0 0 1 3.9-3.9z";
+
+    // 执行过程：同一回合的工具调用/结果收进统一交互容器（终端类型）
+    private InteractionCard? _execCard;
     private StackPanel? _execContent;
-    private int _execCount;
+    private string? _execLastLine;
 
     public MainWindow()
     {
@@ -858,10 +862,9 @@ public partial class MainWindow : Window
                     _chatPanel!.Children.Clear();
                     _streamViewer = null;
                     _lastRenderedAnswer = null;
-                    _execGroup = null;
-                    _execHeader = null;
+                    _execCard = null;
                     _execContent = null;
-                    _execCount = 0;
+                    _execLastLine = null;
                     _lastKnownTotal = 0;   // 新会话：历史光标归零
                     _visibleFromEnd = 0;
                     _historyExhausted = false;
@@ -1175,9 +1178,24 @@ public partial class MainWindow : Window
         return t.Length <= max ? t : t[..max] + "…";
     }
 
+    /// <summary>决议完成：交互卡状态落定，内容区替换为单行结果并默认外层折叠。</summary>
+    private static void ResolveCard(InteractionCard card, string line, InteractionState state)
+    {
+        card.SetState(state);
+        card.SetSummary(line);   // 折叠后头部仍可看到结果摘要
+        card.Collapse();
+        card.SetContent(new TextBlock
+        {
+            Classes = { "procLine" },
+            Text = line,
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.9,
+        });
+    }
+
     public void AddApprovalCard(string tool, string? argsJson, TaskCompletionSource<ApprovalDecision> tcs)
     {
-        var card = new Border { Classes = { "card" } };
+        InteractionCard card = null!;   // 内容装配完成后在底部构造；回调均在决议时触发
         var stack = new StackPanel { Spacing = 8 };
         stack.Children.Add(new TextBlock
         {
@@ -1187,9 +1205,10 @@ public partial class MainWindow : Window
             Foreground = new SolidColorBrush(Color.Parse("#9a9a9a")),
         });
         // 提要：用户看得懂的一句人话（本地规则翻译，详见 SummarizeApproval）
+        var summary = SummarizeApproval(tool, argsJson);
         stack.Children.Add(new TextBlock
         {
-            Text = SummarizeApproval(tool, argsJson),
+            Text = summary,
             FontSize = 16,
             FontWeight = FontWeight.Medium,
             TextWrapping = TextWrapping.Wrap,
@@ -1251,41 +1270,22 @@ public partial class MainWindow : Window
             Foreground = new SolidColorBrush(Color.Parse("#8a8a8a")),
         };
 
-        void LockButtons()
-        {
-            ok.IsEnabled = false;
-            full.IsEnabled = false;
-            no.IsEnabled = false;
-        }
-        void FoldCard()
-        {
-            LockButtons();
-            if (argsExpander is not null) argsExpander.IsExpanded = false;
-            reasonBox.IsVisible = false;
-            row.IsVisible = false;
-        }
         ok.Click += (_, _) =>
         {
-            FoldCard();
-            card.Classes.Add("resolved");
-            hint.Text = I18n.T("ui.approved");
+            ResolveCard(card, $"{summary} {I18n.T("ui.approved")}", InteractionState.Done);
             tcs.TrySetResult(ApprovalDecision.Approve());
         };
         full.Click += (_, _) =>
         {
-            FoldCard();
-            card.Classes.Add("resolved");
-            hint.Text = I18n.T("ui.full.access.granted.actions.auto.approved.this.session.resets.on.restart");
+            ResolveCard(card, $"{summary} {I18n.T("ui.approved.2")} · {I18n.T("ui.full.access")}", InteractionState.Done);
             _controller.FullAccess = true;
             UpdateFullAccessVisual();   // 芯片与 tooltip 同步
             tcs.TrySetResult(ApprovalDecision.Approve());
         };
         no.Click += (_, _) =>
         {
-            FoldCard();
             var reason = reasonBox.Text?.Trim();
-            card.Classes.Add("resolved");
-            hint.Text = I18n.T("ui.value.2", string.IsNullOrEmpty(reason) ? "" : $"：{reason}");
+            ResolveCard(card, $"{summary} {I18n.T("ui.value.2", string.IsNullOrEmpty(reason) ? "" : $"：{reason}")}", InteractionState.Rejected);
             tcs.TrySetResult(ApprovalDecision.Reject(reason));
         };
         // 回合被用户停止时：卡片作废标注（TrySetCanceled 由控制器触发）
@@ -1293,31 +1293,25 @@ public partial class MainWindow : Window
         {
             if (!t.IsCanceled) return;
             Dispatcher.UIThread.Post(() =>
-            {
-                FoldCard();
-                card.Classes.Add("resolved");
-                hint.Text = I18n.T("ui.message.2");
-            });
+                ResolveCard(card, $"{summary} {I18n.T("ui.message.2")}", InteractionState.Cancelled));
         }, TaskScheduler.Default);
-        // 在气泡快捷卡上被决议（外部 TrySetResult）时：同步锁定并标注本卡状态
+        // 在气泡快捷卡上被决议（外部 TrySetResult）时：同步折叠本卡为单行结果
         tcs.Task.ContinueWith(t =>
         {
             if (t.Status != TaskStatus.RanToCompletion) return;
             var d = t.Result;
             Dispatcher.UIThread.Post(() =>
-            {
-                FoldCard();
-                card.Classes.Add("resolved");
-                hint.Text = d.Approved
-                    ? I18n.T("ui.approved")
-                    : I18n.T("ui.rejected.value", d.Reason ?? "");
-            });
+                ResolveCard(card, d.Approved
+                    ? $"{summary} {I18n.T("ui.approved")}"
+                    : $"{summary} {I18n.T("ui.value.2", string.IsNullOrEmpty(d.Reason) ? "" : $"：{d.Reason}")}",
+                    d.Approved ? InteractionState.Done : InteractionState.Rejected));
         }, TaskScheduler.Default);
 
         stack.Children.Add(reasonBox);
         stack.Children.Add(row);
         stack.Children.Add(hint);
-        card.Child = stack;
+        card = new InteractionCard(I18n.T("ui.card.authorization"), stack,
+            InteractionState.Pending, I18n.T("ui.state.waitauth"), IconShield);
         _chatPanel!.Children.Add(card);
         ScrollToEnd();
     }
@@ -1326,7 +1320,7 @@ public partial class MainWindow : Window
     {
 
 
-        var card = new Border { Classes = { "card", "ask" } };
+        InteractionCard card = null!;   // 内容装配完成后在底部构造
         var stack = new StackPanel { Spacing = 8 };
         stack.Children.Add(new TextBlock
         {
@@ -1354,22 +1348,16 @@ public partial class MainWindow : Window
         var answerBtn = new Button { Content = I18n.T("ui.answer"), Classes = { "actionOk" } };
         var choicesRow = new WrapPanel { Orientation = Orientation.Horizontal };
 
+        var prefix = string.IsNullOrWhiteSpace(choices)
+            ? I18n.T("ui.needs.your.input")
+            : I18n.T("ui.needs.your.choice");
         void Submit(string text)
         {
             if (string.IsNullOrWhiteSpace(text))
             {
                 return;
             }
-            card.Classes.Add("resolved");
-            stack.Children.Add(new TextBlock
-            {
-                Text = I18n.T("ui.you.answered.value", text),
-                FontSize = 12.5,
-                Foreground = new SolidColorBrush(Color.Parse("#8a8a8a")),
-            });
-            choicesRow.Children.Clear();
-            answerBox.IsEnabled = false;
-            answerBtn.IsEnabled = false;
+            ResolveCard(card, $"{prefix}：{Cut(question, 60)} → {Cut(text, 60)}", InteractionState.Done);
             tcs.TrySetResult(text);
         }
 
@@ -1406,7 +1394,12 @@ public partial class MainWindow : Window
         row.Children.Add(answerBox);
         row.Children.Add(answerBtn);
         stack.Children.Add(row);
-        card.Child = stack;
+        var hasChoices = !string.IsNullOrWhiteSpace(choices);
+        card = new InteractionCard(
+            I18n.T(hasChoices ? "ui.card.selection" : "ui.card.answer"), stack,
+            InteractionState.Pending,
+            I18n.T(hasChoices ? "ui.state.waitselect" : "ui.state.waitanswer"),
+            IconQuestion);
         _chatPanel!.Children.Add(card);
         ScrollToEnd();
     }
@@ -1748,54 +1741,46 @@ public partial class MainWindow : Window
         ScrollToEnd();
     }
 
-    /// <summary>执行过程行：收进当前回合的折叠组（无组则先创建），不挤占主内容区。</summary>
+    /// <summary>执行过程行：收进当前回合的终端交互卡（无卡则先创建）。</summary>
     private void AppendToolLine(string text)
     {
         BeginExecGroupIfNeeded();
-        _execCount++;
-        _execHeader!.Text = I18n.T("ui.process.value.steps", _execCount);
 
         var line = new TextBlock
         {
             Text = text.Length > 160 ? text[..160] + "…" : text,
             TextWrapping = TextWrapping.Wrap,
+            FontSize = 12.5,
+            Foreground = new SolidColorBrush(Color.Parse("#9a9a9a")),
             Opacity = 0.85,
         };
+        _execLastLine = line.Text;
+        _execCard!.SetSummary(Cut(line.Text, 60));
         _execContent!.Children.Add(line);
         ScrollToEnd();
     }
 
     private void BeginExecGroupIfNeeded()
     {
-        if (_execGroup is not null)
+        if (_execCard is not null)
         {
             return;
         }
-        _execHeader = new TextBlock { Text = I18n.T("ui.process") };
         _execContent = new StackPanel { Spacing = 3 };
-        _execGroup = new Expander
-        {
-            Classes = { "execGroup" },
-            Header = _execHeader,
-            Content = _execContent,
-            IsExpanded = false,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            Margin = new Thickness(0, 0, 40, 0),
-        };
-        _chatPanel!.Children.Add(_execGroup);
+        _execCard = new InteractionCard(I18n.T("ui.terminal"), _execContent,
+            InteractionState.Running, iconData: IconTerminal, collapsed: true, collapsible: true);
+        _chatPanel!.Children.Add(_execCard);
         ScrollToEnd();
     }
 
     private void CollapseExecGroup()
     {
-        if (_execGroup is not null)
-        {
-            _execGroup.IsExpanded = false;
-        }
-        _execGroup = null;
-        _execHeader = null;
+        // 回合结束：状态置为已完成并外层折叠，保持主内容清爽
+        _execCard?.SetState(InteractionState.Done);
+        _execCard?.Collapse();
+        _execCard = null;
         _execContent = null;
-        _execCount = 0;
+        _execLastLine = null;
     }
 
     private void ScrollToEnd()
@@ -2478,41 +2463,52 @@ public partial class MainWindow : Window
             }
             else
             {
+                // 剪贴板含文本时直接交给输入框默认粘贴：
+                // 平台兜底要起子进程（PowerShell/osascript），纯文本场景绝不能走到，否则 UI 卡 1~4 秒
+                var clipText = await clipboard.TryGetTextAsync();
+                if (!string.IsNullOrEmpty(clipText))
+                {
+                    return;
+                }
                 // 平台兜底：TryGetBitmapAsync 读不到的剪贴板位图（截图工具/聊天软件只放 DIB/TIFF/PNGf 的场景），
-                // macOS 经 osascript 写出 PNGf；Windows 经 PowerShell 读位图
+                // macOS 经 osascript 写出 PNGf；Windows 经 PowerShell 读位图。
+                // 子进程在线程池等待，不阻塞 UI 线程。
                 Console.Error.WriteLine("[paste] 进入平台兜底读取剪贴板图片");
                 var tmp = Path.Combine(Path.GetTempPath(), $"clip-{Guid.NewGuid():N}.png");
-                if (OperatingSystem.IsMacOS())
+                await Task.Run(() =>
                 {
-                    var script =
-                        "set pngData to (the clipboard as «class PNGf»)\n" +
-                        $"set f to open for access POSIX file \"{tmp}\" with write permission\n" +
-                        "set eof f to 0\n" +
-                        "write pngData to f\n" +
-                        "close access f";
-                    var psi = new System.Diagnostics.ProcessStartInfo("/usr/bin/osascript", $"-e \"{script.Replace("\"", "\\\"")}\"")
+                    if (OperatingSystem.IsMacOS())
                     {
-                        CreateNoWindow = true,
-                        UseShellExecute = false,
-                    };
-                    using var p = System.Diagnostics.Process.Start(psi);
-                    p?.WaitForExit(4000);
-                }
-                else if (OperatingSystem.IsWindows())
-                {
-                    var script =
-                        "Add-Type -AssemblyName System.Windows.Forms; " +
-                        "Add-Type -AssemblyName System.Drawing; " +
-                        "$i = [System.Windows.Forms.Clipboard]::GetImage(); " +
-                        "$i.Save('" + tmp + "', [System.Drawing.Imaging.ImageFormat]::Png)";
-                    var psi = new System.Diagnostics.ProcessStartInfo("powershell", "-NoProfile -ExecutionPolicy Bypass -Command \"" + script + "\"")
+                        var script =
+                            "set pngData to (the clipboard as «class PNGf»)\n" +
+                            $"set f to open for access POSIX file \"{tmp}\" with write permission\n" +
+                            "set eof f to 0\n" +
+                            "write pngData to f\n" +
+                            "close access f";
+                        var psi = new System.Diagnostics.ProcessStartInfo("/usr/bin/osascript", $"-e \"{script.Replace("\"", "\\\"")}\"")
+                        {
+                            CreateNoWindow = true,
+                            UseShellExecute = false,
+                        };
+                        using var p = System.Diagnostics.Process.Start(psi);
+                        p?.WaitForExit(4000);
+                    }
+                    else if (OperatingSystem.IsWindows())
                     {
-                        CreateNoWindow = true,
-                        UseShellExecute = false,
-                    };
-                    using var p = System.Diagnostics.Process.Start(psi);
-                    p?.WaitForExit(4000);
-                }
+                        var script =
+                            "Add-Type -AssemblyName System.Windows.Forms; " +
+                            "Add-Type -AssemblyName System.Drawing; " +
+                            "$i = [System.Windows.Forms.Clipboard]::GetImage(); " +
+                            "$i.Save('" + tmp + "', [System.Drawing.Imaging.ImageFormat]::Png)";
+                        var psi = new System.Diagnostics.ProcessStartInfo("powershell", "-NoProfile -ExecutionPolicy Bypass -Command \"" + script + "\"")
+                        {
+                            CreateNoWindow = true,
+                            UseShellExecute = false,
+                        };
+                        using var p = System.Diagnostics.Process.Start(psi);
+                        p?.WaitForExit(4000);
+                    }
+                });
                 if (File.Exists(tmp) && new FileInfo(tmp).Length > 0)
                 {
                     Console.Error.WriteLine("[paste] 平台兜底已读取图片");
