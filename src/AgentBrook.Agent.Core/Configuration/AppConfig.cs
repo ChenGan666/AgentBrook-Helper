@@ -53,6 +53,12 @@ public sealed class AgentOptions
     public int MaxMemoryChars { get; set; } = 24_000;
 
     /// <summary>
+    /// 记忆注入模式：full（全部记忆文件全文注入，默认）/ index（MEMORY.md 全文常驻，
+    /// 其他文件只注入文件名+首行摘要，模型需要细节时用 memory_read 按需取回，显著降低每轮输入）。
+    /// </summary>
+    public string MemoryInjectMode { get; set; } = "full";
+
+    /// <summary>
     /// 需要人工审批（HITL）才能执行的工具名列表，如 ["run_command"]。
     /// MCP 工具写带前缀的全名，如 "mcp_filesystem_write_file"。
     /// </summary>
@@ -83,6 +89,19 @@ public sealed class AgentOptions
     /// 在延迟与记忆之间取平衡；需要更长记忆可在 appsettings 调大。
     /// </summary>
     public long ContextBudgetChars { get; set; } = 120_000;
+
+    /// <summary>
+    /// 工具结果老化折叠：超过该数量的用户回合之前的工具输出（FunctionResultContent），
+    /// 全文转存到 ContextArchiveDir 下的文本文件，历史中原位替换为可恢复的占位符。
+    /// 0 表示关闭。占位符中注明存档路径，模型需要时可用 read_file 取回原文。
+    /// </summary>
+    public int ToolResultAgeTurns { get; set; } = 2;
+
+    /// <summary>折叠占位符中保留的结果摘要字符数；同时作为折叠阈值（结果 &gt; 2 倍该值才折叠）。</summary>
+    public int ToolResultFoldKeepChars { get; set; } = 300;
+
+    /// <summary>工具结果存档目录（相对工作区根目录），按会话 ID 分子目录存放。</summary>
+    public string ContextArchiveDir { get; set; } = ".ctx-archive";
 
     /// <summary>
     /// 模型回复语言（zh/en）。由设置界面保存、ApplyAssistantSettingsAsync 写回，

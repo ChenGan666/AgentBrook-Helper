@@ -43,6 +43,8 @@ public sealed class BrookAgent : IAsyncDisposable
     private string _sessionId = "";
     private string _sessionFile = "";
     private string _sessionSummaryFile = "";
+    private string _sessionIndexFile = "";   // 历史档案索引持久化文件（summaryFile + ".index"）
+    private readonly List<string> _archiveIndex = [];   // 档案索引条目：折叠的工具结果 / 被裁对话原文 → 存档路径
     private bool _titleAutoSet;   // 本会话标题是否已从首条用户消息自动生成
 
     /// <summary>会话标题自动生成/切换后触发（UI 刷新顶栏标题）。</summary>
@@ -216,7 +218,7 @@ public sealed class BrookAgent : IAsyncDisposable
         var mcpConnections = await McpToolSource.ConnectAllAsync(config.MCP, workspace, log);
         Console.Error.WriteLine($"[init] {DateTime.Now:HH:mm:ss.fff} mcp done ({mcpConnections.Count})");
 
-        var memory = new MarkdownMemoryProvider(workspace.MemoryDir, config.Agent.MaxMemoryChars);
+        var memory = new MarkdownMemoryProvider(workspace.MemoryDir, config.Agent.MaxMemoryChars, config.Agent.MemoryInjectMode);
 
         // 模型路由：子Agent/摘要等辅助角色用清单中的轻量模型（分级用模，降本提速）
         var router = new ModelRouter(config, () => providers.Active ?? activeProvider);
@@ -392,9 +394,11 @@ public sealed class BrookAgent : IAsyncDisposable
         brook._sessionId = current.Id;
         brook._sessionFile = sessions.SessionFile(current.Id);
         brook._sessionSummaryFile = sessions.SummaryFile(current.Id);
+        brook._sessionIndexFile = brook._sessionSummaryFile + ".index";
         brook._titleAutoSet = current.Title != "新对话" && current.Title != "上次会话";
         brook._historySummary = File.Exists(brook._sessionSummaryFile)
             ? File.ReadAllText(brook._sessionSummaryFile) : "";
+        brook.LoadArchiveIndex();
         brook.CurrentModel = string.IsNullOrEmpty(activeProvider.ActiveModel)
             ? activeProvider.Models.FirstOrDefault() ?? ""
             : activeProvider.ActiveModel;
@@ -662,7 +666,9 @@ public sealed class BrookAgent : IAsyncDisposable
         _sessionId = meta.Id;
         _sessionFile = _sessions.SessionFile(_sessionId);
         _sessionSummaryFile = _sessions.SummaryFile(_sessionId);
+        _sessionIndexFile = _sessionSummaryFile + ".index";
         _historySummary = "";
+        _archiveIndex.Clear();
         _titleAutoSet = false;
         _session = await _agent.CreateSessionAsync();
         await SaveSessionCoreAsync();
@@ -746,9 +752,11 @@ public sealed class BrookAgent : IAsyncDisposable
         _sessionId = id;
         _sessionFile = _sessions.SessionFile(id);
         _sessionSummaryFile = _sessions.SummaryFile(id);
+        _sessionIndexFile = _sessionSummaryFile + ".index";
         _titleAutoSet = meta.Title != "新对话";
         _historySummary = File.Exists(_sessionSummaryFile)
             ? File.ReadAllText(_sessionSummaryFile) : "";
+        LoadArchiveIndex();
         try
         {
             if (File.Exists(_sessionFile))
@@ -781,6 +789,15 @@ public sealed class BrookAgent : IAsyncDisposable
     public async Task DeleteSessionAsync(string id)
     {
         _sessions.Remove(id);
+        try
+        {
+            var archiveDir = Path.Combine(_workspace.Root, _config.Agent.ContextArchiveDir, id);
+            if (Directory.Exists(archiveDir))
+            {
+                Directory.Delete(archiveDir, recursive: true);   // 同步清理该会话的工具结果存档
+            }
+        }
+        catch { }
         if (id != _sessionId) return;
         var next = _sessions.Listed.FirstOrDefault();
         if (next is null)
@@ -906,6 +923,7 @@ public sealed class BrookAgent : IAsyncDisposable
         }
 
         SanitizeOrphanApprovals(_session);   // 上回合中断可能留下孤儿审批请求，先清理
+        DedupeMediaContextNotes(_session);   // 多模态上下文注记每轮重发：清掉旧副本，历史里只留本回合最新一条
         var compacted = await AutoCompactContextAsync(ct); // 历史超阈值时自动压缩：早期对话转前情摘要，防上下文溢出
         if (compacted.RemovedMessages > 0)
         {
@@ -1094,6 +1112,15 @@ public sealed class BrookAgent : IAsyncDisposable
         var result = await Task.Run(() => CompactTrim(), cancellationToken);
         if (result.RemovedMessages > 0)
         {
+            // 被裁掉的早期对话原文也存档进索引：摘要记结论、档案存原文，信息可寻址恢复
+            if (_droppedTranscript is { Length: > 0 } dropped)
+            {
+                var archived = ArchiveToolResult($"transcript-{result.RemovedMessages}msg", dropped);
+                if (archived is not null)
+                {
+                    AddArchiveIndexEntry($"早期对话原文(前{result.RemovedMessages}条消息) → {archived}");
+                }
+            }
             var summarized = await SummarizeDroppedAsync(_droppedTranscript, cancellationToken);
             _droppedTranscript = null;
             InjectSummaryIntoHistory();
@@ -1106,6 +1133,7 @@ public sealed class BrookAgent : IAsyncDisposable
         {
             InjectSummaryIntoHistory();   // 恢复的会话/历史重建后也保证摘要在场
         }
+        PersistArchiveIndex();
         return (result.RemovedMessages, result.EstimatedTokensBefore, result.EstimatedTokensAfter, result.RemovedMessages > 0);
     }
 
@@ -1166,6 +1194,13 @@ public sealed class BrookAgent : IAsyncDisposable
                 }
             }
 
+            // 3) 工具结果老化折叠：N 个用户回合之前的工具输出全文转存工作区存档文件，
+            //    历史原位替换为可恢复占位符（附存档路径，模型需要时 read_file 取回）——信息零丢失。
+            FoldAgedToolResults(history);
+
+            // 4) 完全相同的大块工具结果去重：同一文件/命令被反复调用时，旧副本替换为对新副本的引用
+            DedupeToolResults(history);
+
             long afterChars = history.Sum(CharsOf);
             result.EstimatedTokensAfter = afterChars / 2;
             _session.SetInMemoryChatHistory(history, null, null);
@@ -1178,6 +1213,170 @@ public sealed class BrookAgent : IAsyncDisposable
     }
 
     private string? _droppedTranscript;
+    private int _archiveSeq;   // 本会话工具结果存档文件序号（防同名覆盖）
+
+    /// <summary>
+    /// 把"超过 ToolResultAgeTurns 个用户回合"之前的工具结果折叠为占位符：
+    /// 原文写入 ContextArchiveDir/&lt;sessionId&gt;/ 存档，历史中保留 工具名+摘要+存档路径。
+    /// 折叠不改变消息结构与 CallId 配对（FunctionResultContent 原样替换 Result 文本）。
+    /// </summary>
+    private void FoldAgedToolResults(List<ChatMessage> history)
+    {
+        var ageTurns = _config.Agent.ToolResultAgeTurns;
+        var keepChars = Math.Max(80, _config.Agent.ToolResultFoldKeepChars);
+        if (ageTurns <= 0 || history.Count < 4)
+        {
+            return;
+        }
+
+        // 老化边界：从末尾数第 N 条带正文的 user 消息（审批续跑的 User 消息无正文，不计回合）。
+        // 边界之前的消息即 N 个用户回合之前的旧内容。
+        var boundary = -1;
+        var seen = 0;
+        for (var i = history.Count - 1; i >= 0; i--)
+        {
+            if (history[i].Role == ChatRole.User && !string.IsNullOrWhiteSpace(history[i].Text) && ++seen >= ageTurns)
+            {
+                boundary = i;
+                break;
+            }
+        }
+        if (boundary <= 0)
+        {
+            return;
+        }
+
+        // callId → 工具名：占位符中注明是哪个工具的结果（与 ToolCompleted 事件同一映射思路）
+        var callNames = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var m in history)
+        {
+            foreach (var c in m.Contents)
+            {
+                if (c is FunctionCallContent fc && !string.IsNullOrEmpty(fc.CallId))
+                {
+                    callNames.TryAdd(fc.CallId, fc.Name);
+                }
+            }
+        }
+
+        for (var i = 0; i < boundary; i++)
+        {
+            var msg = history[i];
+            if (IsSummaryMessage(msg)) continue;
+            for (var j = 0; j < msg.Contents.Count; j++)
+            {
+                if (msg.Contents[j] is FunctionResultContent frc
+                    && frc.Result is string txt
+                    && txt.Length > keepChars * 2)
+                {
+                    var archived = ArchiveToolResult(frc.CallId ?? $"c{i}-{j}", txt);
+                    if (archived is null)
+                    {
+                        continue;   // 存档失败则保留原文（宁可多耗 token 不丢信息）
+                    }
+                    callNames.TryGetValue(frc.CallId ?? "", out var tool);
+                    var preview = txt[..keepChars].Replace("\r", " ").Replace("\n", " ").Trim();
+                    msg.Contents[j] = new FunctionResultContent(frc.CallId ?? "",
+                        $"[{tool ?? "工具"} 结果已折叠（原 {txt.Length:N0} 字符）｜摘要：{preview}…｜" +
+                        $"完整内容已存档至 {archived}，需要原文时用 read_file 恢复]");
+                    AddArchiveIndexEntry($"{tool ?? "工具"} 结果({txt.Length:N0}字) → {archived}");
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// 大块重复工具结果去重：从最新往最旧扫描，结果文本完全相同的旧副本替换为指向新副本的短引用。
+    /// 常见于同一文件被多次 read_file、同一命令重复执行——内容零变化时旧副本是纯浪费。
+    /// </summary>
+    private void DedupeToolResults(List<ChatMessage> history)
+    {
+        var seen = new Dictionary<string, string>(StringComparer.Ordinal);   // 结果文本 → 较新副本的 callId
+        for (var i = history.Count - 1; i >= 0; i--)
+        {
+            var msg = history[i];
+            if (IsSummaryMessage(msg)) continue;
+            for (var j = 0; j < msg.Contents.Count; j++)
+            {
+                if (msg.Contents[j] is FunctionResultContent frc
+                    && frc.Result is string txt
+                    && txt.Length > Math.Max(80, _config.Agent.ToolResultFoldKeepChars) * 2)
+                {
+                    if (seen.TryGetValue(txt, out var newerCallId))
+                    {
+                        msg.Contents[j] = new FunctionResultContent(frc.CallId ?? "",
+                            $"[结果与较新一次调用（{newerCallId}）完全相同，已去重]");
+                    }
+                    else
+                    {
+                        seen[txt] = frc.CallId ?? "?";
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>登记一条档案索引（折叠的工具结果 / 被裁对话原文 → 存档路径），总量封顶最近 60 条。</summary>
+    private void AddArchiveIndexEntry(string entry)
+    {
+        _archiveIndex.Add("- " + entry);
+        if (_archiveIndex.Count > 60)
+        {
+            _archiveIndex.RemoveRange(0, _archiveIndex.Count - 60);
+        }
+    }
+
+    /// <summary>从索引文件恢复档案索引（每行一条 "- ..." 条目）。</summary>
+    private void LoadArchiveIndex()
+    {
+        _archiveIndex.Clear();
+        try
+        {
+            if (!string.IsNullOrEmpty(_sessionIndexFile) && File.Exists(_sessionIndexFile))
+            {
+                _archiveIndex.AddRange(File.ReadAllLines(_sessionIndexFile)
+                    .Where(l => l.StartsWith("- ", StringComparison.Ordinal)));
+            }
+        }
+        catch { }
+    }
+
+    /// <summary>档案索引落盘（条目少，直接全量覆写）。</summary>
+    private void PersistArchiveIndex()
+    {
+        try
+        {
+            if (!string.IsNullOrEmpty(_sessionIndexFile))
+            {
+                File.WriteAllText(_sessionIndexFile, string.Join('\n', _archiveIndex));
+            }
+        }
+        catch { }
+    }
+
+    /// <summary>把工具结果原文写入工作区存档目录，返回相对工作区根目录的路径（失败返回 null）。</summary>
+    private string? ArchiveToolResult(string callId, string content)
+    {
+        try
+        {
+            var relDir = Path.Combine(_config.Agent.ContextArchiveDir, _sessionId);
+            var dir = Path.Combine(_workspace.Root, relDir);
+            Directory.CreateDirectory(dir);
+            var safe = new string((callId ?? "call").Select(ch =>
+                char.IsLetterOrDigit(ch) || ch is '-' or '_' ? ch : '-').ToArray());
+            if (safe.Length > 40)
+            {
+                safe = safe[..40];
+            }
+            var name = $"{_archiveSeq++:D3}-{safe}-{Guid.NewGuid().ToString("N")[..4]}.txt";
+            File.WriteAllText(Path.Combine(dir, name), content);
+            return Path.Combine(relDir, name).Replace('\\', '/');
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     /// <summary>把将被裁掉的消息压成大纲文本（供摘要器浓缩；保留靠近当前的部分）。</summary>
     private static string BuildTranscript(IList<ChatMessage> history, int count)
@@ -1231,6 +1430,7 @@ public sealed class BrookAgent : IAsyncDisposable
             [
                 new ChatMessage(ChatRole.System, "你是对话摘要器。把「已有摘要」与「新裁掉的对话」合并为一份连贯的滚动摘要，供助手延续工作。" +
                     "必须保留：用户的目标与偏好、关键事实与决定、已完成的工作与产出位置、未完成/待办事项。" +
+                    "按短标签组织输出：【目标】【关键事实与决定】【产物与位置】【待办】（无内容的部分省略）。" +
                     $"直接输出摘要正文，不超过 {SummaryMaxChars / 2} 字，不要评论。"),
                 new ChatMessage(ChatRole.User, $"=== 已有摘要 ===\n{prev}\n\n=== 新裁掉的对话 ===\n{transcript}\n\n请输出合并后的滚动摘要。"),
             ], cancellationToken: cancellationToken);
@@ -1252,12 +1452,13 @@ public sealed class BrookAgent : IAsyncDisposable
         }
     }
 
-    /// <summary>把滚动摘要作为 System 消息注入/更新到历史头部（存在则原位替换，不存在则插入）。</summary>
+    /// <summary>把滚动摘要（含历史档案索引）作为 System 消息注入/更新到历史头部（存在则原位替换，不存在则插入）。</summary>
     private void InjectSummaryIntoHistory()
     {
         try
         {
-            if (string.IsNullOrWhiteSpace(_historySummary))
+            var hasSummary = !string.IsNullOrWhiteSpace(_historySummary);
+            if (!hasSummary && _archiveIndex.Count == 0)
             {
                 return;
             }
@@ -1265,7 +1466,17 @@ public sealed class BrookAgent : IAsyncDisposable
             {
                 return;
             }
-            var text = SummaryTag + "\n" + _historySummary;
+            var sb = new System.Text.StringBuilder(SummaryTag);
+            if (hasSummary)
+            {
+                sb.Append('\n').Append(_historySummary);
+            }
+            if (_archiveIndex.Count > 0)
+            {
+                sb.Append("\n\n【历史档案索引】（早期工具结果与对话原文已存档为文件，需要细节时用 read_file 按路径取回原文）\n")
+                  .Append(string.Join('\n', _archiveIndex));
+            }
+            var text = sb.ToString();
             if (history.Count > 0 && IsSummaryMessage(history[0]))
             {
                 history[0] = new ChatMessage(ChatRole.System, text);
@@ -1280,6 +1491,37 @@ public sealed class BrookAgent : IAsyncDisposable
         {
             // 注入失败不影响主流程
         }
+    }
+
+    /// <summary>
+    /// 清理历史中的多模态上下文注记（"[系统上下文·不计入回复]" 开头的 System 消息）。
+    /// 该注记描述的是"当前已选媒体模型"这一易变状态，每轮都会随新消息重发一条；
+    /// 旧副本留在历史中只会徒耗 token 且信息过期，这里统一移除（本回合的新注记随后随用户消息进入历史）。
+    /// </summary>
+    private static void DedupeMediaContextNotes(AgentSession session)
+    {
+        try
+        {
+            if (!session.TryGetInMemoryChatHistory(out var history, null, null) || history is null)
+            {
+                return;
+            }
+            var removed = 0;
+            for (var i = history.Count - 1; i >= 0; i--)
+            {
+                if (history[i].Role == ChatRole.System
+                    && (history[i].Text ?? "").StartsWith("[系统上下文·不计入回复]", StringComparison.Ordinal))
+                {
+                    history.RemoveAt(i);
+                    removed++;
+                }
+            }
+            if (removed > 0)
+            {
+                session.SetInMemoryChatHistory(history, null, null);
+            }
+        }
+        catch { }
     }
 
     /// <summary>
@@ -1338,6 +1580,7 @@ public sealed class BrookAgent : IAsyncDisposable
         {
             SanitizeOrphanApprovals(_session);
             CompactTrim();
+            PersistArchiveIndex();   // 本次裁剪/折叠若产生新索引条目，随会话一并落盘
             var serialized = await _agent.SerializeSessionAsync(_session);
             var dir = Path.GetDirectoryName(_sessionFile);
             if (!string.IsNullOrEmpty(dir))

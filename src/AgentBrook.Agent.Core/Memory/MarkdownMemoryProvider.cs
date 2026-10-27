@@ -9,10 +9,13 @@ namespace AgentBrook.Agent.Memory;
 /// 每轮运行前把 memory 目录下的 .md 文件内容注入为附加指令（AIContext.Instructions），
 /// 写入则由 <see cref="MemoryTools"/> 提供的模型可见工具完成。
 /// </summary>
-public sealed class MarkdownMemoryProvider(string memoryDir, int maxTotalChars) : AIContextProvider
+public sealed class MarkdownMemoryProvider(string memoryDir, int maxTotalChars, string injectMode = "full") : AIContextProvider
 {
     private readonly string _memoryDir = memoryDir;
     private readonly int _maxTotalChars = maxTotalChars;
+
+    /// <summary>index 模式：MEMORY.md 全文常驻，其他记忆文件只注入文件名+首行索引（memory_read 按需取回）。</summary>
+    private readonly bool _indexMode = string.Equals(injectMode, "index", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>核心记忆文件，始终排首位。</summary>
     public const string CoreFileName = "MEMORY.md";
@@ -27,9 +30,12 @@ public sealed class MarkdownMemoryProvider(string memoryDir, int maxTotalChars) 
 
         return new ValueTask<AIContext>(new AIContext
         {
-            Instructions =
-                "以下是本智能体的长期记忆（来自 Markdown 记忆文件，每轮自动注入）。" +
-                "其中与当前任务相关的信息应当被视为用户与项目的既定事实：\n\n" + memory,
+            Instructions = _indexMode
+                ? "以下是本智能体的长期记忆（来自 Markdown 记忆文件，每轮自动注入）。MEMORY.md 为全文；" +
+                  "其余记忆文件只列名称与首行索引，与当前任务相关时用 memory_read 读取完整内容。" +
+                  "其中与当前任务相关的信息应当被视为用户与项目的既定事实：\n\n" + memory
+                : "以下是本智能体的长期记忆（来自 Markdown 记忆文件，每轮自动注入）。" +
+                  "其中与当前任务相关的信息应当被视为用户与项目的既定事实：\n\n" + memory,
         });
     }
 
@@ -54,6 +60,20 @@ public sealed class MarkdownMemoryProvider(string memoryDir, int maxTotalChars) 
             var content = ReadFileSafe(file);
             if (string.IsNullOrWhiteSpace(content))
             {
+                continue;
+            }
+
+            // 索引模式：非核心文件只注入文件名 + 首行摘要（不超过 120 字符），不计入字符预算
+            if (_indexMode && !string.Equals(name, CoreFileName, StringComparison.OrdinalIgnoreCase))
+            {
+                var head = content.Split('\n')
+                    .Select(l => l.Trim().TrimStart('#').Trim())
+                    .FirstOrDefault(l => l.Length > 0) ?? "";
+                if (head.Length > 120)
+                {
+                    head = head[..120] + "…";
+                }
+                sb.AppendLine($"### memory/{name}（索引：memory_read 取全文）").AppendLine(head).AppendLine();
                 continue;
             }
 
