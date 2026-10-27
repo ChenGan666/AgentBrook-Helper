@@ -209,8 +209,7 @@ public partial class MainWindow : Window
                         {
                             var isActive = m == currentModel && provider.Name == currentProvider;
                             var model = m;
-                            var label = provider.DisplayNameOf(model);
-                            if (label != model) label = $"{label}（{model}）";   // 显示名≠接口名时括注真实模型名
+                            var label = provider.DisplayNameOf(model);   // 只显示显示名，不括注接口名
                             var b = new Button
                             {
                                 Classes = { "menuItem" },
@@ -292,7 +291,6 @@ public partial class MainWindow : Window
                         var mm = m;
                         var label = provider.DisplayNameOf(mm);
                         var typeTag = provider.TypeOf(mm) is >= 6 ? "视频" : "图像";
-                        if (label != mm) label = $"{label}（{mm}）";
                         var mb = new Button
                         {
                             Classes = { "menuItem" },
@@ -1728,22 +1726,58 @@ public partial class MainWindow : Window
 
     private void AddErrorBubble(string message)
     {
+        Control content = new TextBlock
+        {
+            Text = I18n.T("ui.error.value", WindowBase.IsBillingError(message) ? WindowBase.FriendlyRelayError(message) : message),
+            FontSize = 13.5,
+            Foreground = new SolidColorBrush(Color.Parse("#b3261e")),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        if (WindowBase.IsBillingError(message))
+        {
+            // 余额不足/卡失效：错误下方直接给充值入口（AgentBrook 卡自动带上当前 Key）
+            var stack = new StackPanel { Spacing = 8 };
+            stack.Children.Add(content);
+            var rechargeBtn = new Button
+            {
+                Content = I18n.T("ui.token.recharge.btn"),
+                Classes = { "actionOk" },
+                FontSize = 13,
+                HorizontalAlignment = HorizontalAlignment.Left,
+            };
+            rechargeBtn.Click += (_, _) => OpenTokenRechargePage();
+            stack.Children.Add(rechargeBtn);
+            content = stack;
+        }
         var border = new Border
         {
             Background = new SolidColorBrush(Color.Parse("#ffe9e7")),
             CornerRadius = new CornerRadius(14),
             Padding = new Thickness(12, 8),
             HorizontalAlignment = HorizontalAlignment.Center,
-            Child = new TextBlock
-            {
-                Text = I18n.T("ui.error.value", message),
-                FontSize = 13.5,
-                Foreground = new SolidColorBrush(Color.Parse("#b3261e")),
-                TextWrapping = TextWrapping.Wrap,
-            },
+            Child = content,
         };
         _chatPanel!.Children.Add(border);
         ScrollToEnd();
+    }
+
+    /// <summary>打开 AgentBrook Token卡充值页：当前供应商为 AgentBrook 时自动预填卡 Key。</summary>
+    private void OpenTokenRechargePage()
+    {
+        try
+        {
+            var url = WindowBase.TokenPurchaseUrl;
+            var p = _controller.Providers.FirstOrDefault(x => x.Name == _controller.CurrentProvider);
+            if (p?.Name == "AgentBrook" && !string.IsNullOrWhiteSpace(p.ApiKey))
+            {
+                url += "?mode=2&key=" + Uri.EscapeDataString(p.ApiKey);
+            }
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[recharge] ✖ 打开充值页失败：{ex.Message}");
+        }
     }
 
     /// <summary>执行过程行：收进当前回合的终端交互卡（无卡则先创建）。</summary>

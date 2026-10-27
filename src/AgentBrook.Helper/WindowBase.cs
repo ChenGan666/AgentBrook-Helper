@@ -15,7 +15,7 @@ public abstract class WindowBase : Window
     /// <summary>AgentBrook.API 中转地址（生产部署改为线上域名，如 https://api.example.com）</summary>
     protected const string RelayApiBase = "https://api.agentbrook.com";
     /// <summary>AgentBrook.Service Token卡购买页</summary>
-    protected const string TokenPurchaseUrl = "https://helper.agentbrook.com/Token";
+    internal const string TokenPurchaseUrl = "https://helper.agentbrook.com/Token";
 
     /// <summary>按控件名把 TextBlock 文本设为翻译值（键为中文原文或语义化 Key）。</summary>
     protected void SetT(string name, string key)
@@ -105,17 +105,28 @@ public abstract class WindowBase : Window
         return reply.Trim();
     }
 
+    /// <summary>中转服务返回的计费/卡状态错误码（出现时应提示用户充值或换卡）。</summary>
+    internal static readonly string[] BillingErrorCodes =
+    [
+        "insufficient_quota", "insufficient_balance",
+        "card_expired", "card_frozen", "card_voided", "card_not_activated",
+    ];
+
+    /// <summary>错误文本是否为计费/卡状态错误（需提示充值）。</summary>
+    internal static bool IsBillingError(string? rawMessage) =>
+        !string.IsNullOrEmpty(rawMessage) && BillingErrorCodes.Any(rawMessage.Contains);
+
     /// <summary>
     /// 把中转服务返回的英文错误码（trial_ip_mismatch / insufficient_quota / card_* 等）
     /// 映射成多语言友好描述；不认识的错误原样返回。
     /// </summary>
-    protected static string FriendlyRelayError(string? rawMessage)
+    internal static string FriendlyRelayError(string? rawMessage)
     {
         var text = rawMessage ?? "";
         var key = text switch
         {
             var t when t.Contains("trial_ip_mismatch") => "ui.relay.err.trial_ip_mismatch",
-            var t when t.Contains("insufficient_quota") => "ui.relay.err.insufficient_quota",
+            var t when t.Contains("insufficient_quota") || t.Contains("insufficient_balance") => "ui.relay.err.insufficient_quota",
             var t when t.Contains("card_expired") => "ui.relay.err.card_expired",
             var t when t.Contains("card_frozen") => "ui.relay.err.card_frozen",
             var t when t.Contains("card_voided") => "ui.relay.err.card_voided",
