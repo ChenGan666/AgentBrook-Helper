@@ -31,7 +31,7 @@ internal static class ModelCatalog
         using var resp = await Http.SendAsync(req);
         var text = await resp.Content.ReadAsStringAsync();
         if (!resp.IsSuccessStatusCode)
-            throw new InvalidOperationException($"HTTP {(int)resp.StatusCode}: {(text.Length > 120 ? text[..120] : text)}");
+            throw new InvalidOperationException($"HTTP {(int)resp.StatusCode}: {text}");
         return Parse(text);
     }
 

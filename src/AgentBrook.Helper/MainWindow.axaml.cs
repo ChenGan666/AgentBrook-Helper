@@ -695,7 +695,7 @@ public partial class MainWindow : Window
         if (t is null) return;
         var title = _controller.CurrentSessionTitle;
         if (title.Length > 14) title = title[..14] + "…";
-        t.Text = title.Length > 0 ? "· " + title : "";
+        t.Text = title;   // 助手名已移至窗口标题，此处只显示会话标题
     }
 
     /// <summary>排队提示条。</summary>
@@ -765,13 +765,18 @@ public partial class MainWindow : Window
     /// <summary>把个性化设置（名字）应用到窗口标题与顶栏。</summary>
     public void ApplyIdentityUi()
     {
-        var name = AssistantIdentity.Current;
-        Title = I18n.T("ui.value.assistant", name);
+        UpdateWindowTitle(_statusText?.Text ?? "");
         var t = this.FindControl<TextBlock>("AgentNameText");
         if (t is not null)
         {
-            t.Text = name;
+            t.Text = AssistantIdentity.Current;
         }
+    }
+
+    /// <summary>窗口标题 = 「助手名 助手 · 当前状态」。</summary>
+    private void UpdateWindowTitle(string statusText)
+    {
+        Title = $"{I18n.T("ui.value.assistant", AssistantIdentity.Current)} · {statusText}";
     }
 
     private async Task SafeSwitchProviderAsync(string providerName)
@@ -1464,7 +1469,7 @@ public partial class MainWindow : Window
         if (_tokenText is not null)
         {
             _tokenText.Text = $"Ⓣ {_cumTokens:N0}";
-            _tokenText.IsVisible = true;
+            _tokenText.IsVisible = false;   // 顶栏不再显示，会话内已有明细
         }
     }
 
@@ -2143,8 +2148,8 @@ public partial class MainWindow : Window
                 ? I18n.T("ui.idle.value", _controller.Agent!.CurrentModel)
                 : _controller.Ready ? I18n.T("ui.idle") : I18n.T("ui.starting.2"),
             BrookRunState.Thinking => I18n.T("ui.thinking.2"),
-            BrookRunState.CallingTool => I18n.T("ui.working.value", detail),
-            BrookRunState.AwaitingApproval => I18n.T("ui.awaiting.approval.value", detail),
+            BrookRunState.CallingTool => I18n.T("ui.working"),
+            BrookRunState.AwaitingApproval => I18n.T("ui.awaiting.approval"),
             BrookRunState.AwaitingUserAnswer => I18n.T("ui.awaiting.your.answer"),
             _ => I18n.T("ui.idle"),
         };
@@ -2153,6 +2158,11 @@ public partial class MainWindow : Window
             text = _pillOverride;   // 启动状态覆盖（如「就绪 · 26 工具」），到期自动恢复
         }
         _statusText!.Text = text;
+        // 状态同步进窗口标题（如「Win-Brook 助手 · 干活中」）；空闲态标题不带模型名
+        var titleText = _pillOverride ?? (state == BrookRunState.Idle
+            ? (_controller.Ready ? I18n.T("ui.idle") : I18n.T("ui.starting.2"))
+            : text);
+        UpdateWindowTitle(titleText);
         UpdateModelChip();
         _statusPill!.Classes.Remove("pillBusy");
         _statusPill.Classes.Remove("pillWait");

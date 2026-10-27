@@ -234,18 +234,21 @@
                     </Button>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                    <Border x:Name="StatusPill" CornerRadius="6" Padding="8,3" Background="#2b2b2b">
+                    <!-- 状态已移至窗口标题，胶囊保留元素（隐藏）以兼容旧逻辑 -->
+                    <Border x:Name="StatusPill" CornerRadius="6" Padding="8,3" Background="#2b2b2b" IsVisible="False">
                         <TextBlock x:Name="StatusText" Text="启动中…" FontSize="12.5" Foreground="#9a9a9a"/>
                     </Border>
+                    <!-- Token 统计移至会话内展示，顶栏不再显示 -->
                     <TextBlock x:Name="TokenText" Text="" FontSize="12" Foreground="#8a8a8a"
                                VerticalAlignment="Center" IsVisible="False"/>
                     <!-- 会话切换器：助手名 + 当前会话标题，点击弹出会话列表 -->
                     <Button x:Name="SessionBtn" Background="Transparent" Padding="6,3" CornerRadius="6"
                             HorizontalContentAlignment="Left" ToolTip.Tip="切换会话">
                         <StackPanel Orientation="Horizontal" Spacing="6" MaxWidth="380">
+                            <!-- 助手名已在窗口标题中显示，会话按钮只留会话标题 -->
                             <TextBlock x:Name="AgentNameText" Text="Brook" FontSize="15" FontWeight="SemiBold"
                                        VerticalAlignment="Center" Foreground="#e6e6e6"
-                                       TextTrimming="CharacterEllipsis" MaxWidth="150"/>
+                                       TextTrimming="CharacterEllipsis" MaxWidth="150" IsVisible="False"/>
                             <TextBlock x:Name="SessionTitleText" Text="" FontSize="12.5" VerticalAlignment="Center"
                                        Foreground="#8a8a8a" TextTrimming="CharacterEllipsis" MaxWidth="200"/>
                         </StackPanel>

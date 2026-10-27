@@ -34,9 +34,15 @@ public static class MarkdownView
     private static readonly FontFamily UiFont = new("PingFang SC, Hiragino Sans GB, Microsoft YaHei");
     private static readonly FontFamily MonoFont = new("Menlo, monospace");
 
+    // file:// 链接含空格时 Markdig 无法解析（整段 ![](...) 退化为裸文本）：统一把空格转 %20
+    private static readonly System.Text.RegularExpressions.Regex FileLinkSpaceRegex =
+        new(@"\((file://[^)\n]*)\)", System.Text.RegularExpressions.RegexOptions.Compiled);
+
     public static Control Render(string markdown)
     {
-        var doc = Markdown.Parse(markdown ?? "", Pipeline);
+        markdown = FileLinkSpaceRegex.Replace(markdown ?? "",
+            m => "(" + m.Groups[1].Value.Replace(" ", "%20") + ")");
+        var doc = Markdown.Parse(markdown, Pipeline);
         var panel = new StackPanel { Spacing = 6 };
         var textBlock = NewTextBlock();
         var hasText = false;
@@ -131,9 +137,20 @@ public static class MarkdownView
             ? link.Url
             : link.FirstChild is LiteralInline li ? li.Content.ToString() : "";
         var isRemote = MediaBlock.IsRemote(src);
-        var full = isRemote
-            ? src
-            : Path.Combine(App.Controller.Agent!.WorkspaceRoot, src.TrimStart('/'));
+        string full;
+        if (isRemote)
+        {
+            full = src;
+        }
+        else if (src.StartsWith("file://", StringComparison.OrdinalIgnoreCase)
+                 && Uri.TryCreate(src, UriKind.Absolute, out var fileUri))
+        {
+            full = fileUri.LocalPath;   // file:// 绝对路径（%20 自动解码）
+        }
+        else
+        {
+            full = Path.Combine(App.Controller.Agent!.WorkspaceRoot, src.TrimStart('/'));
+        }
 
         // 图片：markdown ![]() 语法或按后缀识别；视频/音频：普通链接后缀识别
         var kind = link.IsImage ? MediaBlock.Kind.Image : MediaBlock.Detect(full);
