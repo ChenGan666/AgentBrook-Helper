@@ -726,7 +726,6 @@ public partial class MainWindow : Window
         var t = this.FindControl<TextBlock>("SessionTitleText");
         if (t is null) return;
         var title = _controller.CurrentSessionTitle;
-        if (title.Length > 14) title = title[..14] + "…";
         t.Text = title;   // 助手名已移至窗口标题，此处只显示会话标题
     }
 
