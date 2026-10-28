@@ -57,7 +57,7 @@ public sealed class InteractionCard : StackPanel
     {
         _collapsible = collapsible;
         Spacing = 4;
-        Margin = new Thickness(0, 0, 40, 0);
+        Margin = new Thickness(0);
 
         // ── 头部：图标 + 标题 + 摘要(*) + 状态 + 折叠箭头；摘要列受宽约束并省略号截断 ──
         var head = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,Auto,*,Auto,Auto"), ColumnSpacing = 8 };

@@ -674,6 +674,7 @@ public partial class MainWindow : Window
         }
         _startupReplayed = true;
         var transcript = _controller.GetTranscript();
+        RebuildStageRail();   // 启动自动加载：阶段轨随回放重建（锚点经 StartHint 匹配补登）
         if (transcript.Count == 0)
         {
             return;   // 全新会话：保持问候引导

@@ -1114,14 +1114,19 @@ public sealed class BrookAgent : IAsyncDisposable
     /// 轻量一次性补全（走摘要档模型，不进会话历史）：启动问候语等旁路生成用。
     /// 失败由调用方兜底（问候语等场景静默降级）。
     /// </summary>
-    public async Task<string> QuickCompleteAsync(string systemPrompt, string userPrompt, CancellationToken cancellationToken = default)
+    public async Task<string> QuickCompleteAsync(string systemPrompt, string userPrompt,
+        CancellationToken cancellationToken = default, bool useMainModel = false)
     {
-        var (_, client) = _router.Resolve(ModelRouter.RoleSummarize, _chatClient);
+        // useMainModel：阶段分类等随会话模型的调用走主客户端+当前选中模型
+        // （SummarizeModel 配置可能失效，用户选中模型一定有效）；默认仍走摘要档。
+        var (model, client) = useMainModel
+            ? (CurrentModel, _chatClient)
+            : _router.Resolve(ModelRouter.RoleSummarize, _chatClient);
         var response = await client.GetResponseAsync(
         [
             new ChatMessage(ChatRole.System, systemPrompt),
             new ChatMessage(ChatRole.User, userPrompt),
-        ], cancellationToken: cancellationToken);
+        ], new ChatOptions { ModelId = model }, cancellationToken);
         return (response.Text ?? "").Trim();
     }
 
@@ -1557,7 +1562,7 @@ public sealed class BrookAgent : IAsyncDisposable
                     "你是话题边界判定器。判断「用户新消息」是否开启了一个与「当前阶段」不同的新话题阶段。" +
                     "同一目标的追问、补充、修正、报错修复视为同阶段；切换到无关任务/领域视为新阶段。" +
                     "只输出 JSON：{\"new\":false} 或 {\"new\":true,\"title\":\"≤12字的新阶段短标题\"}，不要输出其他内容。",
-                    $"当前阶段标题：{cur.Title}\n用户新消息：{snippet}", cancellationToken);
+                    $"当前阶段标题：{cur.Title}\n用户新消息：{snippet}", cancellationToken, useMainModel: true);
                 var (isNew, title) = ParseStageVerdict(verdict);
                 if (isNew)
                 {
@@ -1627,7 +1632,7 @@ public sealed class BrookAgent : IAsyncDisposable
             var text = await QuickCompleteAsync(
                 "你是阶段摘要器。把「本阶段的对话素材」浓缩为一句阶段结论摘要（≤80字），" +
                 "必须保留：用户目标、关键决定、产出位置、未完成事项。直接输出摘要正文，不要评论。",
-                material, cancellationToken);
+                material, cancellationToken, useMainModel: true);
             if (!string.IsNullOrWhiteSpace(text))
             {
                 return text.Trim().Length > 120 ? text.Trim()[..120] : text.Trim();
