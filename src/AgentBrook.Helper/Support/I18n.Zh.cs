@@ -416,6 +416,7 @@ internal static partial class I18n
         ["ui.process"] = "执行过程",
         ["ui.process.value.steps"] = "执行过程 · {0} 步",
         ["ui.terminal"] = "终端",
+        ["ui.plan"] = "计划",
         ["ui.expand"] = "展开",
         ["ui.collapse"] = "收起",
         ["ui.card.authorization"] = "权限授权",

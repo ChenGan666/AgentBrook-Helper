@@ -416,6 +416,7 @@ internal static partial class I18n
         ["ui.process"] = "Process",
         ["ui.process.value.steps"] = "Process · {0} steps",
         ["ui.terminal"] = "Terminal",
+        ["ui.plan"] = "Plan",
         ["ui.expand"] = "Expand",
         ["ui.collapse"] = "Collapse",
         ["ui.card.authorization"] = "Authorization",

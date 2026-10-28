@@ -27,6 +27,9 @@ public abstract record BrookEvent
     /// <summary>一次工具调用完成（ResultPreview 为结果前若干字符，供宿主展示执行反馈）。</summary>
     public sealed record ToolCompleted(string Name, string? ResultPreview) : BrookEvent;
 
+    /// <summary>任务清单更新（todo_write 完成后发出，PlanText 为完整渲染文本，宿主可直接展示）。</summary>
+    public sealed record PlanChanged(string PlanText) : BrookEvent;
+
     /// <summary>Token 用量（每回合结束发出；CumTotal 为应用累计总消耗）。</summary>
     public sealed record Usage(long TurnInput, long TurnOutput, long TurnTotal, long CumTotal) : BrookEvent;
 

@@ -84,6 +84,7 @@ public partial class MainWindow : Window
     private const string IconTerminal = "M4 5h16v14H4V5zm2 3v2l2 2-2 2v2l4-4-4-4zm7 7h4v2h-4v-2z";
     private const string IconShield = "M12 2l8 3v6c0 5-3.5 9.5-8 11-4.5-1.5-8-6-8-11V5l8-3z";
     private const string IconQuestion = "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1.2 15.2v-2.4h2.4v2.4h-2.4zm.3-10.9a3.9 3.9 0 0 1 4 3.9c0 1.7-1.1 2.4-2 3-.6.4-1 .7-1 1.5h-2.2c0-1.6.9-2.3 1.8-2.9.7-.5 1.2-.9 1.2-1.6a1.9 1.9 0 0 0-3.8 0H7.2a3.9 3.9 0 0 1 3.9-3.9z";
+    private const string IconPlan = "M3 5h2v2H3V5zm4 0h14v2H7V5zM3 11h2v2H3v-2zm4 0h14v2H7v-2zM3 17h2v2H3v-2zm4 0h14v2H7v-2z";
 
     // 执行过程：同一回合的工具调用/结果收进统一交互容器（终端类型）
     private InteractionCard? _execCard;
@@ -352,7 +353,13 @@ public partial class MainWindow : Window
             Dispatcher.UIThread.Post(() => AddUserBubble(text, atts));
         };
         _controller.ToolFeedback += text => Dispatcher.UIThread.Post(() =>
-            AppendToolLine("✔ " + (text.Length > 160 ? text[..160] + "…" : text)));
+        {
+            // todo_* 由计划卡展示，终端卡不重复刷完成行
+            if (!text.StartsWith("todo_write") && !text.StartsWith("todo_list"))
+            {
+                AppendToolLine("✔ " + (text.Length > 160 ? text[..160] + "…" : text));
+            }
+        });
 
         // 启动过程（连接 MCP/恢复会话/就绪）改在顶栏状态胶囊展示，不进对话流
         _controller.ModelConfigurationChanged += () => Dispatcher.UIThread.Post(UpdateModelConfigurationCard);
@@ -925,10 +932,17 @@ public partial class MainWindow : Window
                     AppendToolLine(tool.Name["log:".Length..]);
                     return;
                 }
-                if (tool.Name != "ask_user")
+                if (tool.Name is "ask_user" or "todo_write" or "todo_list")
+                {
+                    // ask_user 走提问卡；todo_* 由计划卡展示，避免终端卡重复刷屏
+                }
+                else
                 {
                     AppendToolLine($"工具 · {tool.Name} …");
                 }
+                break;
+            case BrookEvent.PlanChanged plan:
+                UpsertPlanCard(plan.PlanText);   // todo_write 完成 → 计划卡原地刷新
                 break;
             case BrookEvent.TextDelta:
                 UpdateStreamText();   // 流式：把控制器全量答案覆盖到当前气泡（幂等）
@@ -1866,6 +1880,66 @@ public partial class MainWindow : Window
         _execCard = null;
         _execContent = null;
         _execLastLine = null;
+        _planCard?.Collapse();   // 计划卡同收（卡片保留，下轮 todo_write 原地更新）
+        if (_planCard is not null && _planDone == _planTotal && _planTotal > 0)
+        {
+            _planCard.SetState(InteractionState.Done, $"{_planDone}/{_planTotal}");
+        }
+        else
+        {
+            _planCard?.SetState(InteractionState.Done);
+        }
+    }
+
+    // ───────────────────────── 计划卡（todo_write → PlanChanged 驱动） ─────────────────────────
+    private InteractionCard? _planCard;
+    private StackPanel? _planContent;
+    private int _planDone, _planTotal;
+
+    /// <summary>渲染计划文本（todo_write 结果：头行 + 「N.[✓/▸/ ] 标题」行 + 「进度：x/y 完成」尾行）。</summary>
+    private void UpsertPlanCard(string planText)
+    {
+        var lines = planText.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var items = lines.Where(l => l.Contains(".[")).ToList();
+        var progressLine = lines.FirstOrDefault(l => l.StartsWith("进度"));
+        _planDone = 0;
+        _planTotal = items.Count;
+        foreach (var l in items)
+        {
+            if (l.Contains("[✓]"))
+            {
+                _planDone++;
+            }
+        }
+
+        if (_planCard is null)
+        {
+            _planContent = new StackPanel { Spacing = 3 };
+            _planCard = new InteractionCard(I18n.T("ui.plan"), _planContent,
+                InteractionState.Running, iconData: IconPlan, collapsible: true);
+            _chatPanel!.Children.Add(_planCard);
+        }
+        _planContent!.Children.Clear();
+        foreach (var l in items)
+        {
+            var mark = l.Contains("[✓]") ? "done" : l.Contains("[▸]") ? "doing" : "pending";
+            _planContent.Children.Add(new TextBlock
+            {
+                Text = l,
+                FontSize = 12.5,
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = new SolidColorBrush(Color.Parse(mark switch
+                {
+                    "done" => "#6a6a6a",
+                    "doing" => "#4a9eff",
+                    _ => "#c8c8c8",
+                })),
+                Opacity = mark == "done" ? 0.75 : 1,
+            });
+        }
+        _planCard.SetSummary(progressLine ?? "");
+        _planCard.SetState(InteractionState.Running, $"{_planDone}/{_planTotal}");
+        ScrollToEnd();
     }
 
     private void ScrollToEnd()

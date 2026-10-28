@@ -261,6 +261,7 @@ public sealed class BrookAgent : IAsyncDisposable
         var mcpTools = new McpTools(workspace.Root,
             config.MCP.Servers.Select(s => s.Name).ToList());
         var userTools = new UserInteractionTools(interaction);
+        var todoTools = new TodoTools();   // 模型可见的任务清单（长任务计划/进度自查）
 
         // 项目团队：主 Agent 具备派生/指挥工作 Agent 的能力
         var teamTools = new Team.TeamTools(
@@ -302,6 +303,9 @@ public sealed class BrookAgent : IAsyncDisposable
             AIFunctionFactory.Create(skillTools.install_skill),
             AIFunctionFactory.Create(skillTools.skill_market),
             AIFunctionFactory.Create(userTools.ask_user),
+            // 任务清单（模型自管理，无需审批）
+            AIFunctionFactory.Create(todoTools.todo_write),
+            AIFunctionFactory.Create(todoTools.todo_list),
             // 子Agent 委派（轻量，无需审批：子Agent 只有工作区文件工具）
             AIFunctionFactory.Create(subAgentTools.delegate_task),
             // 项目团队（派生与协作）
@@ -1008,6 +1012,11 @@ public sealed class BrookAgent : IAsyncDisposable
                             : TruncateForPreview(result.Result?.ToString());
                         var completedName = callNames.GetValueOrDefault(result.CallId, result.CallId);
                         yield return new BrookEvent.ToolCompleted(completedName, preview);
+                        if (completedName == "todo_write" && result.Exception is null)
+                        {
+                            // 计划更新：完整渲染文本透出给宿主计划卡（不截断）
+                            yield return new BrookEvent.PlanChanged(result.Result?.ToString() ?? "");
+                        }
                     }
                     if (content is ToolApprovalRequestContent approval)
                     {
