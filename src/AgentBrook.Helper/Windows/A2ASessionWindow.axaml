@@ -1,0 +1,273 @@
+﻿<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="using:AgentBrook.Helper.Windows" xmlns:core="using:AgentBrook.Helper.Core"
+        x:Class="AgentBrook.Helper.Windows.A2ASessionWindow"
+        x:DataType="local:A2ASessionViewModel"
+        RequestedThemeVariant="Dark"
+        Title="A2A 协作会话"
+        Icon="avares://AgentBrook.Helper/Assets/app-icon.png"
+        Width="1220" Height="780" MinWidth="900" MinHeight="600"
+        Background="#181818" FontFamily="PingFang SC, Hiragino Sans GB, Microsoft YaHei">
+  <Window.Styles>
+    <Style Selector="Button.primary"><Setter Property="Background" Value="#2f7bff"/><Setter Property="Foreground" Value="White"/><Setter Property="CornerRadius" Value="7"/><Setter Property="Padding" Value="12,7"/></Style>
+    <Style Selector="Button.quiet"><Setter Property="Background" Value="#303030"/><Setter Property="Foreground" Value="#dddddd"/><Setter Property="CornerRadius" Value="7"/><Setter Property="Padding" Value="10,6"/></Style>
+    <Style Selector="TextBlock.heading"><Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Foreground" Value="#8d9bad"/><Setter Property="Margin" Value="0,8,0,5"/></Style>
+    <Style Selector="ListBox"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/></Style>
+    <Style Selector="ListBoxItem"><Setter Property="Padding" Value="8,7"/><Setter Property="CornerRadius" Value="7"/><Setter Property="Margin" Value="0,1"/></Style>
+    <!-- 行内操作按钮：鼠标悬停列表项时才显示，避免每行常驻按钮造成视觉拥挤 -->
+    <Style Selector="ListBoxItem Button.row-action-btn">
+      <Setter Property="Opacity" Value="0"/>
+      <Setter Property="Transitions">
+        <Transitions><DoubleTransition Property="Opacity" Duration="0:0:0.15"/></Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="ListBoxItem:pointerover Button.row-action-btn">
+      <Setter Property="Opacity" Value="1"/>
+    </Style>
+    <Style Selector="Button.icon-btn"><Setter Property="Background" Value="Transparent"/><Setter Property="Padding" Value="4"/></Style>
+    <Style Selector="Button.icon-btn:pointerover"><Setter Property="Background" Value="#353535"/></Style>
+    <Style Selector="GridSplitter">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Height" Value="2"/>
+      <Setter Property="HorizontalAlignment" Value="Stretch"/>
+      <Setter Property="ResizeDirection" Value="Rows"/>
+    </Style>
+    <Style Selector="GridSplitter:pointerover">
+      <Setter Property="Background" Value="#4a9eff"/>
+    </Style>
+  </Window.Styles>
+  <Grid RowDefinitions="Auto,*">
+    <Border Grid.Row="0" Background="#242424" BorderBrush="#353535" BorderThickness="0,0,0,1" Padding="16,11">
+      <StackPanel Spacing="2">
+        <TextBlock Text="{Binding Status}" FontSize="12" Foreground="#78b7ff"/>
+        <TextBlock Text="{Binding Detail}" FontSize="11" Foreground="#777777"/>
+      </StackPanel>
+    </Border>
+    <Grid Grid.Row="1" ColumnDefinitions="280,*,310">
+      <Border Grid.Column="0" Background="#202020" BorderBrush="#343434" BorderThickness="0,0,1,0" Padding="13">
+        <Grid x:Name="LeftPanelGrid" RowDefinitions="Auto,*,2,*,2,*">
+          <Border Background="#292929" CornerRadius="9" Padding="10">
+            <StackPanel Spacing="3">
+              <TextBlock x:Name="LocalHelperText" Text="本机 Helper" FontWeight="SemiBold" Foreground="#eeeeee"/>
+              <TextBlock FontSize="20" HorizontalAlignment="Left">🤖 <Run Text="{Binding DisplayName}"/></TextBlock>
+              <TextBlock Text="{Binding NodeId}" FontSize="10" Foreground="#777777" TextTrimming="CharacterEllipsis"/>
+            </StackPanel>
+          </Border>
+          <Grid Grid.Row="1" RowDefinitions="Auto,*">
+            <TextBlock x:Name="PeersHeading" Classes="heading" Text="PEERS"/>
+            <ListBox Grid.Row="1" x:Name="PeerList" ItemsSource="{Binding Peers}">
+              <ListBox.ItemTemplate><DataTemplate x:DataType="local:A2APeerItem">
+                <Grid ColumnDefinitions="*,Auto">
+                  <StackPanel Spacing="1">
+                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" Foreground="#e8eef5"/>
+                    <TextBlock Text="{Binding NodeIdShort}" FontSize="10" Foreground="#6f7b88" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Text="{Binding Summary}" FontSize="11" Foreground="#8d9bad"/>
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
+                    <Button Classes="quiet row-action-btn" Content="配对" Tag="peer-pair" IsVisible="{Binding ShowPairButton}" FontSize="11" Padding="10,2" HorizontalContentAlignment="Center"/>
+                    <Button Classes="quiet row-action-btn" Content="解除" Tag="peer-unpair" IsVisible="{Binding ShowUnpairButton}" FontSize="11" Padding="10,2" HorizontalContentAlignment="Center"/>
+                  </StackPanel>
+                </Grid>
+              </DataTemplate></ListBox.ItemTemplate>
+            </ListBox>
+          </Grid>
+          <GridSplitter Grid.Row="2"/>
+          <Grid Grid.Row="3" RowDefinitions="Auto,*">
+            <TextBlock x:Name="PeerSessionsHeading" Classes="heading" Text="PEER SESSIONS"/>
+            <ListBox Grid.Row="1" x:Name="PeerSessionList" ItemsSource="{Binding PeerSessions}">
+              <ListBox.ItemTemplate><DataTemplate x:DataType="local:A2ASessionItem">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Text="{Binding Summary}" Foreground="#dedede" VerticalAlignment="Center"/>
+                  <Button Classes="icon-btn row-action-btn" Grid.Column="1" Tag="session-delete" ToolTip.Tip="删除会话" DataContext="{Binding}">
+                    <Path Data="M19 6h-2c0-1.1-.9-2-2-2H8c-1.1 0-2 .9-2 2H4c-1.1 0-2 .9-2 2v1h18V8c0-1.1-.9-2-2-2zM3 8v12c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V8H3zm5 10H6v-7h2v7zm4 0h-2v-7h2v7zm4 0h-2v-7h2v7z" Fill="#aaaaaa" Width="14" Height="14" Stretch="Uniform"/>
+                  </Button>
+                </Grid>
+              </DataTemplate></ListBox.ItemTemplate>
+            </ListBox>
+          </Grid>
+          <GridSplitter Grid.Row="4"/>
+          <Grid Grid.Row="5" RowDefinitions="Auto,*">
+            <TextBlock x:Name="GroupSessionsHeading" Classes="heading" Text="GROUP SESSIONS"/>
+            <ListBox Grid.Row="1" x:Name="GroupSessionList" ItemsSource="{Binding GroupSessions}">
+              <ListBox.ItemTemplate><DataTemplate x:DataType="local:A2ASessionItem">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Text="{Binding Summary}" Foreground="#dedede" VerticalAlignment="Center"/>
+                  <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2">
+                    <!-- 群主视角的行内管理操作：改名 / 关闭（悬停显示），删除对所有会话可用 -->
+                    <Button Classes="icon-btn row-action-btn" Tag="group-rename" ToolTip.Tip="群组改名" IsVisible="{Binding IsCoordinator}">
+                      <Path Data="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" Fill="#aaaaaa" Width="13" Height="13" Stretch="Uniform"/>
+                    </Button>
+                    <Button Classes="icon-btn row-action-btn" Tag="group-close" ToolTip.Tip="关闭群组（仅群主）" IsVisible="{Binding IsCoordinator}">
+                      <Path Data="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z" Fill="#aaaaaa" Width="13" Height="13" Stretch="Uniform"/>
+                    </Button>
+                    <Button Classes="icon-btn row-action-btn" Tag="session-delete" ToolTip.Tip="删除会话" DataContext="{Binding}">
+                      <Path Data="M19 6h-2c0-1.1-.9-2-2-2H8c-1.1 0-2 .9-2 2H4c-1.1 0-2 .9-2 2v1h18V8c0-1.1-.9-2-2-2zM3 8v12c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V8H3zm5 10H6v-7h2v7zm4 0h-2v-7h2v7zm4 0h-2v-7h2v7z" Fill="#aaaaaa" Width="14" Height="14" Stretch="Uniform"/>
+                    </Button>
+                  </StackPanel>
+                </Grid>
+              </DataTemplate></ListBox.ItemTemplate>
+            </ListBox>
+          </Grid>
+        </Grid>
+      </Border>
+      <Grid Grid.Column="1" RowDefinitions="Auto,*,Auto" Background="#191919">
+        <Border Grid.Row="0" Padding="15,8" Background="#202020">
+          <Panel>
+            <!-- 动态标题：跟随选中会话（Peer=对方名称 / Group=群名）；群主点击群名进入编辑，失焦自动保存 -->
+            <Button x:Name="HeaderTitle" Background="Transparent" BorderThickness="0" Padding="0"
+                    HorizontalContentAlignment="Left" Cursor="Hand" Click="OnHeaderTitleClick"
+                    ToolTip.Tip="群主可点击群名修改">
+              <TextBlock x:Name="HeaderTitleText" Text="{Binding SelectedSession.Title, FallbackValue=事件流, TargetNullValue=事件流}"
+                         FontWeight="SemiBold" Foreground="#dddddd"/>
+            </Button>
+            <TextBox x:Name="HeaderEdit" IsVisible="False" Background="#303030" BorderThickness="0"
+                     CornerRadius="7" Padding="8,5" MinWidth="300" HorizontalAlignment="Left"/>
+            <!-- 群自动交流开关：仅影响本机 Helper 是否自动应答（每群独立，默认关） -->
+            <CheckBox Content="自动交流" FontSize="12" Foreground="#9a9a9a"
+                      IsChecked="{Binding IsAutoTalkOn}" IsVisible="{Binding IsAutoTalkVisible}"
+                      HorizontalAlignment="Right" VerticalAlignment="Center"
+                      ToolTip.Tip="开启后，群内消息 @ 本机名称时自动应答（内置防循环上限）"/>
+          </Panel>
+        </Border>
+        <ListBox Grid.Row="1" x:Name="EventList" ItemsSource="{Binding Events}" Padding="12">
+          <ListBox.ItemTemplate><DataTemplate x:DataType="local:A2AEventItem">
+            <Border Background="#252525" CornerRadius="9" Padding="11,8" Margin="0,3">
+              <Grid ColumnDefinitions="Auto,Auto,*" RowDefinitions="Auto,Auto,Auto">
+                <TextBlock Text="{Binding Time}" FontSize="11" Foreground="#777777" Margin="0,0,10,0"/>
+                <TextBlock Grid.Column="1" Text="{Binding Sender}" FontSize="11" FontWeight="SemiBold" Foreground="#9ecbff" Margin="0,0,10,0"/>
+                <TextBlock Grid.Column="2" Text="{Binding Type}" FontSize="11" Foreground="#78b7ff"/>
+                <TextBlock Grid.Row="1" Grid.ColumnSpan="3" Text="{Binding Content}" TextWrapping="Wrap" Foreground="#e2e2e2" Margin="0,5,0,0"/>
+                <!-- 附件芯片：文件传输事件显示，点击用系统默认程序打开本机文件 -->
+                <Button Grid.Row="2" Grid.ColumnSpan="3" Tag="event-attachment" Classes="quiet"
+                        IsVisible="{Binding HasAttachment}" HorizontalAlignment="Left" Margin="0,6,0,0"
+                        Padding="9,4" ToolTip.Tip="点击打开附件">
+                  <StackPanel Orientation="Horizontal" Spacing="5">
+                    <TextBlock Text="📎" FontSize="12"/>
+                    <TextBlock Text="{Binding AttachmentName}" FontSize="11.5" Foreground="#9ecbff"/>
+                  </StackPanel>
+                </Button>
+              </Grid>
+            </Border>
+          </DataTemplate></ListBox.ItemTemplate>
+        </ListBox>
+        <Border Grid.Row="2" Background="#242424" Padding="12" BorderBrush="#343434" BorderThickness="0,1,0,0">
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+            <TextBox x:Name="MessageBox" PlaceholderText="输入消息，@ 选择成员，选中群组可 @全部…" Background="#303030" BorderThickness="0" CornerRadius="8" Padding="10,8"/>
+            <Button Grid.Column="1" x:Name="SendBtn" Classes="primary" Content="发送"/>
+          </Grid>
+        </Border>
+      </Grid>
+      <Border Grid.Column="2" Background="#202020" BorderBrush="#343434" BorderThickness="1,0,0,0" Padding="13">
+        <TabControl>
+          <TabItem x:Name="DetailsTab" Header="详情">
+            <ScrollViewer><StackPanel Spacing="5">
+              <TextBlock x:Name="MembersHeading" Classes="heading" Text="成员"/>
+              <ListBox x:Name="MemberList" ItemsSource="{Binding Members}">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="local:A2AMemberItem">
+                    <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,2" ToolTip.Tip="{Binding NodeId}">
+                      <StackPanel Spacing="1">
+                        <TextBlock Text="{Binding DisplayName}" Foreground="#e8eef5" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Text="{Binding NodeIdShort}" FontSize="10" Foreground="#6f7b88" TextTrimming="CharacterEllipsis"/>
+                      </StackPanel>
+                      <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                        <TextBlock Text="{Binding RoleText}" FontSize="10" Foreground="#78b7ff" HorizontalAlignment="Right"/>
+                        <TextBlock Text="{Binding StateText}" FontSize="10" Foreground="{Binding StateBrush}" HorizontalAlignment="Right"/>
+                      </StackPanel>
+                      <!-- 群主视角：鼠标悬停成员行时显示踢出按钮（row-action-btn 全局悬停显隐样式） -->
+                      <Button Grid.Column="2" Classes="quiet row-action-btn" Tag="member-kick" Content="踢出"
+                              IsVisible="{Binding CanKick}" FontSize="10" Padding="8,2"
+                              VerticalAlignment="Center" Margin="8,0,0,0"
+                              ToolTip.Tip="将该成员移出群组"/>
+                    </Grid>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+              <TextBlock x:Name="TasksHeading" Classes="heading" Text="任务"/><ItemsControl ItemsSource="{Binding Tasks}"/>
+              <TextBlock x:Name="FilesHeading" Classes="heading" Text="文件 / ARTIFACT"/><ItemsControl ItemsSource="{Binding Artifacts}"/>
+              <TextBlock x:Name="AuditHeading" Classes="heading" Text="审计摘要"/><ItemsControl ItemsSource="{Binding Audit}"/>
+            </StackPanel></ScrollViewer>
+          </TabItem>
+          <TabItem x:Name="InboxTab" Header="Inbox">
+            <ListBox x:Name="InboxList" ItemsSource="{Binding Inbox}">
+              <ListBox.ItemTemplate><DataTemplate x:DataType="core:A2AInteraction">
+                <Border Background="#292929" CornerRadius="8" Padding="10" Margin="0,3">
+                  <StackPanel Spacing="5">
+                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="#eeeeee"/>
+                    <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" FontSize="12" Foreground="#aaaaaa"/>
+                    <TextBlock Text="{Binding State}" FontSize="11" Foreground="#d29922"/>
+                    <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding ShowActions}">
+                      <Button Classes="primary" Content="接受" Tag="accept"/>
+                      <Button Classes="quiet" Content="拒绝" Tag="reject"/>
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          </TabItem>
+          <TabItem x:Name="SummaryTab" Header="摘要" IsVisible="{Binding IsGroupSessionSelected}">
+            <ScrollViewer>
+              <StackPanel Spacing="5">
+                <TextBlock x:Name="GroupSummaryHeading" Classes="heading" Text="群共享摘要（每 10 轮自动压缩）"/>
+                <TextBlock x:Name="GroupSummaryText" Text="{Binding SelectedGroupSummary, FallbackValue=暂无摘要, TargetNullValue=暂无摘要}"
+                           TextWrapping="Wrap" Foreground="#e2e2e2" FontSize="12.5"/>
+                <TextBlock x:Name="SummaryDescription" Text="摘要由群主 Helper 自动生成并同步给所有成员，供各端推理使用；寒暄类闲聊不进入摘要。"
+                           TextWrapping="Wrap" FontSize="11" Foreground="#6f7b88" Margin="0,8,0,0"/>
+              </StackPanel>
+            </ScrollViewer>
+          </TabItem>
+          <TabItem x:Name="NodeTab" Header="节点">
+            <StackPanel Spacing="7">
+              <TextBlock x:Name="RuntimeHeading" Classes="heading" Text="运行配置"/>
+              <TextBlock x:Name="NodeNameText" Text="{Binding DisplayName, StringFormat='名称：{0}'}"/>
+              <TextBlock x:Name="NodeEnabledText" Text="{Binding Enabled, StringFormat='启用：{0}'}"/>
+              <TextBlock x:Name="NodeConfiguredPortText" Text="{Binding ListenPort, StringFormat='配置端口：{0}'}"/>
+              <TextBlock x:Name="NodeActualPortText" Text="{Binding ActualPort, StringFormat='实际端口：{0}'}"/>
+              <TextBlock x:Name="NodeIdText" Text="{Binding NodeId, StringFormat='NodeId：{0}'}" TextWrapping="Wrap"/>
+              <TextBlock Text="高风险配对、任务与文件操作始终进入 Inbox，不会自动执行。" TextWrapping="Wrap" Foreground="#d29922" Margin="0,12,0,0"/>
+            </StackPanel>
+          </TabItem>
+        </TabControl>
+      </Border>
+    </Grid>
+
+    <!-- @ 提记弹层：群会话发送框输入 @ 呼出成员列表（含 @全部），↑↓/Enter/空格/点击 选中插入 -->
+    <Popup x:Name="MentionPopup" PlacementTarget="{Binding #MessageBox}" Placement="Top"
+           IsLightDismissEnabled="False" HorizontalOffset="4">
+      <Border Background="#2b2b2b" BorderBrush="#3f3f3f" BorderThickness="1" CornerRadius="10"
+              Padding="4" MinWidth="230" MaxWidth="320" Margin="0,0,0,6"
+              BoxShadow="0 6 18 #55000000">
+        <ListBox x:Name="MentionList" MaxHeight="220" Background="Transparent"
+                 BorderThickness="0" Padding="2">
+          <ListBox.Styles>
+            <Style Selector="ListBoxItem">
+              <Setter Property="Background" Value="Transparent"/>
+              <Setter Property="MinHeight" Value="32"/>
+              <Setter Property="Padding" Value="10,4"/>
+              <Setter Property="CornerRadius" Value="7"/>
+            </Style>
+            <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
+              <Setter Property="Background" Value="#26ffffff"/>
+            </Style>
+            <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+              <Setter Property="Background" Value="#3d6bb9ff"/>
+            </Style>
+          </ListBox.Styles>
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="local:MentionItem">
+              <Panel>
+                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding Icon}" FontSize="14" VerticalAlignment="Center"/>
+                  <TextBlock Text="{Binding Display}" FontSize="13" Foreground="#e6e6e6" VerticalAlignment="Center"/>
+                </StackPanel>
+                <TextBlock Text="{Binding StatusText}" FontSize="11" Foreground="#9a9a9a"
+                           HorizontalAlignment="Right" VerticalAlignment="Center"/>
+              </Panel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </Border>
+    </Popup>
+  </Grid>
+</Window>

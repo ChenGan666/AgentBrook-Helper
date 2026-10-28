@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Text.Json;
 using AgentBrook.Agent.Configuration;
@@ -530,6 +531,31 @@ public sealed class BrookAgent : IAsyncDisposable
         }
     }
 
+    /// <summary>回合内插队消息队列：下一轮模型调用时并入会话，Agent 自行判断与当前任务的关联。</summary>
+    private readonly ConcurrentQueue<ChatMessage> _steeringQueue = new();
+
+    /// <summary>
+    /// 用户在执行中插队发送消息（队列"立即执行"）：不打断当前流，下一轮模型调用时作为用户消息注入，
+    /// Agent 结合上下文自行判断是补充当前任务还是独立新任务。
+    /// </summary>
+    public void EnqueueSteering(ChatMessage message) => _steeringQueue.Enqueue(message);
+
+    /// <summary>取走全部插队消息：每条前置注记（让模型知道它来自执行中插队）。</summary>
+    private List<ChatMessage>? DrainSteering()
+    {
+        if (_steeringQueue.IsEmpty) return null;
+        var list = new List<ChatMessage>();
+        while (_steeringQueue.TryDequeue(out var m))
+        {
+            var contents = m.Contents.Count > 0
+                ? new List<AIContent>(m.Contents)
+                : [new TextContent("")];
+            contents.Insert(0, new TextContent("[用户在执行过程中插队发送的这条消息——请自行判断是对当前任务的补充，还是应另行处理的新事项]"));
+            list.Add(new ChatMessage(ChatRole.User, contents));
+        }
+        return list;
+    }
+
     /// <summary>打断当前回合：取消模型流与审批等待，已完成部分保留在会话中。</summary>
     public void CancelTurn()
     {
@@ -1012,12 +1038,18 @@ public sealed class BrookAgent : IAsyncDisposable
                 }
             }
 
-            if (approvals.Count == 0)
+            // 插队消息：无待审批且无可插队时回合结束；有插队则并入下轮调用（Agent 自行判断关联）
+            var steering = DrainSteering();
+            if (approvals.Count == 0 && steering is null)
             {
                 break;
             }
+            if (steering is not null)
+            {
+                yield return new BrookEvent.ToolStarted("log:⏩ 收到用户插队消息，已并入当前回合", null);
+            }
 
-            followUp = [];
+            followUp = steering ?? [];
             foreach (var request in approvals)
             {
                 var call = request.ToolCall as FunctionCallContent;

@@ -242,17 +242,20 @@ AgentBrook-Helper/
     ├── AgentBrook.A2A.Core/         ← A2A 协议内核：Peer/Group 会话、事件账本、节点身份
     ├── AgentBrook.A2A.Transport/    ← A2A 传输：签名鉴权、配对、发现、群组同步、文件推送
     └── AgentBrook.Helper/           ← 桌面宿主（Avalonia）；macOS + Windows
-        ├── BubbleWindow.axaml(.cs)  ← 悬浮气泡：状态动画、拖拽、位置记忆
-        ├── MainWindow.axaml(.cs)    ← 对话窗：聊天流、@ 提记、状态条、审批卡片
-        ├── A2ASessionWindow(.cs)    ← A2A 会话中心：Peers/群组/事件流/成员管理/摘要
-        ├── GroupAutoTalkProcessor.cs← 群自动交流：@ 触发、防循环六道闸、上下文压缩
-        ├── A2AExtensionController.cs← A2A 宿主与业务联动（群组/发现/压缩/更新）
-        ├── A2AAgentTools.cs         ← a2a_* 工具暴露给模型
-        ├── ModelSettingsWindow      ← 设置窗口：常规 / 模型 / Token充值 / 协作 / 更新
-        ├── ClientFingerprint.cs     ← 硬件指纹（试用卡防重复申请）
-        ├── MarkdownView.cs          ← 自研 Markdown → Avalonia 渲染器
-        ├── AssistantController.cs   ← 气泡与对话窗共享的控制器
-        ├── UiPrefs.cs               ← UI 偏好持久化
+        ├── App.axaml(.cs) / Program.cs ← 应用入口与生命周期（退出保护、单实例）
+        ├── Core/                    ← 控制器与 A2A 联动：AssistantController（气泡/对话窗共享）、
+        │                              A2AExtensionController（群组/发现/压缩/更新）、
+        │                              GroupAutoTalkProcessor（防循环六道闸）、
+        │                              A2AAgentTools、A2ARemoteMessageProcessor、LocalApiServer
+        ├── Windows/                 ← 全部窗口：BubbleWindow（按职责拆 7 个 partial：磁吸/命中/
+        │                              轨道/伙伴环/定位/Toast/视觉）、MainWindow（聊天流/@ 提记/
+        │                              审批卡片）、ModelSettingsWindow、OnboardingWindow、
+        │                              A2ASessionWindow（A2A 会话中心）、WindowBase
+        ├── Views/                   ← 对话流控件：MarkdownView（自研渲染器）、MediaBlock、
+        │                              InteractionCard、LanPeerBubbles
+        ├── Support/                 ← 三语 I18n、ModelCatalog、AutoStart、UiPrefs、
+        │                              ClientFingerprint（试用卡防重复）、NotifySound
+        ├── Environment/             ← 环境检测与一键修复
         ├── Update/AutoUpdater.cs    ← 每日更新检查、分块下载、换文件重启
         └── build-mac-app.sh / publish-helper.ps1 ← macOS / Windows 打包脚本
 ```

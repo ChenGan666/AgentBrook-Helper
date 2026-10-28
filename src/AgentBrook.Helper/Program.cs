@@ -1,3 +1,7 @@
+﻿using AgentBrook.Helper.Support;
+using AgentBrook.Helper.Windows;
+using AgentBrook.Helper.Core;
+using AgentBrook.Helper.Views;
 using Avalonia;
 using System;
 

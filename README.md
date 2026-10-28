@@ -242,17 +242,20 @@ AgentBrook-Helper/
     ├── AgentBrook.A2A.Core/         ← A2A protocol core (Peer/Group sessions, events, identity)
     ├── AgentBrook.A2A.Transport/    ← A2A transport (signing, pairing, discovery, group sync)
     └── AgentBrook.Helper/           ← desktop host (Avalonia); macOS + Windows
-        ├── BubbleWindow.axaml(.cs)  ← floating bubble: animation, drag, position memory
-        ├── MainWindow.axaml(.cs)    ← chat window: stream, @-mentions, status bar, approval cards
-        ├── A2ASessionWindow(.cs)    ← A2A session center: peers, groups, event stream, summary
-        ├── GroupAutoTalkProcessor.cs← group auto-talk: @-trigger, anti-loop gates, context
-        ├── A2AExtensionController.cs← A2A host + business glue (groups, discovery, update)
-        ├── A2AAgentTools.cs         ← a2a_* tools exposed to the model
-        ├── ModelSettingsWindow      ← settings: general / models / token top-up / collaboration / update
-        ├── ClientFingerprint.cs     ← hardware fingerprint (trial-card anti-duplicate)
-        ├── MarkdownView.cs          ← hand-written Markdown → Avalonia renderer
-        ├── AssistantController.cs   ← controller shared by bubble and window
-        ├── UiPrefs.cs               ← UI preference persistence
+        ├── App.axaml(.cs) / Program.cs ← app entry & lifecycle (quit protection, single instance)
+        ├── Core/                    ← controllers & A2A glue: AssistantController (shared by bubble
+        │                              and window), A2AExtensionController (groups/discovery/compression/
+        │                              update), GroupAutoTalkProcessor (anti-loop gates), A2AAgentTools,
+        │                              A2ARemoteMessageProcessor, LocalApiServer
+        ├── Windows/                 ← every window: BubbleWindow (split into 7 partials: dock/
+        │                              hit-test/orbit/peer ring/positioning/toast/visual), MainWindow
+        │                              (stream/@-mentions/approval cards), ModelSettingsWindow,
+        │                              OnboardingWindow, A2ASessionWindow, WindowBase
+        ├── Views/                   ← conversation controls: MarkdownView (hand-written renderer),
+        │                              MediaBlock, InteractionCard, LanPeerBubbles
+        ├── Support/                 ← trilingual I18n, ModelCatalog, AutoStart, UiPrefs,
+        │                              ClientFingerprint (trial-card anti-duplicate), NotifySound
+        ├── Environment/             ← environment checks with one-click repair
         ├── Update/AutoUpdater.cs    ← daily update check, chunked download, apply & restart
         └── build-mac-app.sh / publish-helper.ps1 ← macOS / Windows packaging
 ```

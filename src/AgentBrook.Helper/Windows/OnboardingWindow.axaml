@@ -1,0 +1,192 @@
+﻿<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="AgentBrook.Helper.Windows.OnboardingWindow"
+        xmlns:env="using:AgentBrook.Helper.EnvironmentCheck"
+        Title="AgentBrook Helper"
+        Width="600" Height="520" CanResize="False"
+        WindowStartupLocation="CenterScreen" Topmost="True"
+        Background="#1f1f1f" FontFamily="PingFang SC, Hiragino Sans GB, Microsoft YaHei">
+  <Window.Styles>
+    <Style Selector="Button.primaryBtn">
+      <Setter Property="Background" Value="#2f7bff"/>
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="CornerRadius" Value="7"/>
+      <Setter Property="Padding" Value="16,7"/>
+      <Setter Property="Cursor" Value="Hand"/>
+    </Style>
+    <Style Selector="Button.primaryBtn:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#4a8cff"/>
+      <Setter Property="Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.primaryBtn:pressed /template/ ContentPresenter">
+      <Setter Property="Background" Value="#1f66e0"/>
+      <Setter Property="Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.ghostBtn">
+      <Setter Property="Background" Value="#303030"/>
+      <Setter Property="Foreground" Value="#dddddd"/>
+      <Setter Property="CornerRadius" Value="7"/>
+      <Setter Property="Padding" Value="10,6"/>
+      <Setter Property="Cursor" Value="Hand"/>
+    </Style>
+    <Style Selector="Button.ghostBtn:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#3d3d3d"/>
+      <Setter Property="Foreground" Value="#ffffff"/>
+    </Style>
+    <Style Selector="Button.ghostBtn:pressed /template/ ContentPresenter">
+      <Setter Property="Background" Value="#2a2a2a"/>
+      <Setter Property="Foreground" Value="#ffffff"/>
+    </Style>
+    <Style Selector="Button.linkBtn">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="#8a8a8a"/>
+      <Setter Property="Padding" Value="4"/>
+      <Setter Property="Cursor" Value="Hand"/>
+    </Style>
+    <Style Selector="Button.linkBtn:pointerover /template/ ContentPresenter">
+      <Setter Property="Foreground" Value="#c8c8c8"/>
+    </Style>
+    <Style Selector="Button.iconBtn">
+      <Setter Property="Width" Value="44"/>
+      <Setter Property="Height" Value="44"/>
+      <Setter Property="FontSize" Value="20"/>
+      <Setter Property="CornerRadius" Value="8"/>
+      <Setter Property="Padding" Value="0"/>
+      <Setter Property="Background" Value="#333333"/>
+      <Setter Property="HorizontalContentAlignment" Value="Center"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Setter Property="Cursor" Value="Hand"/>
+    </Style>
+    <Style Selector="Button.iconBtn:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#3f3f3f"/>
+    </Style>
+    <Style Selector="Button.iconBtn:pressed /template/ ContentPresenter">
+      <Setter Property="Background" Value="#2a2a2a"/>
+    </Style>
+    <Style Selector="Button.iconBtn:checked /template/ ContentPresenter">
+      <Setter Property="Background" Value="#2f7bff"/>
+      <Setter Property="Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.iconBtn:checked:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#4a8cff"/>
+      <Setter Property="Foreground" Value="White"/>
+    </Style>
+    <Style Selector="TextBlock.formLabel">
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Foreground" Value="#8d9bad"/>
+      <Setter Property="Margin" Value="0,10,0,4"/>
+    </Style>
+    <Style Selector="TextBox">
+      <Setter Property="Background" Value="#303030"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="CornerRadius" Value="8"/>
+      <Setter Property="Padding" Value="10,8"/>
+      <Setter Property="Foreground" Value="#e6e6e6"/>
+    </Style>
+  </Window.Styles>
+  <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="24,18,24,18">
+    <Grid Grid.Row="0" ColumnDefinitions="*,Auto">
+      <TextBlock x:Name="TitleText" Text="欢迎使用 AgentBrook Helper" FontSize="18" FontWeight="SemiBold" Foreground="#f0f0f0"/>
+      <Button x:Name="SkipBtn" Grid.Column="1" Classes="linkBtn" Content="跳过引导"/>
+    </Grid>
+    <TextBlock Grid.Row="1" x:Name="StepText" Text="" Margin="0,6,0,12" FontSize="12" Foreground="#78b7ff"/>
+
+    <ScrollViewer Grid.Row="2" Padding="0,0,6,0">
+      <Panel>
+      <!-- 步骤 2：大模型 -->
+      <StackPanel x:Name="StepModels" Spacing="8" IsVisible="False">
+        <TextBlock x:Name="S1Welcome" Text="欢迎使用 AgentBrook Helper！先配置一个大模型供应商（OpenAI 兼容，可稍后在「设置 → 模型」中修改）。" TextWrapping="Wrap" Foreground="#c8c8c8"/>
+        <TextBlock x:Name="S2Desc" TextWrapping="Wrap" Foreground="#c8c8c8"/>
+        <TextBlock x:Name="S2Title" Text="配置大模型" Classes="formLabel" Margin="0,8,0,0"/>
+        <TextBlock x:Name="S2PresetLabel" Classes="formLabel" Text="预设"/>
+        <ComboBox x:Name="PresetBox" MinWidth="320" HorizontalAlignment="Left"/>
+        <TextBlock x:Name="S2BaseUrlLabel" Classes="formLabel" Text="API 地址"/>
+        <TextBox x:Name="BaseUrlBox" MinWidth="320" HorizontalAlignment="Left"/>
+        <TextBlock x:Name="S2ApiKeyLabel" Classes="formLabel" Text="API Key"/>
+        <TextBox x:Name="ApiKeyBox" MinWidth="320" HorizontalAlignment="Left"/>
+        <StackPanel x:Name="TokenRow" Orientation="Horizontal" Spacing="10"
+                    HorizontalAlignment="Left" IsVisible="False" Margin="0,4,0,0">
+            <Button x:Name="TrialBtn" Classes="ghostBtn" Content="获取体验卡" MinWidth="96"/>
+            <Button x:Name="BuyBtn" Classes="ghostBtn" Content="优惠购买Token卡" MinWidth="96"/>
+        </StackPanel>
+        <TextBlock x:Name="TrialHint" Text="" FontSize="12" Foreground="#8a8a8a" TextWrapping="Wrap"
+                   MaxWidth="420" HorizontalAlignment="Left" Margin="0,2,0,0"/>
+        <TextBlock x:Name="S2ModelsLabel" Classes="formLabel" Text="模型（逗号分隔）"/>
+        <TextBox x:Name="ModelsBox" MinWidth="320" HorizontalAlignment="Left"/>
+        <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,4,0,0">
+            <Button x:Name="ModelTestBtn" Classes="ghostBtn" Content="测试" MinWidth="72"/>
+            <TextBlock x:Name="ModelTestHint" VerticalAlignment="Center" FontSize="12"
+                       Foreground="#8a8a8a" TextWrapping="Wrap"/>
+        </StackPanel>
+      </StackPanel>
+
+      <!-- 步骤 1：身份 -->
+      <StackPanel x:Name="StepIdentity" Spacing="8">
+        <TextBlock x:Name="S1NameLabel" Classes="formLabel" Text="助手名称"/>
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+          <TextBox x:Name="NameBox" Text="Brook"/>
+          <Button x:Name="NameGenBtn" Grid.Column="1" Classes="primaryBtn" Content="取名" MinWidth="72"/>
+        </Grid>
+        <TextBlock x:Name="S1IconLabel" Classes="formLabel" Text="选择图标"/>
+        <WrapPanel x:Name="IconGrid" MaxWidth="420"/>
+        <TextBlock x:Name="S1Hint" Text="名称与图标会显示在气泡、A2A 列表与对话中；点「取名」可让大模型起一个名字。" FontSize="11.5" Foreground="#6f7b88" Margin="0,4,0,0"/>
+      </StackPanel>
+
+      <!-- 步骤 3：语言与提示词 -->
+      <StackPanel x:Name="Step3" Spacing="8" IsVisible="False">
+        <TextBlock x:Name="S3Desc" Text="选择模型回复使用的语言，并可选填一段默认提示词（附加到系统指令，每轮生效）。" TextWrapping="Wrap" Foreground="#c8c8c8"/>
+        <TextBlock x:Name="S3LanguageLabel" Classes="formLabel" Text="交流语言"/>
+        <ComboBox x:Name="ReplyLangBox" MinWidth="220" HorizontalAlignment="Left" SelectedIndex="0">
+          <ComboBoxItem Content="中文" Tag="zh"/>
+          <ComboBoxItem Content="English" Tag="en"/>
+          <ComboBoxItem Content="Bahasa Indonesia" Tag="id"/>
+        </ComboBox>
+        <TextBlock x:Name="S3PromptLabel" Classes="formLabel" Text="默认提示词"/>
+        <TextBox x:Name="PromptBox" MinHeight="90" Text="" TextWrapping="Wrap"
+                 AcceptsReturn="True" Watermark="例如：回答尽量简短；优先用表格展示数据…"/>
+      </StackPanel>
+
+      <!-- 步骤 4：工作空间 -->
+      <StackPanel x:Name="Step4" Spacing="8" IsVisible="False">
+        <TextBlock x:Name="S4Title" Classes="formLabel"/>
+        <TextBlock x:Name="S4Desc" Text="工作空间是智能体的文件、脚本、记忆与技能所在目录。默认即可，也可自选目录。" TextWrapping="Wrap" Foreground="#c8c8c8"/>
+        <TextBlock x:Name="S4Label" Classes="formLabel" Text="工作空间目录"/>
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <TextBox x:Name="WorkspaceBox" MinWidth="380"/>
+          <Button x:Name="WorkspacePickBtn" Classes="ghostBtn" Content="选择目录…"/>
+        </StackPanel>
+        <TextBlock x:Name="WorkspaceHint" FontSize="11.5" Foreground="#6f7b88" TextWrapping="Wrap"
+                   Text="修改保存后需重启应用才能完全生效。"/>
+      </StackPanel>
+
+      <!-- 步骤 5：环境检测 -->
+      <StackPanel x:Name="Step5" Spacing="8" IsVisible="False">
+        <TextBlock x:Name="S5Title" Classes="formLabel"/>
+        <TextBlock x:Name="S5Desc" Text="检测运行环境是否满足 AgentBrook Helper 正常运行。" TextWrapping="Wrap" Foreground="#c8c8c8"/>
+        <StackPanel Orientation="Horizontal" Spacing="10">
+          <Button x:Name="RunCheckBtn" Classes="primaryBtn" Content="开始检测"/>
+          <Button x:Name="RepairEnvironmentBtn" Classes="ghostBtn" IsEnabled="False"/>
+        </StackPanel>
+        <TextBlock x:Name="CheckSummary" FontSize="12.5" Foreground="#8a8a8a" TextWrapping="Wrap"/>
+        <Border Background="#252525" CornerRadius="12" Padding="12" BorderBrush="#333333" BorderThickness="1">
+          <StackPanel x:Name="EnvList" Spacing="10"/>
+        </Border>
+        <TextBlock x:Name="CheckHint" Text="" FontSize="12" Foreground="#8a8a8a" TextWrapping="Wrap"/>
+      </StackPanel>
+
+      <!-- 完成态 -->
+      <StackPanel x:Name="DonePanel" Spacing="10" IsVisible="False">
+        <TextBlock x:Name="DoneTitle" Text="🎉 初始化完成！" FontSize="16" FontWeight="SemiBold" Foreground="#f0f0f0"/>
+        <TextBlock x:Name="DoneDesc" Text="双击屏幕上的气泡即可开始对话。部分设置（工作空间、界面语言等）将在重启应用后完全生效。" TextWrapping="Wrap" Foreground="#c8c8c8"/>
+        <Button x:Name="RestartBtn" Classes="primaryBtn" Content="立即重启应用" HorizontalAlignment="Left"/>
+      </StackPanel>
+    </Panel>
+    </ScrollViewer>
+
+    <Grid Grid.Row="3" ColumnDefinitions="*,Auto,Auto" Margin="0,14,0,0">
+      <Button x:Name="BackBtn" Classes="ghostBtn" Content="上一步" IsVisible="False"/>
+      <Button x:Name="NextBtn" Grid.Column="1" Classes="primaryBtn" Content="下一步" MinWidth="96"/>
+    </Grid>
+  </Grid>
+</Window>
