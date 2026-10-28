@@ -58,6 +58,16 @@ public partial class MainWindow : Window
     private Border? _modelConfigurationCard;
     private StackPanel? _chatPanel;
     private ScrollViewer? _chatScroll;
+
+    // ── 阶段导航（左侧游标圆点列 + 悬停摘要卡）──
+    private StackPanel? _stageRail;
+    private Border? _stageCard;
+    private TextBlock? _stageCardTitle, _stageCardMeta, _stageCardText;
+    private readonly Dictionary<int, Control> _stageAnchors = new();   // 阶段Id → 对话区锚点控件
+    private readonly Dictionary<int, Avalonia.Controls.Shapes.Ellipse> _stageDots = new();   // 阶段Id → 圆点
+    private int _activeStageId;      // 当前定位/阅读阶段
+    private int _hoverStageId;       // 鼠标悬停阶段（优先于 _activeStageId 显示）
+    private DispatcherTimer? _stageHideTimer;   // 悬停卡延时收起（圆点→卡片移动不闪）
     // ── 历史滚动加载：会话记录可视光标（从末尾计数已渲染条数）与加载状态 ──
     private int _visibleFromEnd;        // 已可见的记录条数（从末尾计；含底部直播渲染与顶部滚动加载）
     private int _lastKnownTotal;        // 上次对账时的记录总数
@@ -98,6 +108,17 @@ public partial class MainWindow : Window
 
         _chatPanel = this.FindControl<StackPanel>("ChatPanel");
         _chatScroll = this.FindControl<ScrollViewer>("ChatScroll");
+        _stageRail = this.FindControl<StackPanel>("StageRail");
+        _stageCard = this.FindControl<Border>("StageHoverCard");
+        _stageCardTitle = this.FindControl<TextBlock>("StageCardTitle");
+        _stageCardMeta = this.FindControl<TextBlock>("StageCardMeta");
+        _stageCardText = this.FindControl<TextBlock>("StageCardText");
+        if (_stageCard is not null)
+        {
+            // 悬停卡保持：从圆点移上卡片时不收起
+            _stageCard.PointerEntered += (_, _) => _stageHideTimer?.Stop();
+            _stageCard.PointerExited += (_, _) => HideStageCard();
+        }
         _chatScroll!.ScrollChanged += OnChatScrollChanged;   // 滚动到顶 → 增量加载更早的历史记录
         _statusText = this.FindControl<TextBlock>("StatusText");
         _statusPill = this.FindControl<Border>("StatusPill");
@@ -670,6 +691,7 @@ public partial class MainWindow : Window
     private void ClearChatForSessionSwitch(string title)
     {
         _chatPanel!.Children.Clear();
+        _stageAnchors.Clear();
         _lastRenderedAnswer = null;
         _streamViewer = null;
         UpdateSessionTitle();
@@ -683,6 +705,7 @@ public partial class MainWindow : Window
         _lastKnownTotal = _controller.TranscriptCount;
         _visibleFromEnd = transcript.Count;
         _historyExhausted = false;
+        RebuildStageRail();   // 阶段清单随会话切换重建（锚点由 BuildTranscriptItem 的 StartHint 匹配补登）
         var replayed = transcript.Count;
 
         if (replayed > 0)
@@ -916,6 +939,8 @@ public partial class MainWindow : Window
                 if (tool.Name == "__clear__")
                 {
                     _chatPanel!.Children.Clear();
+                    _stageAnchors.Clear();
+                    RebuildStageRail();   // 新会话：阶段轨清空
                     _streamViewer = null;
                     _lastRenderedAnswer = null;
                     _execCard = null;
@@ -944,6 +969,10 @@ public partial class MainWindow : Window
             case BrookEvent.PlanChanged plan:
                 UpsertPlanCard(plan.PlanText);   // todo_write 完成 → 计划卡原地刷新
                 break;
+            case BrookEvent.StageStarted st:
+                AnchorLatestUserBubble(st.Id);   // 新阶段：把刚发出的用户气泡登记为定位锚点
+                RebuildStageRail();
+                break;
             case BrookEvent.TextDelta:
                 UpdateStreamText();   // 流式：把控制器全量答案覆盖到当前气泡（幂等）
                 break;
@@ -961,6 +990,7 @@ public partial class MainWindow : Window
                 RemoveStreamBubble();  // 流式纯文本让位给 Markdown 渲染
                 ShowFinalAnswer();
                 AppendUsageLine();
+                RebuildStageRail();   // 阶段摘要/关闭状态可能已更新
                 break;
         }
     }
@@ -1942,6 +1972,273 @@ public partial class MainWindow : Window
         ScrollToEnd();
     }
 
+    // ───────────────────────── 阶段导航：左侧游标圆点 + 悬停摘要卡 + 点击定位 ─────────────────────────
+    private static readonly Color StageDotDim = Color.Parse("#555555");
+    private static readonly Color StageDotActive = Color.Parse("#c8c8c8");
+    private static readonly Color StageDotHover = Color.Parse("#9ec3ff");
+
+    private const double StagePitchBase = 23;   // 常规点距（14 命中区 + 9 间距）
+    private const double StageDotBase = 5;      // 常规圆点直径
+    private double _dotPitch = StagePitchBase;  // 自适应后的实际点距（溢出时缩小）
+    private double _dotBase = StageDotBase;     // 自适应后的基础直径
+    private readonly Dictionary<int, double> _dotScale = new();      // 当前缩放（动画帧值）
+    private readonly Dictionary<int, double> _dotScaleTarget = new();// 目标缩放
+    private DispatcherTimer? _dotAnim;          // 挤压/放大弹性动画
+    private Control? _railGrid;                 // 轨道外层 Grid（测高算点距）
+
+    /// <summary>按 _controller.SessionStages 重建圆点列（阶段新增/摘要更新/会话切换后调用）。</summary>
+    private void RebuildStageRail()
+    {
+        if (_stageRail is null)
+        {
+            return;
+        }
+        if (_railGrid is null && _stageRail.Parent is Control g)
+        {
+            _railGrid = g;
+            g.SizeChanged += (_, _) => RebuildStageRail();   // 高度变化 → 重算点距（自适应缩放）
+        }
+        var stages = _controller.SessionStages;
+        // 自适应：点距 = min(常规, 可用高/阶段数)，点数撑爆高度时整体等比缩小（不设下限）
+        var avail = _railGrid?.Bounds.Height ?? 0;
+        _dotPitch = avail > 0 && stages.Count > 0
+            ? Math.Min(StagePitchBase, avail / stages.Count)
+            : StagePitchBase;
+        _dotBase = Math.Max(1, Math.Min(StageDotBase, _dotPitch * 0.45));
+
+        _stageRail.Children.Clear();
+        _stageDots.Clear();
+        _dotScale.Clear();
+        _dotScaleTarget.Clear();
+        foreach (var st in stages)
+        {
+            var id = st.Id;
+            var dot = new Avalonia.Controls.Shapes.Ellipse
+            {
+                Width = _dotBase,
+                Height = _dotBase,
+                Fill = new SolidColorBrush(StageDotDim),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            var hit = new Border   // 命中区=点距（挤压后仍整列可点）
+            {
+                Height = _dotPitch,
+                Width = 14,
+                Background = Brushes.Transparent,
+                Child = dot,
+                Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+                Tag = id,
+            };
+            hit.PointerEntered += (_, _) => OnStageDotEnter(id);
+            hit.PointerExited += (_, _) => OnStageDotExit();
+            hit.PointerPressed += (_, e) =>
+            {
+                NavigateToStage(id);
+                e.Handled = true;
+            };
+            _stageRail.Children.Add(hit);
+            _stageDots[id] = dot;
+            _dotScale[id] = 1;
+            _dotScaleTarget[id] = 1;
+        }
+        UpdateStageDots();
+    }
+
+    /// <summary>
+    /// 圆点视觉：默认 dim；当前定位 ×1.6 主色；悬停 ×1.9 亮色并挤压相邻点
+    /// （±1 位 ×0.7、±2 位 ×0.85）。尺寸走短动画，颜色即时。
+    /// </summary>
+    private void UpdateStageDots()
+    {
+        var ordered = _stageDots.Keys.OrderBy(k => k).ToList();
+        foreach (var (id, dot) in _stageDots)
+        {
+            var scale = 1.0;
+            var color = StageDotDim;
+            if (id == _activeStageId)
+            {
+                scale = 1.6;
+                color = StageDotActive;
+            }
+            if (_hoverStageId != 0)
+            {
+                var dist = Math.Abs(ordered.IndexOf(id) - ordered.IndexOf(_hoverStageId));
+                if (id == _hoverStageId)
+                {
+                    scale = 1.9;
+                    color = StageDotHover;
+                }
+                else if (dist == 1)
+                {
+                    scale = 0.7;   // 紧邻点被挤压
+                }
+                else if (dist == 2)
+                {
+                    scale = 0.85;
+                }
+            }
+            _dotScaleTarget[id] = scale;
+            dot.Fill = new SolidColorBrush(color);
+        }
+        // 尺寸趋近动画：~16ms 步进、0.35 插值系数（≈150ms 收敛的弹性感）
+        _dotAnim ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+        _dotAnim.Tick -= DotAnimTick;
+        _dotAnim.Tick += DotAnimTick;
+        _dotAnim.Start();
+    }
+
+    private void DotAnimTick(object? sender, EventArgs e)
+    {
+        var settled = true;
+        foreach (var (id, dot) in _stageDots)
+        {
+            var target = _dotScaleTarget.GetValueOrDefault(id, 1);
+            var cur = _dotScale.GetValueOrDefault(id, 1);
+            if (Math.Abs(target - cur) > 0.02)
+            {
+                settled = false;
+                cur += (target - cur) * 0.35;
+            }
+            else
+            {
+                cur = target;
+            }
+            _dotScale[id] = cur;
+            dot.Width = dot.Height = Math.Max(0.5, _dotBase * cur);
+        }
+        if (settled)
+        {
+            _dotAnim!.Stop();
+        }
+    }
+
+    private void OnStageDotEnter(int id)
+    {
+        _hoverStageId = id;
+        _stageHideTimer?.Stop();
+        UpdateStageDots();
+        var stage = _controller.SessionStages.FirstOrDefault(s => s.Id == id);
+        if (stage is not null)
+        {
+            ShowStageCard(stage, id);
+        }
+    }
+
+    private void OnStageDotExit()
+    {
+        _hoverStageId = 0;
+        UpdateStageDots();
+        // 延时收起：用户从圆点滑向摘要卡时不闪收
+        _stageHideTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(180) };
+        _stageHideTimer.Tick -= StageHideTick;
+        _stageHideTimer.Tick += StageHideTick;
+        _stageHideTimer.Stop();
+        _stageHideTimer.Start();
+    }
+
+    private void StageHideTick(object? sender, EventArgs e)
+    {
+        _stageHideTimer!.Stop();
+        HideStageCard();
+    }
+
+    private void HideStageCard()
+    {
+        if (_stageCard is not null)
+        {
+            _stageCard.IsVisible = false;
+        }
+    }
+
+    /// <summary>在圆点右侧弹出阶段摘要卡（深色圆角卡片，y 随圆点位置，夹取在可视区内）。</summary>
+    private void ShowStageCard(AgentBrook.Agent.Infrastructure.SessionStage stage, int id)
+    {
+        if (_stageCard is null || _stageCardTitle is null || _stageCardMeta is null || _stageCardText is null)
+        {
+            return;
+        }
+        _stageCardTitle.Text = stage.Title;
+        _stageCardMeta.Text = stage.Closed ? $"阶段 {stage.Id}" : $"阶段 {stage.Id} · 进行中";
+        _stageCardText.Text = stage.Closed && !string.IsNullOrWhiteSpace(stage.Summary)
+            ? stage.Summary
+            : "进行中（本阶段结束后自动生成摘要）";
+
+        // 定位：圆点在外层 Grid 中的 Y 减去微偏，夹到 [4, Grid高-卡高-8]
+        var railGrid = _stageRail?.Parent as Control;
+        var hit = _stageRail?.Children.FirstOrDefault(c => c.Tag is int t && t == id);
+        double y = 20;
+        if (railGrid is not null && hit is not null)
+        {
+            var pt = hit.TranslatePoint(new Point(0, 0), railGrid);
+            if (pt is { } p)
+            {
+                y = p.Y - 10;
+            }
+            var maxY = Math.Max(4, railGrid.Bounds.Height - 140);
+            y = Math.Clamp(y, 4, maxY);
+        }
+        _stageCard.Margin = new Thickness(26, y, 0, 0);
+        _stageCard.IsVisible = true;
+    }
+
+    /// <summary>最近一条用户气泡登记为阶段锚点（StageStarted 事件时刚发的那条即阶段起始消息）。</summary>
+    private void AnchorLatestUserBubble(int stageId)
+    {
+        for (var i = _chatPanel!.Children.Count - 1; i >= 0; i--)
+        {
+            if (_chatPanel.Children[i] is Border b && b.Tag as string == "msg")
+            {
+                _stageAnchors[stageId] = b;
+                return;
+            }
+        }
+    }
+
+    /// <summary>点击圆点：滚动到该阶段起始消息（顶部留 10dip 余量），并设为当前定位阶段。</summary>
+    private void NavigateToStage(int stageId)
+    {
+        _activeStageId = stageId;
+        UpdateStageDots();
+        if (_stageAnchors.TryGetValue(stageId, out var anchor) && _chatPanel is not null && _chatScroll is not null)
+        {
+            var pt = anchor.TranslatePoint(new Point(0, 0), _chatPanel);
+            if (pt is { } p)
+            {
+                _chatScroll.Offset = new Vector(0, Math.Max(0, p.Y - 10));
+            }
+        }
+        // 锚点缺失（历史未回放/被裁剪）：仅更新定位态，不报错
+    }
+
+    /// <summary>手动滚动联动：取「顶部仍在屏上（或刚过顶 60dip 内）」的最靠后阶段锚点为当前阅读阶段。</summary>
+    private void UpdateActiveStageFromScroll()
+    {
+        if (_stageAnchors.Count == 0 || _chatPanel is null || _chatScroll is null)
+        {
+            return;
+        }
+        var edge = _chatScroll.Offset.Y + 60;
+        var best = 0;
+        foreach (var (id, anchor) in _stageAnchors)
+        {
+            var pt = anchor.TranslatePoint(new Point(0, 0), _chatPanel);
+            if (pt is { } p && p.Y <= edge && id > best)
+            {
+                best = id;
+            }
+        }
+        if (best == 0 && _stageAnchors.Count > 0)
+        {
+            best = _stageAnchors.Keys.Min();   // 全部锚点都在顶上方：保持第一个阶段
+        }
+        if (best != 0 && best != _activeStageId)
+        {
+            _activeStageId = best;
+            UpdateStageDots();
+        }
+    }
+
     private void ScrollToEnd()
     {
         TrimChatHistory();
@@ -1956,7 +2253,19 @@ public partial class MainWindow : Window
         {
             var stack = new StackPanel { Spacing = 6 };
             stack.Children.Add(MarkdownView.Selectable(new SelectableTextBlock { Text = text, TextWrapping = TextWrapping.Wrap }));
-            return new Border { Classes = { "userBubble" }, Child = stack, Tag = "history" };
+            var item = new Border { Classes = { "userBubble" }, Child = stack, Tag = "history" };
+            // 阶段锚点匹配：StartHint（开启该阶段的用户消息开头）对得上就登记定位锚点
+            if (text.Trim() is { } t && t.Length > 0)
+            {
+                var stage = _controller.SessionStages
+                    .FirstOrDefault(s => s.StartHint.Length > 0 && !_stageAnchors.ContainsKey(s.Id)
+                        && t.StartsWith(s.StartHint, StringComparison.Ordinal));
+                if (stage is not null)
+                {
+                    _stageAnchors[stage.Id] = item;
+                }
+            }
+            return item;
         }
         Control render;
         try { render = MarkdownView.Render(text); }
@@ -1990,6 +2299,7 @@ public partial class MainWindow : Window
     private void OnChatScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
         var sv = _chatScroll!;
+        UpdateActiveStageFromScroll();   // 阶段游标跟随阅读位置（开销极小：锚点数量≈阶段数）
         if (_loadingOlderHistory || _historyExhausted)
         {
             return;

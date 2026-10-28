@@ -257,10 +257,27 @@
             </DockPanel>
         </Border>
 
-        <!-- 聊天流 -->
-        <ScrollViewer Grid.Row="1" x:Name="ChatScroll" Padding="16,14,16,8">
-            <StackPanel x:Name="ChatPanel" Spacing="10"/>
-        </ScrollViewer>
+        <!-- 聊天流：左侧阶段导航轨（暗淡圆点列） + 对话区 + 悬停摘要卡浮层 -->
+        <Grid Grid.Row="1" ColumnDefinitions="14,*">
+            <StackPanel x:Name="StageRail" VerticalAlignment="Center" Spacing="0"
+                        HorizontalAlignment="Center"/>
+            <ScrollViewer Grid.Column="1" x:Name="ChatScroll" Padding="6,14,16,8">
+                <StackPanel x:Name="ChatPanel" Spacing="10"/>
+            </ScrollViewer>
+            <Border x:Name="StageHoverCard" Grid.ColumnSpan="2" IsVisible="False"
+                    Width="340" MaxWidth="440" HorizontalAlignment="Left" VerticalAlignment="Top"
+                    CornerRadius="14" Padding="16,12" BorderThickness="1"
+                    BorderBrush="#3d3d3d" Background="#2b2b2b">
+                <StackPanel Spacing="6">
+                    <TextBlock x:Name="StageCardTitle" FontSize="13.5" FontWeight="SemiBold"
+                               Foreground="#e6e6e6" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock x:Name="StageCardMeta" FontSize="11" Foreground="#8a8a8a"
+                               TextTrimming="CharacterEllipsis"/>
+                    <TextBlock x:Name="StageCardText" FontSize="12.5" Foreground="#b8b8b8"
+                               TextWrapping="Wrap" MaxLines="6" TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
+            </Border>
+        </Grid>
 
         <!-- 输入区：大圆角容器，上输入下工具行 -->
         <Border Grid.Row="2" Background="#252525" Padding="12,8,12,12">

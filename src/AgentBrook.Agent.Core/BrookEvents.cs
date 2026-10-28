@@ -30,6 +30,9 @@ public abstract record BrookEvent
     /// <summary>任务清单更新（todo_write 完成后发出，PlanText 为完整渲染文本，宿主可直接展示）。</summary>
     public sealed record PlanChanged(string PlanText) : BrookEvent;
 
+    /// <summary>新话题阶段开启（阶段摘要导航锚点：Id 阶段号、Title 标题、StartHint 起始用户消息开头）。</summary>
+    public sealed record StageStarted(int Id, string Title, string StartHint) : BrookEvent;
+
     /// <summary>Token 用量（每回合结束发出；CumTotal 为应用累计总消耗）。</summary>
     public sealed record Usage(long TurnInput, long TurnOutput, long TurnTotal, long CumTotal) : BrookEvent;
 

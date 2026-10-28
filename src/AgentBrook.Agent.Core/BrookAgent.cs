@@ -45,6 +45,8 @@ public sealed class BrookAgent : IAsyncDisposable
     private string _sessionFile = "";
     private string _sessionSummaryFile = "";
     private string _sessionIndexFile = "";   // 历史档案索引持久化文件（summaryFile + ".index"）
+    private SessionStageStore? _stages;      // 会话阶段摘要（session-stages.json）：话题边界 → 分阶段注入
+    private readonly System.Text.StringBuilder _stageAccum = new();   // 当前阶段的素材积累（关闭时浓缩成摘要）
     private readonly List<string> _archiveIndex = [];   // 档案索引条目：折叠的工具结果 / 被裁对话原文 → 存档路径
     private bool _titleAutoSet;   // 本会话标题是否已从首条用户消息自动生成
 
@@ -400,6 +402,7 @@ public sealed class BrookAgent : IAsyncDisposable
         brook._sessionFile = sessions.SessionFile(current.Id);
         brook._sessionSummaryFile = sessions.SummaryFile(current.Id);
         brook._sessionIndexFile = brook._sessionSummaryFile + ".index";
+        brook._stages = new SessionStageStore(Path.GetDirectoryName(brook._sessionFile)!);
         brook._titleAutoSet = current.Title != "新对话" && current.Title != "上次会话";
         brook._historySummary = File.Exists(brook._sessionSummaryFile)
             ? File.ReadAllText(brook._sessionSummaryFile) : "";
@@ -697,6 +700,8 @@ public sealed class BrookAgent : IAsyncDisposable
         _sessionFile = _sessions.SessionFile(_sessionId);
         _sessionSummaryFile = _sessions.SummaryFile(_sessionId);
         _sessionIndexFile = _sessionSummaryFile + ".index";
+        _stages = new SessionStageStore(Path.GetDirectoryName(_sessionFile)!);
+        _stageAccum.Clear();
         _historySummary = "";
         _archiveIndex.Clear();
         _titleAutoSet = false;
@@ -783,6 +788,8 @@ public sealed class BrookAgent : IAsyncDisposable
         _sessionFile = _sessions.SessionFile(id);
         _sessionSummaryFile = _sessions.SummaryFile(id);
         _sessionIndexFile = _sessionSummaryFile + ".index";
+        _stages = new SessionStageStore(Path.GetDirectoryName(_sessionFile)!);
+        _stageAccum.Clear();
         _titleAutoSet = meta.Title != "新对话";
         _historySummary = File.Exists(_sessionSummaryFile)
             ? File.ReadAllText(_sessionSummaryFile) : "";
@@ -928,6 +935,12 @@ public sealed class BrookAgent : IAsyncDisposable
             _sessions.SetTitle(_sessionId, title);
             _titleAutoSet = true;
             SessionTitleChanged?.Invoke(title);
+        }
+
+        // 话题边界追踪：每条用户消息经轻量分类判定是否开启新阶段（失败静默继续，不影响回合）
+        if (await TrackStageAsync(messageText, ct) is { } stageEvt)
+        {
+            yield return stageEvt;   // 新阶段开启：宿主导航锚点
         }
 
         // 多模态上下文：用户已选 media 模型时注入动态状态（独立 system 消息，transcript 过滤不显示），
@@ -1077,6 +1090,11 @@ public sealed class BrookAgent : IAsyncDisposable
             await SaveSessionCoreAsync();
         }
 
+        if (!string.IsNullOrWhiteSpace(TurnAnswer))
+        {
+            // 阶段素材积累：回合最终回答也进当前阶段（关闭时浓缩摘要用）
+            _stageAccum.Append($"[助手] {(TurnAnswer.Length > 300 ? TurnAnswer[..300] + "…" : TurnAnswer)}\n");
+        }
         await SaveSessionCoreAsync();
         yield return new BrookEvent.TurnCompleted();
         yield return new BrookEvent.Status(BrookRunState.Idle);
@@ -1163,6 +1181,7 @@ public sealed class BrookAgent : IAsyncDisposable
                 }
             }
             var summarized = await SummarizeDroppedAsync(_droppedTranscript, cancellationToken);
+            _stages?.Save();   // 压缩完成后顺手落盘阶段清单（归档目录可能随之产生）
             _droppedTranscript = null;
             InjectSummaryIntoHistory();
             if (summarized)
@@ -1382,15 +1401,24 @@ public sealed class BrookAgent : IAsyncDisposable
         catch { }
     }
 
-    /// <summary>档案索引落盘（条目少，直接全量覆写）。</summary>
+    /// <summary>档案索引落盘（条目少，直接全量覆写）。空索引不建文件；已存在的空文件顺手清理。</summary>
     private void PersistArchiveIndex()
     {
         try
         {
-            if (!string.IsNullOrEmpty(_sessionIndexFile))
+            if (string.IsNullOrEmpty(_sessionIndexFile))
             {
-                File.WriteAllText(_sessionIndexFile, string.Join('\n', _archiveIndex));
+                return;
             }
+            if (_archiveIndex.Count == 0)
+            {
+                if (File.Exists(_sessionIndexFile))
+                {
+                    File.Delete(_sessionIndexFile);   // 无档案条目：删除残留的 0 字节索引
+                }
+                return;
+            }
+            File.WriteAllText(_sessionIndexFile, string.Join('\n', _archiveIndex));
         }
         catch { }
     }
@@ -1493,13 +1521,131 @@ public sealed class BrookAgent : IAsyncDisposable
         }
     }
 
+    // ───────────────────────── 阶段摘要：话题边界 → 分阶段注入 ─────────────────────────
+    private const int StageTitleMaxChars = 12;
+    private const int StageAccumMaxChars = 6_000;
+
+    /// <summary>
+    /// 每回合的用户消息做话题边界判定（A·启发式：SummarizeModel 微调用）：
+    /// 新话题 → 关闭当前阶段（浓缩素材为摘要）→ 开新阶段；同一话题 → 素材继续积累。
+    /// 分类/摘要任何一步失败都静默降级为"同阶段"，绝不阻塞回合。
+    /// </summary>
+    /// <summary>会话阶段清单（宿主阶段导航用；未初始化时为空）。</summary>
+    public IReadOnlyList<SessionStage> SessionStages => _stages?.Stages ?? [];
+
+    private async Task<BrookEvent.StageStarted?> TrackStageAsync(string userText, CancellationToken cancellationToken)
+    {
+        BrookEvent.StageStarted? evt = null;
+        try
+        {
+            var snippet = userText.Trim();
+            if (_stages is null || string.IsNullOrWhiteSpace(snippet))
+            {
+                return null;
+            }
+            snippet = snippet.Length > 240 ? snippet[..240] : snippet;
+            var hint = snippet.Length > 40 ? snippet[..40] : snippet;
+            var cur = _stages.Current;
+            if (cur is null)
+            {
+                var st = _stages.OpenNew(ShortTitle(snippet), hint);   // 首个阶段：用消息开头当标题
+                evt = new BrookEvent.StageStarted(st.Id, st.Title, st.StartHint);
+            }
+            else
+            {
+                var verdict = await QuickCompleteAsync(
+                    "你是话题边界判定器。判断「用户新消息」是否开启了一个与「当前阶段」不同的新话题阶段。" +
+                    "同一目标的追问、补充、修正、报错修复视为同阶段；切换到无关任务/领域视为新阶段。" +
+                    "只输出 JSON：{\"new\":false} 或 {\"new\":true,\"title\":\"≤12字的新阶段短标题\"}，不要输出其他内容。",
+                    $"当前阶段标题：{cur.Title}\n用户新消息：{snippet}", cancellationToken);
+                var (isNew, title) = ParseStageVerdict(verdict);
+                if (isNew)
+                {
+                    var summary = await SummarizeStageAsync(_stageAccum.ToString(), cancellationToken);
+                    _stages.CloseCurrent(summary);
+                    _stageAccum.Clear();
+                    var st = _stages.OpenNew(string.IsNullOrWhiteSpace(title) ? ShortTitle(snippet) : title.Trim(), hint);
+                    evt = new BrookEvent.StageStarted(st.Id, st.Title, st.StartHint);
+                }
+            }
+            _stageAccum.Append($"[用户] {snippet}\n");
+            if (_stageAccum.Length > StageAccumMaxChars)
+            {
+                // 只保留尾部素材（本阶段内越靠近现在的内容摘要价值越高）
+                _stageAccum.Remove(0, _stageAccum.Length - StageAccumMaxChars / 2);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // 静默：阶段追踪失败不影响回合
+        }
+        return evt;
+    }
+
+    private static string ShortTitle(string text)
+    {
+        var t = text.Trim().Replace('\n', ' ');
+        return t.Length > StageTitleMaxChars ? t[..StageTitleMaxChars] + "…" : t;
+    }
+
+    /// <summary>解析分类器 JSON 回复；解析失败按"同阶段"处理。</summary>
+    private static (bool IsNew, string? Title) ParseStageVerdict(string? verdict)
+    {
+        if (string.IsNullOrWhiteSpace(verdict))
+        {
+            return (false, null);
+        }
+        try
+        {
+            var start = verdict.IndexOf('{');
+            var end = verdict.LastIndexOf('}');
+            if (start < 0 || end <= start)
+            {
+                return (false, null);
+            }
+            using var doc = JsonDocument.Parse(verdict[start..(end + 1)]);
+            var root = doc.RootElement;
+            var isNew = root.TryGetProperty("new", out var nv) && nv.ValueKind == JsonValueKind.True;
+            var title = root.TryGetProperty("title", out var tv) ? tv.GetString() : null;
+            return (isNew, title);
+        }
+        catch
+        {
+            return (false, null);
+        }
+    }
+
+    /// <summary>关闭阶段时把积累的素材浓缩为 ≤80 字阶段摘要；失败时退化为素材首部截断。</summary>
+    private async Task<string> SummarizeStageAsync(string material, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(material))
+        {
+            return "（无记录）";
+        }
+        try
+        {
+            var text = await QuickCompleteAsync(
+                "你是阶段摘要器。把「本阶段的对话素材」浓缩为一句阶段结论摘要（≤80字），" +
+                "必须保留：用户目标、关键决定、产出位置、未完成事项。直接输出摘要正文，不要评论。",
+                material, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                return text.Trim().Length > 120 ? text.Trim()[..120] : text.Trim();
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { }
+        var fallback = material.Replace('\n', ' ').Trim();
+        return fallback.Length > 80 ? fallback[..80] + "…" : fallback;
+    }
+
     /// <summary>把滚动摘要（含历史档案索引）作为 System 消息注入/更新到历史头部（存在则原位替换，不存在则插入）。</summary>
     private void InjectSummaryIntoHistory()
     {
         try
         {
             var hasSummary = !string.IsNullOrWhiteSpace(_historySummary);
-            if (!hasSummary && _archiveIndex.Count == 0)
+            var hasStages = _stages?.Closed.Count > 0;
+            if (!hasSummary && _archiveIndex.Count == 0 && !hasStages)
             {
                 return;
             }
@@ -1511,6 +1657,15 @@ public sealed class BrookAgent : IAsyncDisposable
             if (hasSummary)
             {
                 sb.Append('\n').Append(_historySummary);
+            }
+            var closedStages = _stages?.Closed;
+            if (closedStages is { Count: > 0 })
+            {
+                sb.Append("\n\n【阶段摘要】（按话题边界划分的已完成阶段概要，细节需要时用 read_file 查档案索引取回原文）\n");
+                foreach (var s in closedStages)
+                {
+                    sb.Append($"- 阶段{s.Id}「{s.Title}」：{s.Summary}\n");
+                }
             }
             if (_archiveIndex.Count > 0)
             {
@@ -1622,6 +1777,7 @@ public sealed class BrookAgent : IAsyncDisposable
             SanitizeOrphanApprovals(_session);
             CompactTrim();
             PersistArchiveIndex();   // 本次裁剪/折叠若产生新索引条目，随会话一并落盘
+            _stages?.Save();         // 阶段清单随会话落盘
             var serialized = await _agent.SerializeSessionAsync(_session);
             var dir = Path.GetDirectoryName(_sessionFile);
             if (!string.IsNullOrEmpty(dir))

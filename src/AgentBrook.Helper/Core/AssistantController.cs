@@ -170,6 +170,9 @@ public sealed class AssistantController : IBrookInteraction
     public IReadOnlyList<(string Role, string Text)> GetTranscriptRange(int skipFromEnd, int take) =>
         Ready ? Agent!.GetTranscriptRange(skipFromEnd, take) : [];
     public IReadOnlyList<SessionMeta> Sessions => Ready ? Agent!.Sessions : [];
+    /// <summary>当前会话的阶段清单（左侧阶段导航数据源）。</summary>
+    public IReadOnlyList<AgentBrook.Agent.Infrastructure.SessionStage> SessionStages =>
+        Ready ? Agent!.SessionStages : [];
 
     /// <summary>切换会话；忙碌/未就绪时返回 false。</summary>
     public async Task<bool> SwitchSessionAsync(string id)
