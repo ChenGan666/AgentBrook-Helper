@@ -129,7 +129,6 @@ package_app() {
   cp "$(pwd)/release-notes.txt" "$final_dir/release-notes.txt"
   echo "  -> $zip_path"
   echo "  -> $final_dir/release-notes.txt"
-  echo "  -> $update_dir/AgentBrook.Helper-$VERSION.zip"
 }
 
 if [ "$MODE" = "all" ] || [ "$MODE" = "arm64" ]; then
@@ -165,7 +164,7 @@ do
   python3 - "$app/Contents/MacOS/appsettings.json" << 'PY'
 import json, sys
 p = sys.argv[1]
-d = json.load(open(p, encoding="utf-8"))
+d = json.load(open(p, encoding="utf-8-sig"))
 llm = d.get("LLM")
 if isinstance(llm, dict) and llm.get("ApiKey"):
     llm["ApiKey"] = "sk-please-fill-in-your-api-key"
@@ -186,17 +185,16 @@ PY
     *x64*)   package_app "$app" osx-x64 ;;
     *)       package_app "$app" osx-universal ;;
   esac
-  # 打包完成后即清理该 .app：防止遗留旧包被下次运行重打包成"版本号新、内容旧"的误导性产物
-  rm -rf "$app"
 done
 
+# 泄密终检：必须在 .app 仍存在时执行（.app 在扫描通过后统一清理）
 if grep -rlE 'sk-[A-Za-z0-9]{16,}' "$PUBLISH_BASE"/*/AgentBrook.Helper.app/Contents/MacOS >/dev/null 2>&1; then
   echo "✖ 发布包中仍检测到疑似 API 密钥，构建中止（请检查 appsettings.json / models.json / mcp-user.json）"
   exit 1
 fi
 
-# 清理临时 publish 目录
-rm -rf "$PUBLISH_BASE"/*/publish
+# 清理：.app（防止遗留旧包被下次运行重打包成"版本号新、内容旧"的误导性产物）与临时 publish 目录
+rm -rf "$PUBLISH_BASE"/*/AgentBrook.Helper.app "$PUBLISH_BASE"/*/publish
 
 echo ""
 echo "分发指引（最终产物根：$PUBLISH_BASE/updated/）："
