@@ -5,8 +5,10 @@ using System;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Animation;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Styling;
 
 namespace AgentBrook.Helper.Views;
 
@@ -41,6 +43,8 @@ public sealed class InteractionCard : StackPanel
     private readonly PathIcon _chevron;
     private readonly TextBlock _statusText;
     private readonly TextBlock _summaryText;
+    private readonly Border _shimmer;          // 「执行中」流光带（组合线程动画，零 CPU）
+    private CancellationTokenSource? _shimmerCts;
     private bool _innerExpanded;
     private bool _outerCollapsed;
 
@@ -117,7 +121,34 @@ public sealed class InteractionCard : StackPanel
             Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
         };
         headBtn.Click += (_, _) => SetOuterCollapsed(!_outerCollapsed);
-        Children.Add(headBtn);
+
+        // 流光带：210px 宽波动高光（头尾渐隐、波峰居中），平移扫过标题行
+        _shimmer = new Border
+        {
+            Width = 210,
+            IsHitTestVisible = false,
+            IsVisible = false,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Stretch,
+            RenderTransform = new TranslateTransform(),
+            Background = new LinearGradientBrush
+            {
+                StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+                EndPoint = new RelativePoint(1, 0, RelativeUnit.Relative),
+                GradientStops =
+                {
+                    new GradientStop(Color.FromArgb(0, 255, 255, 255), 0),
+                    new GradientStop(Color.FromArgb(14, 255, 255, 255), 0.22),
+                    new GradientStop(Color.FromArgb(44, 255, 255, 255), 0.5),    // 波峰
+                    new GradientStop(Color.FromArgb(14, 255, 255, 255), 0.78),
+                    new GradientStop(Color.FromArgb(0, 255, 255, 255), 1),
+                },
+            },
+        };
+        var headWrap = new Grid { ClipToBounds = true };
+        headWrap.Children.Add(_shimmer);      // 先加：绘制在标题文字下层
+        headWrap.Children.Add(headBtn);
+        Children.Add(headWrap);
 
         // ── 内容卡：圆角暗底 + 限高滚动 + 内层展开入口 ──
         _innerToggleText = new TextBlock { FontSize = 12 };
@@ -233,5 +264,31 @@ public sealed class InteractionCard : StackPanel
         };
         _statusText.Text = statusText ?? I18n.T(key);
         _statusText.Foreground = new SolidColorBrush(Color.Parse(color));
+        SetShimmer(state == InteractionState.Running);   // 执行中：标题行流光扫过
+    }
+
+    /// <summary>流光动画开关：TranslateTransform 属性动画（组合线程驱动，不占 CPU）；非执行中立即停止隐藏。</summary>
+    private void SetShimmer(bool running)
+    {
+        _shimmerCts?.Cancel();
+        _shimmerCts = null;
+        _shimmer.IsVisible = running;
+        if (!running)
+        {
+            return;
+        }
+        var anim = new Animation
+        {
+            Duration = TimeSpan.FromSeconds(2.85),   // 慢 50%
+            IterationCount = IterationCount.Infinite,
+            Children =
+            {
+                new KeyFrame { Cue = new Cue(0),    Setters = { new Setter(TranslateTransform.XProperty, -210.0) } },
+                new KeyFrame { Cue = new Cue(0.62), Setters = { new Setter(TranslateTransform.XProperty, 900.0) } },
+                new KeyFrame { Cue = new Cue(1),    Setters = { new Setter(TranslateTransform.XProperty, 900.0) } },   // 尾段停留作呼吸间隔
+            },
+        };
+        _shimmerCts = new CancellationTokenSource();
+        _ = anim.RunAsync(_shimmer, _shimmerCts.Token);
     }
 }
