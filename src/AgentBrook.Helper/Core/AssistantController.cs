@@ -57,7 +57,15 @@ public sealed class AssistantController : IBrookInteraction
     public BubbleWindow? Bubble { get; private set; }
     public void AttachBubble(BubbleWindow bubble) => Bubble = bubble;
 
-    private sealed record UpdateCheckState(string LastCheckDate);
+    private sealed record UpdateCheckState(string LastCheckKey);
+
+    /// <summary>每日检查时点：上午 9:30 / 下午 13:30 / 晚上 21:30（工作时间）。</summary>
+    private static readonly (int Hour, int Minute, string Name)[] CheckSlots =
+    {
+        (9,  30, "morning"),
+        (13, 30, "afternoon"),
+        (21, 30, "evening"),
+    };
 
 
     /// <summary>
@@ -65,7 +73,10 @@ public sealed class AssistantController : IBrookInteraction
     /// 发现新版本 → 气泡提醒（新版本号 + 更新说明）；用户点「立即更新」→ 打开设置窗口
     /// 定位到版本更新区并自动开始更新。检查失败不影响主流程。
     /// </summary>
-    public async Task CheckUpdateOnStartupAsync()
+    public Task CheckUpdateOnStartupAsync() => RunUpdateCheckAsync("startup");
+
+    /// <summary>按检查点执行一次更新检查（slotName 用于每日去重：启动 + 三个时点各至多一次）。</summary>
+    private async Task RunUpdateCheckAsync(string slotName)
     {
         try
         {
@@ -75,12 +86,12 @@ public sealed class AssistantController : IBrookInteraction
                 return;   // 用户关闭了每日自动检查更新
             }
             var state = UiPrefs.Load<UpdateCheckState>("update-check.json");
-            var today = DateTime.Now.ToString("yyyy-MM-dd");
-            if (state?.LastCheckDate == today)
+            var slotKey = $"{DateTime.Now:yyyy-MM-dd}:{slotName}";
+            if (state?.LastCheckKey == slotKey)
             {
-                return;   // 今天已检查过：每日仅首次启动检查
+                return;   // 该检查点今天已检查过
             }
-            UiPrefs.Save("update-check.json", new UpdateCheckState(today));
+            UiPrefs.Save("update-check.json", new UpdateCheckState(slotKey));
 
             // 等待助手就绪（最长 2 分钟）；超时放弃本轮，明天再查
             var waited = TimeSpan.Zero;
@@ -142,27 +153,30 @@ public sealed class AssistantController : IBrookInteraction
             // 更新检查/提醒失败不影响主流程
         }
 
-        // 长期不关机的设备：每 6 小时补查一次（CheckAsync 内部按"当天已检查"去重，
-        // 因此实际每日仍只提醒一次；用户关闭每日检查则此定时器静默退出）。
-        var timerPrefs = UiPrefs.Load<UpdatePrefs>("update-prefs.json") ?? new UpdatePrefs();
-        if (timerPrefs.DailyCheck)
+        // 长期不关机的设备：每分钟轻量判断是否命中检查点（09:30/13:30/21:30，
+        // 命中即补查；CheckAsync 内部按"当天:检查点"去重，实际每个时点每天至多提醒一次；
+        // 用户关闭每日检查则此定时器静默空转，无网络请求）。
+        _ = Task.Run(async () =>
         {
-            _ = Task.Run(async () =>
+            using var timer = new System.Threading.PeriodicTimer(TimeSpan.FromMinutes(1));
+            while (await timer.WaitForNextTickAsync())
             {
-                using var timer = new PeriodicTimer(TimeSpan.FromHours(6));
-                while (await timer.WaitForNextTickAsync())
+                try
                 {
-                    try
-                    {
-                        await CheckUpdateOnStartupAsync();
-                    }
-                    catch
-                    {
-                        // 定时补查失败忽略，等下一轮
-                    }
+                    var timerPrefs = UiPrefs.Load<UpdatePrefs>("update-prefs.json") ?? new UpdatePrefs();
+                    if (!timerPrefs.DailyCheck) continue;
+                    var now = DateTime.Now;
+                    var slot = CheckSlots.FirstOrDefault(s =>
+                        now.Hour == s.Hour && now.Minute >= s.Minute && now.Minute < s.Minute + 1);
+                    if (slot.Name == null) continue;
+                    await RunUpdateCheckAsync(slot.Name);
                 }
-            });
-        }
+                catch
+                {
+                    // 定时检查失败忽略，等下一轮
+                }
+            }
+        });
     }
 
     /// <summary>打开设置窗口，定位到版本更新区并自动开始更新（气泡"立即更新"入口）。</summary>
