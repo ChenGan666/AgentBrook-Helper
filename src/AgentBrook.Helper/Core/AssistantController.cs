@@ -153,27 +153,43 @@ public sealed class AssistantController : IBrookInteraction
             // 更新检查/提醒失败不影响主流程
         }
 
-        // 长期不关机的设备：每分钟轻量判断是否命中检查点（09:30/13:30/21:30，
-        // 命中即补查；CheckAsync 内部按"当天:检查点"去重，实际每个时点每天至多提醒一次；
-        // 用户关闭每日检查则此定时器静默空转，无网络请求）。
+        // 长期不关机的设备：精确等待到下一个检查点（09:30/13:30/21:30）再执行；
+        // 每次醒来重新计算下一时点（用户改偏好/跨天自动适应），等待期间零唤醒零网络请求。
         _ = Task.Run(async () =>
         {
-            using var timer = new System.Threading.PeriodicTimer(TimeSpan.FromMinutes(1));
-            while (await timer.WaitForNextTickAsync())
+            while (true)
             {
                 try
                 {
-                    var timerPrefs = UiPrefs.Load<UpdatePrefs>("update-prefs.json") ?? new UpdatePrefs();
-                    if (!timerPrefs.DailyCheck) continue;
+                    var prefs = UiPrefs.Load<UpdatePrefs>("update-prefs.json") ?? new UpdatePrefs();
+                    if (!prefs.DailyCheck)
+                    {
+                        await Task.Delay(TimeSpan.FromMinutes(30));
+                        continue;
+                    }
+
                     var now = DateTime.Now;
-                    var slot = CheckSlots.FirstOrDefault(s =>
-                        now.Hour == s.Hour && now.Minute >= s.Minute && now.Minute < s.Minute + 1);
-                    if (slot.Name == null) continue;
-                    await RunUpdateCheckAsync(slot.Name);
+                    var todaySlots = CheckSlots
+                        .Select(s => now.Date.AddHours(s.Hour).AddMinutes(s.Minute))
+                        .Where(t => t > now)
+                        .OrderBy(t => t)
+                        .ToList();
+                    var next = todaySlots.Count > 0
+                        ? todaySlots[0]
+                        : now.Date.AddDays(1).AddHours(CheckSlots[0].Hour).AddMinutes(CheckSlots[0].Minute);
+
+                    var wait = next - now;
+                    if (wait > TimeSpan.Zero) await Task.Delay(wait);
+
+                    // 到达时点（等待期间偏好可能被关闭，执行前复核）
+                    var prefsNow = UiPrefs.Load<UpdatePrefs>("update-prefs.json") ?? new UpdatePrefs();
+                    if (!prefsNow.DailyCheck) continue;
+                    await RunUpdateCheckAsync("timer");
                 }
                 catch
                 {
-                    // 定时检查失败忽略，等下一轮
+                    // 等待/计算失败：一分钟后重试
+                    await Task.Delay(TimeSpan.FromMinutes(1));
                 }
             }
         });
