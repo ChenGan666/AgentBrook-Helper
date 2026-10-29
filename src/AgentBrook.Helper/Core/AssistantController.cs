@@ -141,6 +141,28 @@ public sealed class AssistantController : IBrookInteraction
         {
             // 更新检查/提醒失败不影响主流程
         }
+
+        // 长期不关机的设备：每 6 小时补查一次（CheckAsync 内部按"当天已检查"去重，
+        // 因此实际每日仍只提醒一次；用户关闭每日检查则此定时器静默退出）。
+        var timerPrefs = UiPrefs.Load<UpdatePrefs>("update-prefs.json") ?? new UpdatePrefs();
+        if (timerPrefs.DailyCheck)
+        {
+            _ = Task.Run(async () =>
+            {
+                using var timer = new PeriodicTimer(TimeSpan.FromHours(6));
+                while (await timer.WaitForNextTickAsync())
+                {
+                    try
+                    {
+                        await CheckUpdateOnStartupAsync();
+                    }
+                    catch
+                    {
+                        // 定时补查失败忽略，等下一轮
+                    }
+                }
+            });
+        }
     }
 
     /// <summary>打开设置窗口，定位到版本更新区并自动开始更新（气泡"立即更新"入口）。</summary>
