@@ -136,6 +136,98 @@ public sealed class PluginSettingsDialog : WindowBase
         }
     }
 
+    /// <summary>
+    /// 识别模型行（v1.0.12 单模型部署）：模型名（固定） + 安装模型（就绪后变"已安装"并禁用） + 测试（环境自检）。
+    /// 就绪状态经 readyAction 查询（异步，不阻塞 Build）。
+    /// </summary>
+    private Control BuildModelRow(JsonElement item)
+    {
+        var row = NewRow("Auto,*,Auto,Auto");
+        var modelName = item.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+        var installAction = item.TryGetProperty("installAction", out var ia) ? ia.GetString() ?? "install-model" : "install-model";
+        var checkAction = item.TryGetProperty("checkAction", out var ca) ? ca.GetString() ?? "run-self-check" : "run-self-check";
+        var readyAction = item.TryGetProperty("readyAction", out var ra) ? ra.GetString() ?? "model-ready" : "model-ready";
+
+        row.Children.Add(new TextBlock
+        {
+            Text = I18n.T(ItemTitle(item)),
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = new SolidColorBrush(Color.Parse("#e8e8e8")),
+        });
+        row.Children.Add(new TextBlock
+        {
+            Text = modelName,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = new SolidColorBrush(Color.Parse("#c8c8c8")),
+        });
+
+        var installBtn = DialogButton(I18n.T("ui.plugins.privacy.install.model"));
+        var testBtn = DialogButton(I18n.T("ui.plugins.privacy.model.test"));
+        Grid.SetColumn(installBtn, 2);
+        Grid.SetColumn(testBtn, 3);
+        row.Children.Add(installBtn);
+        row.Children.Add(testBtn);
+
+        // 初始就绪状态：已安装 → 按钮变"已安装"并禁用（异步查询，不阻塞 Build）
+        _ = Task.Run(() => _contributor.RunActionAsync(readyAction))
+            .ContinueWith(t =>
+            {
+                if (t.Status == TaskStatus.RanToCompletion && t.Result.Success)
+                {
+                    installBtn.Content = I18n.T("ui.plugins.privacy.model.installed");
+                    installBtn.IsEnabled = false;
+                }
+            }, TaskScheduler.FromCurrentSynchronizationContext());
+
+        installBtn.Click += async (_, _) =>
+        {
+            installBtn.IsEnabled = false;
+            _actionProgress.IsVisible = true;
+            var progress = new Progress<string>(SetProgress);
+            try
+            {
+                var result = await Task.Run(() => _contributor.RunActionAsync(installAction, null, progress));
+                SetStatus(result.Message, ok: result.Success);
+                if (result.Success)
+                {
+                    installBtn.Content = I18n.T("ui.plugins.privacy.model.installed");
+                }
+            }
+            catch (Exception ex)
+            {
+                SetStatus(ex.Message, ok: false);
+            }
+            finally
+            {
+                _actionProgress.IsVisible = false;
+                installBtn.IsEnabled = true;
+            }
+        };
+
+        testBtn.Click += async (_, _) =>
+        {
+            testBtn.IsEnabled = false;
+            _actionProgress.IsVisible = true;
+            var progress = new Progress<string>(SetProgress);
+            try
+            {
+                var result = await Task.Run(() => _contributor.RunActionAsync(checkAction, null, progress));
+                SetStatus(result.Message, ok: result.Success);
+            }
+            catch (Exception ex)
+            {
+                SetStatus(ex.Message, ok: false);
+            }
+            finally
+            {
+                _actionProgress.IsVisible = false;
+                testBtn.IsEnabled = true;
+            }
+        };
+
+        return row;
+    }
+
     // ── schema 项 → 控件 ─────────────────────────────────────────────────
 
     private Control BuildItem(JsonElement item)
@@ -154,7 +246,8 @@ public sealed class PluginSettingsDialog : WindowBase
                 FontSize = 12,
                 TextWrapping = TextWrapping.Wrap,
             },
-            _ => new TextBlock { Text = ItemTitle(item), Foreground = new SolidColorBrush(Color.Parse("#e8e8e8")) },
+            // 未知 item 类型：标题经 I18n 翻译后显示（老宿主遇新 schema 类型不裸显键名）
+            _ => new TextBlock { Text = I18n.T(ItemTitle(item)), Foreground = new SolidColorBrush(Color.Parse("#e8e8e8")) },
         };
     }
 
