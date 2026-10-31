@@ -88,6 +88,7 @@ public sealed class PluginSettingsDialog : WindowBase
     /// <summary>按 schema 构建设置 UI（由打开方调用一次）。</summary>
     public void Build()
     {
+        Console.Error.WriteLine("[plugins-dialog] build r2：三标签页 + model 行（2026-10-31）");
         var schema = ParseJson(_contributor.SettingsSchemaJson());
         if (schema.TryGetValue("groups", out var groups) && groups.ValueKind == JsonValueKind.Array)
         {
