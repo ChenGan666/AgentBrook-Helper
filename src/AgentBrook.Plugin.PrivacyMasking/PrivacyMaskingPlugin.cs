@@ -20,7 +20,6 @@ namespace AgentBrook.Plugin.PrivacyMasking;
 public sealed class PrivacyMaskingPlugin : IHelperPlugin, IChatClientDecorator, ISettingsContributor, IPluginTurnTelemetry, IDisplayTextRestorer
 {
     private const string DefaultModel = "cluener_baseline";   // P0a 裁决 A（2026-10-30）：准确档部署默认
-    private static readonly string[] ModelChoices = ["cluener_baseline", "albert_tiny_zh", "bert_tiny_zh"];
 
     private IPluginHostContext? _host;
     private PrivacyStore? _store;
@@ -40,7 +39,7 @@ public sealed class PrivacyMaskingPlugin : IHelperPlugin, IChatClientDecorator, 
 
     public string Id => "privacy-masking";
     public string DisplayName => "隐私脱敏";
-    public string Version => "1.0.11";
+    public string Version => "1.0.12";
 
     public async Task InitializeAsync(IPluginHostContext host, CancellationToken cancellationToken = default)
     {
@@ -251,10 +250,10 @@ public sealed class PrivacyMaskingPlugin : IHelperPlugin, IChatClientDecorator, 
                     title = "ui.plugins.privacy.model",
                     items = (object[])
                     [
-                        new { key = "privacy.ner.model", type = "choice", title = "ui.plugins.privacy.model",
-                              choices = ModelChoices },
-                        new { type = "action", action = "install-model", title = "ui.plugins.privacy.install.model" },
-                        new { type = "action", action = "run-self-check", title = "ui.plugins.privacy.self.check" },
+                        // 单模型部署（v1.0.12）：下拉移除，识别模型固定为裁决 A 默认档
+                        new { type = "model", title = "ui.plugins.privacy.model", name = DefaultModel,
+                              installAction = "install-model", checkAction = "run-self-check",
+                              readyAction = "model-ready" },
                         new { key = "privacy.auto_register_limit", type = "slider",
                               title = "ui.plugins.privacy.auto.limit", min = 0, max = 2000, step = 50 },
                     ],
@@ -364,7 +363,7 @@ public sealed class PrivacyMaskingPlugin : IHelperPlugin, IChatClientDecorator, 
 
     public IReadOnlyList<string> Actions =>
     [
-        "install-model", "run-self-check",
+        "install-model", "run-self-check", "model-ready",
         "list-terms", "add-term", "remove-term", "set-term-enabled", "add-alias", "list-aliases",
         "list-whitelist", "add-whitelist", "remove-whitelist",
         "export-csv", "import-csv",
@@ -402,6 +401,12 @@ public sealed class PrivacyMaskingPlugin : IHelperPlugin, IChatClientDecorator, 
 
             case "run-self-check":
                 break;
+
+            case "model-ready":
+            {
+                var ready = _models.IsModelReady(model);
+                return new PluginActionResult(ready, model);
+            }
 
             case "list-terms":
             {

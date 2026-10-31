@@ -1,3 +1,4 @@
-Privacy Masking Plugin 1.0.11
-- Fixes "some placeholders not restored": the session map (token -> real value) is now shared at plugin level across all client instances (main chat, sub-agents, pipeline rebuilds) instead of per-shell copies - tokens emitted by any path are now restorable everywhere in the same process
-- Includes all 1.0.10 fixes (list JSON casing, stream-as-is output with one-pass display-layer restoration)
+Privacy Masking Plugin 1.0.12
+- Single-model deployment: the recognition-model dropdown is removed; the model row shows cluener_baseline (decision-A default) with inline Install / Test buttons and an "Installed" state
+- New model-ready query action for the settings dialog
+- Includes all 1.0.11 fixes (plugin-level shared session map, partial-restoration fix)
