@@ -19,7 +19,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-VERSION="${VERSION:-1.0.12}"   # 单模型部署：下拉移除，识别模型行（安装/已安装+测试）；新增 model-ready 查询
+VERSION="${VERSION:-1.0.14}"   # 模型组标题置空（行内标签不重复）；对话框 controls 补列号
 PROJ="src/AgentBrook.Plugin.PrivacyMasking/AgentBrook.Plugin.PrivacyMasking.csproj"
 PUBLISH_BASE="${PUBLISH_BASE:-$(pwd)/src/publish}"
 PLUGIN_OUT="$PUBLISH_BASE/updated/plugin/privacy-masking/$VERSION"

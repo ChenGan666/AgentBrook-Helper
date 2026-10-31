@@ -1,4 +1,3 @@
-Privacy Masking Plugin 1.0.12
-- Single-model deployment: the recognition-model dropdown is removed; the model row shows cluener_baseline (decision-A default) with inline Install / Test buttons and an "Installed" state
-- New model-ready query action for the settings dialog
-- Includes all 1.0.11 fixes (plugin-level shared session map, partial-restoration fix)
+Privacy Masking Plugin 1.0.13
+- Index fetches now carry a one-shot cache-buster parameter, so nginx/gateway GET caches can no longer serve a stale plugin index after publishing a new version
+- Includes all 1.0.12 changes (single-model row with Install/Test, model-ready query)

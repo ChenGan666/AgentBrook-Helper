@@ -16,10 +16,12 @@ public sealed class PluginCatalog(Action<string>? log = null)
     /// <summary>插件安装根目录（workspace/plugins）；由 Manager 注入。</summary>
     public string? PluginsRoot { get; init; }
 
-    /// <summary>拉取服务端插件索引（统一下载服务）。</summary>
+    /// <summary>拉取服务端插件索引（统一下载服务；附加一次性参数避开网关/nginx 的 GET 缓存——与自动更新同策）。</summary>
     public async Task<PluginIndex> FetchAsync(Uri indexUrl, CancellationToken ct = default)
     {
-        var json = await ResourceDownloader.Instance.DownloadStringAsync(indexUrl.ToString(), ct);
+        var bustUrl = indexUrl.ToString() + (indexUrl.ToString().Contains('?') ? "&" : "?")
+            + "_=" + DateTimeOffset.Now.ToUnixTimeMilliseconds();
+        var json = await ResourceDownloader.Instance.DownloadStringAsync(bustUrl, ct);
         return JsonSerializer.Deserialize<PluginIndex>(json) ?? new PluginIndex();
     }
 
