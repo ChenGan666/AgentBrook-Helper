@@ -14,8 +14,9 @@ namespace AgentBrook.Helper.Update;
 
 internal static class AutoUpdater
 {
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(30) };
-    private static readonly HttpClient DownloadHttp = new() { Timeout = TimeSpan.FromMinutes(10) };
+    // 下载统一走宿主共享客户端（ResourceDownloader：插件包/模型/升级包同源，30 分钟超时集中维护）
+    private static readonly HttpClient Http = AgentBrook.Agent.Plugins.ResourceDownloader.SharedClient;
+    private static readonly HttpClient DownloadHttp = AgentBrook.Agent.Plugins.ResourceDownloader.SharedClient;
 
     public static (string Os, string Arch) CurrentPlatform
     {

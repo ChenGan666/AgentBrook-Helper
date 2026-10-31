@@ -7,6 +7,8 @@ using AgentBrook.Agent.Mcp;
 using AgentBrook.Agent.Memory;
 using AgentBrook.Agent.Skills;
 using AgentBrook.Agent.Tools;
+using AgentBrook.Agent.Plugins;
+using AgentBrook.Plugin.Abstractions;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 
@@ -50,6 +52,11 @@ public sealed class BrookAgent : IAsyncDisposable
     private readonly List<string> _archiveIndex = [];   // 档案索引条目：折叠的工具结果 / 被裁对话原文 → 存档路径
     private bool _titleAutoSet;   // 本会话标题是否已从首条用户消息自动生成
 
+    // ── 会话转写（显示用全量历史）：与 LLM 上下文解耦，压缩不裁剪、只增不删 ──
+    private readonly List<(string Role, string Text)> _transcript = new();
+    private readonly object _transcriptLock = new();
+    private string? _transcriptLastSig;   // 已落盘最后一条记录的指纹；null = 尚无已落盘记录
+
     /// <summary>会话标题自动生成/切换后触发（UI 刷新顶栏标题）。</summary>
     public event Action<string>? SessionTitleChanged;
 
@@ -88,6 +95,9 @@ public sealed class BrookAgent : IAsyncDisposable
 
     /// <summary>MCP 服务器配置。</summary>
     public Configuration.McpOptions McpOptions => _config.MCP;
+
+    /// <summary>插件管理器（设置页「插件」区块用：安装/启停/设置贡献）。</summary>
+    public AgentBrook.Agent.Plugins.PluginManager? PluginManager { get; private set; }
 
     /// <summary>
     /// 回合前置校验：活跃供应商的 Key 是否可用于发请求。
@@ -205,9 +215,25 @@ public sealed class BrookAgent : IAsyncDisposable
             ?? throw new InvalidOperationException("模型供应商配置为空：请在模型设置中添加供应商。");
         _ = providers;   // 传递给构造
 
+        // P2 插件系统（doc/18）：恢复已启用插件（隐私脱敏 = 首个插件），聚合装饰器挂到主链路。
+        // 失败降级 = 无插件能力（不影响其他功能）。
+        // 索引地址可配置（appsettings Plugins:IndexUrl；默认生产地址；本地测试指向 AgentBrook.Service /updated/plugin/）
+        // 注意 IndexUrl 默认值是空串（非 null），必须用 IsNullOrEmpty 兜底
+        var pluginIndexUrl = !string.IsNullOrEmpty(config.Plugins?.IndexUrl)
+            ? config.Plugins.IndexUrl
+            : "https://helper.agentbrook.com/updated/plugin/index.json";
+        var pluginManager = new PluginManager(workspace.Root,
+            indexUrl: pluginIndexUrl,
+            language: CoreStrings.Lang, log: m => Console.Error.WriteLine(m));
+        await pluginManager.RestoreAsync();
+        // 热插拔管线宿主：每次构建客户端栈时插入此层，按注册表版本号缓存/换链——
+        // 插件安装/启停/卸载/总开关切换即时生效，无需重启（装饰链不再一次性烘焙）
+        Func<IChatClient, IChatClient> pluginDecorate = inner => new PluginPipelineChatClient(inner, pluginManager.Registry);
+
         IChatClient chatClient = AgentFactory.CreateChatClient(
             activeProvider.BaseUrl, activeProvider.ApiKey,
-            string.IsNullOrEmpty(activeProvider.ActiveModel) ? activeProvider.Models.FirstOrDefault() ?? "" : activeProvider.ActiveModel);
+            string.IsNullOrEmpty(activeProvider.ActiveModel) ? activeProvider.Models.FirstOrDefault() ?? "" : activeProvider.ActiveModel,
+            decorate: pluginDecorate);
 
         // 合并用户级 MCP 配置（workspace/mcp-user.json，由 mcp_add_server 工具写入）
         var userServers = UserMcpConfigStore.Load(workspace.Root);
@@ -224,7 +250,7 @@ public sealed class BrookAgent : IAsyncDisposable
         var memory = new MarkdownMemoryProvider(workspace.MemoryDir, config.Agent.MaxMemoryChars, config.Agent.MemoryInjectMode);
 
         // 模型路由：子Agent/摘要等辅助角色用清单中的轻量模型（分级用模，降本提速）
-        var router = new ModelRouter(config, () => providers.Active ?? activeProvider);
+        var router = new ModelRouter(config, () => providers.Active ?? activeProvider, pluginDecorate);
 
         var skills = SkillRegistry.Load(workspace.SkillsDir, workspace.Root);
 
@@ -256,7 +282,7 @@ public sealed class BrookAgent : IAsyncDisposable
             var fresh = SkillRegistry.Load(workspace.SkillsDir, workspace.Root);
             MasterIndex.Rebuild(workspace.SkillsDir, fresh, mcpGateRef, BuiltinToolOverview);
         }
-        var skillTools = new SkillTools(skillStore, config.Agent.SkillMarketUrl,
+        var skillTools = new SkillTools(skillStore, config.Agent.SkillMarketUrl ?? "",
             onCapabilitiesChanged: reason => RefreshMasterIndex(),
             sessionInfoProvider: () => (brookRef!._historySummary, brookRef!.TurnAnswer));
         brookRef2SetMasterIndex = () => RefreshMasterIndex();   // 供会话沉淀等非工具路径复用
@@ -395,6 +421,7 @@ public sealed class BrookAgent : IAsyncDisposable
         brook._providers = providers;
         brook._activeProvider = activeProvider;
         brook._router = router!;
+        brook.PluginManager = pluginManager;
         brook._refreshMasterIndex = brookRef2SetMasterIndex;
         brook._sessions = sessions;
         brook._skillStore = skillStore;
@@ -407,6 +434,7 @@ public sealed class BrookAgent : IAsyncDisposable
         brook._historySummary = File.Exists(brook._sessionSummaryFile)
             ? File.ReadAllText(brook._sessionSummaryFile) : "";
         brook.LoadArchiveIndex();
+        brook.ResetTranscriptForCurrentSession();   // 启动即挂载当前会话的转写（存量会话首次运行回填落盘）
         brook.CurrentModel = string.IsNullOrEmpty(activeProvider.ActiveModel)
             ? activeProvider.Models.FirstOrDefault() ?? ""
             : activeProvider.ActiveModel;
@@ -557,7 +585,7 @@ public sealed class BrookAgent : IAsyncDisposable
             var contents = m.Contents.Count > 0
                 ? new List<AIContent>(m.Contents)
                 : [new TextContent("")];
-            contents.Insert(0, new TextContent("[用户在执行过程中插队发送的这条消息——请自行判断是对当前任务的补充，还是应另行处理的新事项]"));
+            contents.Insert(0, new TextContent(SteeringNotePrefix));
             list.Add(new ChatMessage(ChatRole.User, contents));
         }
         return list;
@@ -707,21 +735,29 @@ public sealed class BrookAgent : IAsyncDisposable
         _titleAutoSet = false;
         _session = await _agent.CreateSessionAsync();
         await SaveSessionCoreAsync();
+        ResetTranscriptForCurrentSession();   // 全新会话：转写镜像归零（新会话尚无转写文件）
         SessionTitleChanged?.Invoke(meta.Title);
     }
 
     /// <summary>
-    /// 导出当前会话的可读对话记录（user/assistant 文本对，跳过工具中间轮），
+    /// 导出当前会话的可读对话记录尾部（user/assistant 文本对，跳过工具中间轮），
     /// 供 UI 切换会话后回放历史。最多返回最近 limit 条。
+    /// 数据源为全量转写镜像（transcript.jsonl）：与 LLM 上下文解耦，
+    /// 自动压缩裁掉的早期对话仍可完整回放/滚动加载。
     /// </summary>
     public IReadOnlyList<(string Role, string Text)> GetTranscript(int limit = 40)
     {
-        var list = BuildTranscriptList();
-        return list.Skip(Math.Max(0, list.Count - limit)).ToList();
+        lock (_transcriptLock)
+        {
+            return _transcript.Skip(Math.Max(0, _transcript.Count - limit)).ToList();
+        }
     }
 
-    /// <summary>当前会话可读对话记录的总条数（与 GetTranscript 同源同过滤）。</summary>
-    public int TranscriptCount => BuildTranscriptList().Count;
+    /// <summary>当前会话可读对话记录的总条数（与 GetTranscript 同源）。</summary>
+    public int TranscriptCount
+    {
+        get { lock (_transcriptLock) return _transcript.Count; }
+    }
 
     /// <summary>
     /// 分页取更早的可读对话记录：skipFromEnd = 从末尾跳过的条数，take = 最多返回多少条。
@@ -729,13 +765,16 @@ public sealed class BrookAgent : IAsyncDisposable
     /// </summary>
     public IReadOnlyList<(string Role, string Text)> GetTranscriptRange(int skipFromEnd, int take)
     {
-        var list = BuildTranscriptList();
-        var end = Math.Max(0, list.Count - Math.Max(0, skipFromEnd));
-        var start = Math.Max(0, end - Math.Max(0, take));
-        return list.GetRange(start, end - start);
+        lock (_transcriptLock)
+        {
+            var end = Math.Max(0, _transcript.Count - Math.Max(0, skipFromEnd));
+            var start = Math.Max(0, end - Math.Max(0, take));
+            return _transcript.GetRange(start, end - start);
+        }
     }
 
-    /// <summary>可读对话记录（user/assistant 文本对，跳过系统摘要与无正文轮）。</summary>
+    /// <summary>可读对话记录（user/assistant 文本对，跳过系统摘要与无正文轮）。
+    /// 仅作转写对账的数据源：从内存历史提取记录，压缩裁剪不影响已落盘部分。</summary>
     private List<(string Role, string Text)> BuildTranscriptList()
     {
         var list = new List<(string, string)>();
@@ -758,13 +797,135 @@ public sealed class BrookAgent : IAsyncDisposable
                     text = end >= 0 ? text[(end + noteEnd.Length)..].TrimStart() : "";
                     if (text.Length == 0) continue;
                 }
+                // 插队注记只给模型看：转写/回放剥离，显示用户原始输入
+                if (m.Role == ChatRole.User && text.StartsWith(SteeringNotePrefix, StringComparison.Ordinal))
+                {
+                    text = text[SteeringNotePrefix.Length..].TrimStart();
+                    if (text.Length == 0) continue;
+                }
                 if (m.Role == ChatRole.User) list.Add(("user", text));
-                else if (m.Role == ChatRole.Assistant) list.Add(("assistant", text));
+                else if (m.Role == ChatRole.Assistant)
+                {
+                    // 落盘/回放前一次性还原（doc/15 §7.3 v1.0.9 修订）：转录不得存占位符——
+                    // 加载侧同样还原，两侧一致保证指纹对账不失配
+                    list.Add(("assistant", PluginManager?.RestoreDisplayText(text) ?? text));
+                }
             }
         }
         catch { }
         return list;
     }
+
+    // ── 会话转写持久层：transcript.jsonl（JSONL 追加写）+ 内存镜像 + 指纹游标对账 ──
+    // 对账用"最后落盘记录指纹"从尾定位增量，不依赖条数偏移——压缩从头部裁剪会使偏移失准。
+
+    // 回合进行中暂停转录落盘（v1.0.9 用户方案）：流式期间助手文本尚含占位符，
+    // 中途落盘会把未还原内容写进 transcript——回合结束、TurnAnswer 完整还原后的一次性保存才写入
+    private int _transcriptPersistSuspended;
+
+    private const string SteeringNotePrefix = "[用户在执行过程中插队发送的这条消息——请自行判断是对当前任务的补充，还是应另行处理的新事项]";
+
+    private static readonly System.Text.Json.JsonSerializerOptions TranscriptJsonOptions = new()
+    {
+        PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+    };
+
+    private string TranscriptFilePath => Path.Combine(Path.GetDirectoryName(_sessionFile)!, "transcript.jsonl");
+
+    private static string TranscriptSig(string role, string text) => $"{role}\u0001{text}";
+
+    /// <summary>按当前 _sessionFile 重建转写镜像（会话新建/切换/启动时调用），随后对账回填存量记录。</summary>
+    private void ResetTranscriptForCurrentSession()
+    {
+        lock (_transcriptLock)
+        {
+            _transcript.Clear();
+            _transcriptLastSig = null;
+            try
+            {
+                foreach (var line in File.ReadLines(TranscriptFilePath))
+                {
+                    var t = line.Trim();
+                    if (t.Length == 0) continue;
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(t);
+                        var role = doc.RootElement.GetProperty("role").GetString() ?? "";
+                        var text = doc.RootElement.GetProperty("text").GetString() ?? "";
+                        // 加载侧同样还原（与写入侧一致，指纹对账不失配）；无映射的旧标签按原样保留
+                        if (role == "assistant")
+                        {
+                            text = PluginManager?.RestoreDisplayText(text) ?? text;
+                        }
+                        _transcript.Add((role, text));
+                    }
+                    catch { }   // 单行损坏跳过，不影响其余
+                }
+                if (_transcript.Count > 0)
+                {
+                    _transcriptLastSig = TranscriptSig(_transcript[^1].Role, _transcript[^1].Text);
+                }
+            }
+            catch { }   // 转写加载失败（文件缺失/权限/损坏等）一律静默降级为空镜像：显示增强绝不阻断初始化
+        }
+        ReconcileTranscript();
+    }
+
+    /// <summary>对账：把内存历史中"最后落盘记录之后"的新增可读记录追加进转写文件与镜像。
+    /// 指纹从尾匹配，免疫压缩裁剪（头部删除）与中断回合（残留留待下回合补齐）。
+    /// 落盘成功才推进镜像与游标；失败静默，下次对账重试。</summary>
+    private void ReconcileTranscript()
+    {
+        if (_transcriptPersistSuspended == 1)
+        {
+            return;   // 回合进行中：助手文本尚含占位符，落盘会污染 transcript（结束后还原再写）
+        }
+        var list = BuildTranscriptList();
+        lock (_transcriptLock)
+        {
+            var start = 0;
+            if (_transcriptLastSig is not null)
+            {
+                var found = -1;
+                for (var i = list.Count - 1; i >= 0; i--)
+                {
+                    if (TranscriptSig(list[i].Role, list[i].Text) == _transcriptLastSig)
+                    {
+                        found = i;
+                        break;
+                    }
+                }
+                start = found + 1;   // found<0 → 游标记录已被压缩清除：内存里只剩未落盘的新记录，全部落盘
+            }
+            if (start >= list.Count)
+            {
+                return;
+            }
+            try
+            {
+                var dir = Path.GetDirectoryName(_sessionFile);
+                if (!string.IsNullOrEmpty(dir))
+                {
+                    Directory.CreateDirectory(dir);   // 目录缺失（索引/目录不同步）时自愈
+                }
+                var sb = new System.Text.StringBuilder();
+                for (var i = start; i < list.Count; i++)
+                {
+                    sb.Append(JsonSerializer.Serialize(new TranscriptLine(list[i].Role, list[i].Text), TranscriptJsonOptions));
+                    sb.Append('\n');
+                }
+                File.AppendAllText(TranscriptFilePath, sb.ToString(), new System.Text.UTF8Encoding(false));
+                for (var i = start; i < list.Count; i++)
+                {
+                    _transcript.Add(list[i]);
+                }
+                _transcriptLastSig = TranscriptSig(list[^1].Role, list[^1].Text);
+            }
+            catch { }   // 转写是显示增强，落盘失败不阻断回合（镜像/游标未推进，下次对账重试）
+        }
+    }
+
+    private sealed record TranscriptLine(string Role, string Text);
 
     /// <summary>当前会话 ID 与标题。</summary>
     public string CurrentSessionId => _sessionId;
@@ -810,6 +971,7 @@ public sealed class BrookAgent : IAsyncDisposable
         {
             _session = await _agent.CreateSessionAsync();
         }
+        ResetTranscriptForCurrentSession();   // 载入目标会话的转写镜像（无文件则从存量内存历史回填落盘）
         SessionTitleChanged?.Invoke(meta.Title);
         return true;
     }
@@ -990,6 +1152,7 @@ public sealed class BrookAgent : IAsyncDisposable
             var updates = _agent.RunStreamingAsync(followUp ?? outgoing, _session, BuildRunOptions());
 
             // 每轮 stream 重置：TurnAnswer 只保留最后一轮（最终回答），不累积中间轮的过渡文本
+            _transcriptPersistSuspended = 1;   // 回合进行中暂停转录落盘（结束还原后恢复）
             TurnAnswer = "";
 
             // callId → 工具名：ToolCompleted 事件需要真实工具名（FunctionResultContent 只带 CallId），
@@ -1090,12 +1253,25 @@ public sealed class BrookAgent : IAsyncDisposable
             await SaveSessionCoreAsync();
         }
 
+        // v1.0.9 一次性还原（doc/15 §7.3 修订）：流式期间占位符原样展示，
+        // 回合结束时对最终回答做一次完整还原——此后转录/阶段/UI 全部使用还原后文本
         if (!string.IsNullOrWhiteSpace(TurnAnswer))
         {
+            TurnAnswer = PluginManager?.RestoreDisplayText(TurnAnswer) ?? TurnAnswer;
+            _transcriptPersistSuspended = 0;   // 已完整还原 → 恢复转录落盘（本次保存即写入还原后文本）
             // 阶段素材积累：回合最终回答也进当前阶段（关闭时浓缩摘要用）
             _stageAccum.Append($"[助手] {(TurnAnswer.Length > 300 ? TurnAnswer[..300] + "…" : TurnAnswer)}\n");
         }
         await SaveSessionCoreAsync();
+
+        // T5.3：脱敏徽标（有插件遥测且确有脱敏时）——数量 / 模型实际看到的最后一条用户文本 / 图片未脱敏提示
+        var telemetry = PluginManager?.Registry.GetCapability<IPluginTurnTelemetry>();
+        var stats = telemetry?.GetLastTurnStats();
+        if (stats is { MaskedCount: > 0 })
+        {
+            yield return new BrookEvent.MaskingBadge(stats.MaskedCount, stats.MaskedLastUserText, stats.ImagesPresent);
+        }
+
         yield return new BrookEvent.TurnCompleted();
         yield return new BrookEvent.Status(BrookRunState.Idle);
     }
@@ -1527,7 +1703,7 @@ public sealed class BrookAgent : IAsyncDisposable
     }
 
     // ───────────────────────── 阶段摘要：话题边界 → 分阶段注入 ─────────────────────────
-    private const int StageTitleMaxChars = 12;
+    private const int StageTitleMaxChars = 30;
     private const int StageAccumMaxChars = 6_000;
 
     /// <summary>
@@ -1561,7 +1737,7 @@ public sealed class BrookAgent : IAsyncDisposable
                 var verdict = await QuickCompleteAsync(
                     "你是话题边界判定器。判断「用户新消息」是否开启了一个与「当前阶段」不同的新话题阶段。" +
                     "同一目标的追问、补充、修正、报错修复视为同阶段；切换到无关任务/领域视为新阶段。" +
-                    "只输出 JSON：{\"new\":false} 或 {\"new\":true,\"title\":\"≤12字的新阶段短标题\"}，不要输出其他内容。",
+                    "只输出 JSON：{\"new\":false} 或 {\"new\":true,\"title\":\"≤20字的新阶段短标题\"}，不要输出其他内容。",
                     $"当前阶段标题：{cur.Title}\n用户新消息：{snippet}", cancellationToken, useMainModel: true);
                 var (isNew, title) = ParseStageVerdict(verdict);
                 if (isNew)
@@ -1779,6 +1955,7 @@ public sealed class BrookAgent : IAsyncDisposable
     {
         try
         {
+            ReconcileTranscript();   // 转写先落盘：显示历史比上下文快照更珍贵，序列化失败也不丢
             SanitizeOrphanApprovals(_session);
             CompactTrim();
             PersistArchiveIndex();   // 本次裁剪/折叠若产生新索引条目，随会话一并落盘

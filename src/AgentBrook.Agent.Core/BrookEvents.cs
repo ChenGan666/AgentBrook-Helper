@@ -39,6 +39,9 @@ public abstract record BrookEvent
     /// <summary>一个回合结束（最终回答已完整输出）。</summary>
     public sealed record TurnCompleted() : BrookEvent;
 
+    /// <summary>本回合出站脱敏徽标（T5.3）：挂在用户气泡旁，悬停看模型实际收到的脱敏后文本。</summary>
+    public sealed record MaskingBadge(int MaskedCount, string? MaskedPreview, bool ImagesPresent) : BrookEvent;
+
     /// <summary>回合内发生错误。</summary>
     public sealed record Failed(string Message) : BrookEvent;
 }

@@ -200,7 +200,7 @@ public sealed class AssistantController : IBrookInteraction
     {
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
-            var settings = ModelSettingsWindow.ShowSingle();
+            var settings = SettingsWindow.ShowSingle();
             _ = settings.StartUpdateFlowAsync(info, autoStart);
         });
     }

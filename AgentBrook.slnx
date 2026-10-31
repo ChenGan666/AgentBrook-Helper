@@ -4,4 +4,6 @@
   <Project Path="AgentBrook.Agent.Core/AgentBrook.Agent.Core.csproj" />
   <Project Path="AgentBrook.Agent/AgentBrook.Agent.csproj" />
   <Project Path="AgentBrook.Helper/AgentBrook.Helper.csproj" />
+  <Project Path="AgentBrook.Plugin.Abstractions/AgentBrook.Plugin.Abstractions.csproj" />
+  <Project Path="AgentBrook.Plugin.PrivacyMasking/AgentBrook.Plugin.PrivacyMasking.csproj" />
 </Solution>

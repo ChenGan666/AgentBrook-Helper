@@ -269,8 +269,8 @@
                     CornerRadius="14" Padding="16,12" BorderThickness="1"
                     BorderBrush="#3d3d3d" Background="#2b2b2b">
                 <StackPanel Spacing="6">
-                    <TextBlock x:Name="StageCardTitle" FontSize="13.5" FontWeight="SemiBold"
-                               Foreground="#e6e6e6" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock x:Name="StageCardTitle" FontSize="13.5" Foreground="#e6e6e6"
+                               TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis"/>
                     <TextBlock x:Name="StageCardMeta" FontSize="11" Foreground="#8a8a8a"
                                TextTrimming="CharacterEllipsis"/>
                     <TextBlock x:Name="StageCardText" FontSize="12.5" Foreground="#b8b8b8"

@@ -1,6 +1,6 @@
 ﻿<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        x:Class="AgentBrook.Helper.Windows.ModelSettingsWindow"
+        x:Class="AgentBrook.Helper.Windows.SettingsWindow"
         RequestedThemeVariant="Dark"
         Title="设置" Width="920" Height="680" MinWidth="760" MinHeight="560"
         Icon="avares://AgentBrook.Helper/Assets/app-icon.png"
@@ -116,6 +116,35 @@
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="0"/>
         </Style>
+        <!-- 插件页样式（自 PluginManagerWindow 迁入） -->
+        <Style Selector="Button.pluginPrimary">
+            <Setter Property="Background" Value="#2f6fdb"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Padding" Value="12,6"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="Button.pluginSecondary">
+            <Setter Property="Background" Value="#333"/>
+            <Setter Property="Foreground" Value="#c8c8c8"/>
+            <Setter Property="Padding" Value="12,6"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="Button.pluginDanger">
+            <Setter Property="Background" Value="#5a2a2a"/>
+            <Setter Property="Foreground" Value="#f0b0b0"/>
+            <Setter Property="Padding" Value="12,6"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="Border.pluginCard">
+            <Setter Property="Background" Value="#292929"/>
+            <Setter Property="BorderBrush" Value="#3a3a3a"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="10"/>
+            <Setter Property="Padding" Value="14,10"/>
+        </Style>
     </Window.Styles>
 
     <Grid ColumnDefinitions="190,*">
@@ -158,6 +187,13 @@
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <PathIcon Data="{StaticResource Icon.Book}" Width="15" Height="15"/>
                             <TextBlock x:Name="NavSkillsText" Text="Skill管理"/>
+                        </StackPanel>
+                    </RadioButton>
+                    <TextBlock x:Name="NavGroupPlugins" Text="插件" Classes="navGroup"/>
+                    <RadioButton x:Name="NavPlugins" Classes="navItem" GroupName="nav">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <PathIcon Data="{StaticResource Icon.Shield}" Width="15" Height="15"/>
+                            <TextBlock x:Name="NavPluginsText" Text="插件管理"/>
                         </StackPanel>
                     </RadioButton>
                     <TextBlock x:Name="NavGroupSystem" Text="系统" Classes="navGroup"/>
@@ -345,6 +381,21 @@
                 <TextBlock x:Name="LabelBubblePos" Text="气泡位置" Classes="formLabel"/>
                 <Button x:Name="ResetPosBtn" Classes="ghostBtn" Content="重置到默认位置（右上角）"
                         HorizontalAlignment="Left"/>
+            </StackPanel>
+
+            <!-- 插件管理 -->
+            <StackPanel x:Name="PagePlugins" IsVisible="False" Spacing="6">
+                <TextBlock x:Name="PluginsTitle" Text="插件管理" Classes="pageTitle"/>
+                <TextBlock x:Name="PluginsDesc" Text="安装与管理 Helper 能力扩展插件。插件从服务端按需下载。" Classes="pageDesc" Margin="0,2,0,12"/>
+                <TextBlock x:Name="PluginsInstalledHeader" Text="已安装插件" Classes="formLabel" Margin="0,0,0,4"/>
+                <StackPanel x:Name="PluginInstalledList" Spacing="8"/>
+                <TextBlock x:Name="PluginsAvailableHeader" Text="可用插件" Classes="formLabel" Margin="0,12,0,4"/>
+                <StackPanel x:Name="PluginAvailableList" Spacing="8"/>
+                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
+                    <Button x:Name="PluginRefreshBtn" Classes="ghostBtn" Content="刷新"/>
+                    <TextBlock x:Name="PluginStatusText" TextWrapping="Wrap" VerticalAlignment="Center"
+                               Foreground="#8a8a8a" FontSize="12"/>
+                </StackPanel>
             </StackPanel>
 
             <!-- 模型设置 -->

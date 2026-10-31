@@ -105,6 +105,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _controller = App.Controller;
+        StartUiStallWatchdog();
 
         _chatPanel = this.FindControl<StackPanel>("ChatPanel");
         _chatScroll = this.FindControl<ScrollViewer>("ChatScroll");
@@ -130,7 +131,7 @@ public partial class MainWindow : Window
         var a2aBtn = this.FindControl<Button>("A2ABtn");
         if (a2aBtn is not null) a2aBtn.Click += (_, _) => App.ShowA2AWindow();
         var settingsBtn = this.FindControl<Button>("SettingsBtn");
-        if (settingsBtn is not null) settingsBtn.Click += (_, _) => ModelSettingsWindow.ShowSingle();
+        if (settingsBtn is not null) settingsBtn.Click += (_, _) => SettingsWindow.ShowSingle();
         var plusBtn = this.FindControl<Button>("PlusBtn");
         var fullAccessBtn = this.FindControl<Button>("FullAccessBtn");
         var modelChip = this.FindControl<Button>("ModelChip");
@@ -247,9 +248,13 @@ public partial class MainWindow : Window
                                 {
                                     _ = SafeSwitchProviderAsync(provider.Name);
                                 }
+                                else if (_controller.Agent is { } agent)
+                                {
+                                    agent.SetModel(model);
+                                }
                                 else
                                 {
-                                    _controller.Agent!.SetModel(model);
+                                    AddErrorBubble(I18n.T("ui.agent.is.not.ready.yet.please.try.again.later"));
                                 }
                                 UpdateModelChip();
                                 _modelPopup?.IsOpen = false;
@@ -266,7 +271,7 @@ public partial class MainWindow : Window
                     manage.Click += (_, _) =>
                     {
                         _modelPopup?.IsOpen = false;
-                        ModelSettingsWindow.ShowSingle();
+                        SettingsWindow.ShowSingle();
                     };
                     panel.Children.Add(manage);
                 }
@@ -301,7 +306,7 @@ public partial class MainWindow : Window
                     var noneBtn = new Button
                     {
                         Classes = { "menuItem" },
-                        Content = (noneActive ? "✓  " : "      ") + "无",
+                        Content = (noneActive ? "✓  " : "      ") + I18n.T("ui.none"),
                         Foreground = new SolidColorBrush(Color.Parse(noneActive ? "#4a9eff" : "#c8c8c8")),
                     };
                     noneBtn.Click += (_, _) =>
@@ -315,7 +320,7 @@ public partial class MainWindow : Window
                         var isActive = provider.Name == currentProvider && provider.ActiveMediaModel == m;
                         var mm = m;
                         var label = provider.DisplayNameOf(mm);
-                        var typeTag = provider.TypeOf(mm) is >= 6 ? "视频" : "图像";
+                        var typeTag = provider.TypeOf(mm) is >= 6 ? I18n.T("ui.media.type.video") : I18n.T("ui.media.type.image");
                         var mb = new Button
                         {
                             Classes = { "menuItem" },
@@ -336,7 +341,7 @@ public partial class MainWindow : Window
                 {
                     panel.Children.Add(new TextBlock
                     {
-                        Text = "无多模态模型（在模型设置中拉取）",
+                        Text = I18n.T("ui.no.multimodal.models.fetch.in.model.settings"),
                         Foreground = new SolidColorBrush(Color.Parse("#9a9a9a")),
                         FontSize = 13.5,
                         Margin = new Thickness(12, 8),
@@ -444,6 +449,49 @@ public partial class MainWindow : Window
     }
 
     private void InitializeComponent() => AvaloniaXamlLoader.Load(this);
+
+    // ── UI 线程卡顿看门狗（诊断） ───────────────────────────────────────
+    private DispatcherTimer? _uiStallTimer;
+    private Stopwatch _uiStallWatch = new();
+    private long _uiStallReporting;
+
+    /// <summary>
+    /// UI 线程卡顿看门狗：1s 心跳；相邻 tick 间隔 &gt;3s 即判定 UI 线程被同步阻塞，
+    /// 把阻塞时长 + UI 线程托管堆栈打到 stderr（"卡死/卡顿"归因用，发布版可关）。
+    /// </summary>
+    private void StartUiStallWatchdog()
+    {
+        _uiStallWatch.Start();
+        _uiStallTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _uiStallTimer.Tick += (_, _) =>
+        {
+            var elapsed = _uiStallWatch.ElapsedMilliseconds;
+            _uiStallWatch.Restart();
+            if (elapsed <= 3000)
+            {
+                return;
+            }
+            if (Interlocked.Exchange(ref _uiStallReporting, 1) == 1)
+            {
+                return;
+            }
+            Task.Run(() =>
+            {
+                try
+                {
+                    // .NET Core 拿不到其他线程的托管堆栈——时长 + 时间戳与 [turn]/[privacy] 日志对时归因；
+                    // 需要堆栈时在 VS 里卡住时暂停调试器即可
+                    Console.Error.WriteLine(
+                        $"[ui-stall] {DateTime.Now:HH:mm:ss.fff} UI 线程阻塞 {elapsed / 1000.0:F1}s（上一次心跳距今）");
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref _uiStallReporting, 0);
+                }
+            });
+        };
+        _uiStallTimer.Start();
+    }
 
     /// <summary>按回合状态切换发送按钮形态：空闲=发送↑，忙碌=停止■。</summary>
     private void UpdateSendStopVisual(BrookRunState state)
@@ -560,7 +608,7 @@ public partial class MainWindow : Window
                         return;
                     }
                     _sessionPopup?.IsOpen = false;
-                    var wasCurrent = meta.Id == _controller.Agent!.CurrentSessionId;
+                    var wasCurrent = meta.Id == _controller.Agent?.CurrentSessionId;
                     await _controller.DeleteSessionAsync(meta.Id);
                     if (wasCurrent)
                     {
@@ -984,8 +1032,12 @@ public partial class MainWindow : Window
             case BrookEvent.Failed fail:
                 AddErrorBubble(fail.Message);
                 break;
+            case BrookEvent.MaskingBadge badge:
+                RenderMaskingBadge(badge);
+                break;
             case BrookEvent.TurnCompleted:
                 StopThinkLine();
+                StopStreamTimer();
                 CollapseExecGroup();   // 完成后收起执行过程，保持主内容清爽
                 RemoveStreamBubble();  // 流式纯文本让位给 Markdown 渲染
                 ShowFinalAnswer();
@@ -1271,6 +1323,13 @@ public partial class MainWindow : Window
         return t.Length <= max ? t : t[..max] + "…";
     }
 
+    // 选项编号统一由界面渲染；模型若自带前缀（1.、A、（2）、B 空格、① 等）在此剥离
+    private static readonly System.Text.RegularExpressions.Regex ChoiceNumberingPrefix =
+        new(@"^(?:[(（][0-9０-９]{1,2}[)）]|[(（][A-Za-z][)）]|[0-9０-９]{1,2}[.．、:：)）]|[A-Za-z][.．、:：)）]|[A-Za-z](?=\s[\p{IsCJKUnifiedIdeographs}0-9０-９])|[①②③④⑤⑥⑦⑧⑨⑩])\s*",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static string StripChoiceNumbering(string choice) => ChoiceNumberingPrefix.Replace(choice, "");
+
     /// <summary>决议完成：交互卡状态落定，内容区替换为单行结果并默认外层折叠。</summary>
     private static void ResolveCard(InteractionCard card, string line, InteractionState state)
     {
@@ -1456,14 +1515,15 @@ public partial class MainWindow : Window
 
         if (!string.IsNullOrWhiteSpace(choices))
         {
-            foreach (var choice in choices.Split('|', StringSplitOptions.TrimEntries))
+            var items = choices.Split('|', StringSplitOptions.TrimEntries)
+                .Where(c => c.Length > 0)
+                .Select(StripChoiceNumbering)
+                .ToList();
+            for (var i = 0; i < items.Count; i++)
             {
-                if (choice.Length == 0)
-                {
-                    continue;
-                }
-                var chip = new Button { Content = choice, Classes = { "choiceChip" }, Margin = new Thickness(0, 0, 8, 8) };
-                chip.Click += (_, _) => Submit(choice);
+                var text = items[i];
+                var chip = new Button { Content = $"{i + 1}. {text}", Classes = { "choiceChip" }, Margin = new Thickness(0, 0, 8, 8) };
+                chip.Click += (_, _) => Submit(text);
                 choicesRow.Children.Add(chip);
             }
         }
@@ -1621,8 +1681,11 @@ public partial class MainWindow : Window
         }
         var border = new Border { Classes = { "userBubble" }, Child = stack, Tag = "msg" };
         _chatPanel!.Children.Add(border);
+        _lastUserBubbleStack = stack;   // T5.3 脱敏徽标挂点
         ScrollToEnd();
     }
+
+    private StackPanel? _lastUserBubbleStack;
 
     private Control AddAssistantBubble(string? initialText = null)
     {
@@ -1644,8 +1707,45 @@ public partial class MainWindow : Window
     }
 
     private Control? _streamViewer;
+    // 流式渲染节流：TextDelta 每 chunk 全量赋文本 + ScrollToEnd 是 O(n)/chunk（长回复 O(n²)），
+    // 长且占位符密集的回复会拖死 UI 线程——合并为 ~10Hz 重绘
+    private DispatcherTimer? _streamRenderTimer;
+    private bool _streamPending;
 
     /// <summary>流式期间：把控制器维护的当前回合全量答案覆盖到流式气泡（幂等，重复事件无副作用）。</summary>
+    /// <summary>T5.3：用户气泡旁的脱敏徽标；悬停显示模型实际收到的脱敏后文本（可复制）。</summary>
+    private void RenderMaskingBadge(BrookEvent.MaskingBadge badge)
+    {
+        if (_lastUserBubbleStack is null)
+        {
+            return;
+        }
+        var chip = new TextBlock
+        {
+            Text = I18n.T("ui.privacy.badge", badge.MaskedCount)
+                + (badge.ImagesPresent ? " " + I18n.T("ui.privacy.badge.images") : ""),
+            FontSize = 11.5,
+            Foreground = new SolidColorBrush(Color.Parse("#7fbf7f")),
+        };
+        if (!string.IsNullOrEmpty(badge.MaskedPreview))
+        {
+            var tip = new StackPanel { Spacing = 4, MaxWidth = 460 };
+            tip.Children.Add(new TextBlock
+            {
+                Text = I18n.T("ui.privacy.badge.hover"),
+                FontWeight = FontWeight.Medium,
+                Foreground = new SolidColorBrush(Color.Parse("#c8c8c8")),
+            });
+            tip.Children.Add(MarkdownView.Selectable(new SelectableTextBlock
+            {
+                Text = badge.MaskedPreview,
+                TextWrapping = TextWrapping.Wrap,
+            }));
+            ToolTip.SetTip(chip, tip);
+        }
+        _lastUserBubbleStack.Children.Add(chip);
+    }
+
     private void UpdateStreamText()
     {
         var text = _controller.FinalAnswer;
@@ -1663,9 +1763,33 @@ public partial class MainWindow : Window
         }
         if (_streamViewer is SelectableTextBlock tb)
         {
-            tb.Text = text;
-            ScrollToEnd();
+            _streamPending = true;
+            if (_streamRenderTimer is null)
+            {
+                _streamRenderTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+                _streamRenderTimer.Tick += (_, _) =>
+                {
+                    _streamRenderTimer.Stop();
+                    if (_streamPending && _streamViewer is SelectableTextBlock view)
+                    {
+                        _streamPending = false;
+                        view.Text = _controller.FinalAnswer;
+                        ScrollToEnd();
+                    }
+                };
+            }
+            if (!_streamRenderTimer.IsEnabled)
+            {
+                _streamRenderTimer.Start();
+            }
         }
+    }
+
+    /// <summary>回合结束：停止节流定时器并丢弃未渲染的中间态（最终 Markdown 渲染接管）。</summary>
+    private void StopStreamTimer()
+    {
+        _streamRenderTimer?.Stop();
+        _streamPending = false;
     }
 
     /// <summary>回合完成：移除全部流式纯文本气泡，位置让给最终 Markdown 渲染。</summary>

@@ -12,7 +12,8 @@ public static class AgentFactory
 {
     /// <summary>按显式供应商参数创建 IChatClient（模型管理/多供应商切换用）。
     /// maxRetries：传 0 供"测试/取名"等交互场景快速失败（默认保持 SDK 内建重试）。</summary>
-    public static IChatClient CreateChatClient(string baseUrl, string apiKey, string defaultModel, int? maxRetries = null)
+    public static IChatClient CreateChatClient(string baseUrl, string apiKey, string defaultModel,
+        int? maxRetries = null, Func<IChatClient, IChatClient>? decorate = null)
     {
         var options = new OpenAIClientOptions { Endpoint = new Uri(NormalizeEndpoint(baseUrl)) };
         if (maxRetries is not null)
@@ -20,7 +21,9 @@ public static class AgentFactory
             options.RetryPolicy = new System.ClientModel.Primitives.ClientRetryPolicy(maxRetries.Value);
         }
         var client = new OpenAIClient(new System.ClientModel.ApiKeyCredential(apiKey), options);
-        return client.GetChatClient(defaultModel).AsIChatClient();
+        var chat = client.GetChatClient(defaultModel).AsIChatClient();
+        // D13：工厂不内置隐私依赖——decorate 仅由 BrookAgent / ModelRouter 显式传入（Onboarding 等旁路直调默认 null）
+        return decorate is null ? chat : decorate(chat);
     }
 
     /// <summary>
@@ -37,14 +40,15 @@ public static class AgentFactory
     }
 
     /// <summary>创建基于 OpenAI 兼容端点（DeepSeek）的 IChatClient。</summary>
-    public static IChatClient CreateChatClient(AppConfig config)
+    public static IChatClient CreateChatClient(AppConfig config, Func<IChatClient, IChatClient>? decorate = null)
     {
         var apiKey = ResolveApiKey(config);
         var endpoint = new Uri(NormalizeEndpoint(config.LLM.BaseUrl));
 
         var client = new OpenAIClient(new System.ClientModel.ApiKeyCredential(apiKey),
             new OpenAIClientOptions { Endpoint = endpoint });
-        return client.GetChatClient(config.LLM.DefaultModel).AsIChatClient();
+        var chat = client.GetChatClient(config.LLM.DefaultModel).AsIChatClient();
+        return decorate is null ? chat : decorate(chat);
     }
 
     /// <summary>用给定的工具面与上下文提供者创建智能体。</summary>
@@ -154,7 +158,7 @@ public static class AgentFactory
         if (caps is { McpServers.Count: > 0 })
         {
             // worker 作用域 MCP：共享主连接，但只放行被授权的服务器
-            var mcp = new Mcp.McpGateTools(mcpConnections, config.Agent.MaxToolOutputChars, caps.McpServers);
+            var mcp = new Mcp.McpGateTools(mcpConnections ?? [], config.Agent.MaxToolOutputChars, caps.McpServers);
             toolList.Add(AIFunctionFactory.Create(mcp.mcp_call));
             toolList.Add(AIFunctionFactory.Create(mcp.mcp_tool_help));
             extra += "\n# 可用 MCP 工具（仅限被授权的服务器）\n" + mcp.BuildCatalogBlock();

@@ -136,7 +136,7 @@ public partial class App : Application
                         return;
                     }
                     stTimer.Stop();
-                    ModelSettingsWindow.ShowSingle();
+                    SettingsWindow.ShowSingle();
                 };
                 stTimer.Start();
             }
@@ -173,7 +173,7 @@ public partial class App : Application
                 ul.Tick += (_, _) =>
                 {
                     ul.Stop();
-                    var win = ModelSettingsWindow.ShowSingle();
+                    var win = SettingsWindow.ShowSingle();
                     win.DebugSelectUiLanguage("en");
                 };
                 ul.Start();

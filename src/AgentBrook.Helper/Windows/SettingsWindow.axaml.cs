@@ -2,6 +2,7 @@
 using AgentBrook.Helper.Core;
 using AgentBrook.Helper.Views;
 using AgentBrook.Agent.Infrastructure;
+using AgentBrook.Agent.Plugins;
 using AgentBrook.Agent.Skills;
 using AgentBrook.Helper.EnvironmentCheck;
 using AgentBrook.Helper.Update;
@@ -22,16 +23,16 @@ namespace AgentBrook.Helper.Windows;
 /// 模型设置：管理多个 OpenAI 兼容供应商（名称/端点/Key/模型清单），
 /// 保存后热应用到会话（切换供应商时保留对话上下文）。
 /// </summary>
-public partial class ModelSettingsWindow : WindowBase
+public partial class SettingsWindow : WindowBase
 {
     /// <summary>单例窗口：已打开则聚焦复用，未打开则新建（菜单/对话窗/回环回填统一走此入口）。</summary>
-    private static ModelSettingsWindow? _current;
+    private static SettingsWindow? _current;
 
-    public static ModelSettingsWindow ShowSingle()
+    public static SettingsWindow ShowSingle()
     {
         if (_current is null)
         {
-            _current = new ModelSettingsWindow();
+            _current = new SettingsWindow();
             _current.Closed += (_, _) => _current = null;
         }
         if (!_current.IsVisible) _current.Show();
@@ -49,7 +50,7 @@ public partial class ModelSettingsWindow : WindowBase
     private List<EnvironmentCheckResult> _environmentResults = new();
     private Button? _repairAllBtn;
 
-    public ModelSettingsWindow()
+    public SettingsWindow()
     {
         InitializeComponent();
         Opened += (_, _) => CenterOnScreen();
@@ -58,6 +59,7 @@ public partial class ModelSettingsWindow : WindowBase
         BuildPresets();
 
         _skillsHint = this.FindControl<TextBlock>("SkillsHint");
+        _pluginStatusText = this.FindControl<TextBlock>("PluginStatusText");
         BuildSkillsList();
         WireCollaborationAndUpdateSettings();
         this.FindControl<Button>("SetupWizardBtn")?.Click += (_, _) => OnboardingWindow.ShowSingle();
@@ -188,6 +190,16 @@ public partial class ModelSettingsWindow : WindowBase
         NavEnvironment.IsCheckedChanged += (_, _) =>
         {
             if (NavEnvironment.IsChecked == true) ShowPage(PageEnvironment);
+        };
+        NavPlugins.IsCheckedChanged += (_, _) =>
+        {
+            if (NavPlugins.IsChecked == true) ShowPage(PagePlugins);
+        };
+        this.FindControl<Button>("PluginRefreshBtn")!.Click += async (_, _) =>
+        {
+            this.FindControl<Button>("PluginRefreshBtn")!.IsEnabled = false;
+            try { await RefreshPluginLists(); }
+            finally { this.FindControl<Button>("PluginRefreshBtn")!.IsEnabled = true; }
         };
         ShowPage(PageGeneral);   // 与 NavGeneral 默认选中一致
         this.FindControl<Button>("SaveApplyBtn")!.Click += async (_, _) => await SaveAndApplyAsync();
@@ -452,9 +464,284 @@ public partial class ModelSettingsWindow : WindowBase
         PageModels.IsVisible = page == PageModels;
         PageSkills.IsVisible = page == PageSkills;
         PageEnvironment.IsVisible = page == PageEnvironment;
+        PagePlugins.IsVisible = page == PagePlugins;
+        if (page == PagePlugins) _ = RefreshPluginLists();
         if (page == PageEnvironment && _environmentResults.Count == 0)
         {
             _ = CheckEnvironmentAsync();
+        }
+    }
+
+    private TextBlock? _pluginStatusText;
+
+    private void SetPluginStatus(string text)
+    {
+        if (_pluginStatusText is not null)
+        {
+            _pluginStatusText.Text = text;
+        }
+    }
+
+    /// <summary>当前打开的插件设置对话框（卸载时关闭：对话框持有插件实例，会阻碍 ALC 回收与目录删除）。</summary>
+    private PluginSettingsDialog? _openPluginDialog;
+
+    private void ClosePluginDialog()
+    {
+        if (_openPluginDialog is { } d)
+        {
+            _openPluginDialog = null;
+            try { d.Close(); } catch { /* 已关闭则忽略 */ }
+        }
+    }
+
+    /// <summary>刷新插件列表（PagePlugins 激活/手动刷新时调用）：已装 + 服务端可用；所有状态（未就绪/空/错误）页面内可见。</summary>
+    private async Task RefreshPluginLists()
+    {
+        var installedPanel = this.FindControl<StackPanel>("PluginInstalledList");
+        var availablePanel = this.FindControl<StackPanel>("PluginAvailableList");
+        if (installedPanel is null || availablePanel is null)
+        {
+            Console.Error.WriteLine("[plugins] 页面控件缺失：PluginInstalledList/PluginAvailableList");
+            return;
+        }
+        installedPanel.Children.Clear();
+        availablePanel.Children.Clear();
+        SetPluginStatus("");
+
+        var plugins = App.Controller.Agent?.PluginManager;
+        if (plugins is null)
+        {
+            availablePanel.Children.Add(new TextBlock
+            {
+                Text = I18n.T("ui.plugins.not.ready"),
+                Foreground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#f0b0b0")),
+            });
+            return;
+        }
+
+        // 已装插件（空则显示占位说明）
+        var installed = plugins.ListInstalled();
+        if (installed.Count == 0)
+        {
+            installedPanel.Children.Add(new TextBlock
+            {
+                Text = I18n.T("ui.plugins.none"),
+                Foreground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#8a8a8a")),
+            });
+        }
+        foreach (var (id, entry) in installed)
+        {
+            var card = new Border
+            {
+                Classes = { "pluginCard" },
+                Padding = new Thickness(10, 8),
+                CornerRadius = new Avalonia.CornerRadius(8),
+                Background = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#252525")),
+            };
+            var stack = new StackPanel { Spacing = 4 };
+            stack.Children.Add(new TextBlock
+            {
+                Text = $"{id} · {entry.Version}",
+                Foreground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#e8e8e8")),
+            });
+            var toggle = new ToggleSwitch
+            {
+                IsChecked = entry.Enabled,
+                OffContent = "",
+                OnContent = "",
+                VerticalContentAlignment = Avalonia.Layout.VerticalAlignment.Center,
+            };
+            toggle.IsCheckedChanged += async (_, _) =>
+            {
+                try { await plugins.SetEnabledAsync(id, toggle.IsChecked == true); }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"[plugins] SetEnabled: {ex.Message}");
+                    SetPluginStatus(ex.Message);
+                }
+            };
+            stack.Children.Add(toggle);
+
+            // 插件设置对话框（doc/18 §7.1：具体插件在弹出单独的设置界面对话框）
+            var contributor = plugins.GetSettingsContributor(id);
+            if (contributor is not null)
+            {
+                var settingsBtn = new Button
+                {
+                    Content = I18n.T("ui.plugins.settings"),
+                    Classes = { "pluginSecondary" },
+                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left,
+                };
+                settingsBtn.Click += (_, _) =>
+                {
+                    ClosePluginDialog();
+                    var dialog = new PluginSettingsDialog(id, id, contributor);
+                    dialog.Build();
+                    dialog.Closed += (_, _) => { if (_openPluginDialog == dialog) _openPluginDialog = null; };
+                    _openPluginDialog = dialog;
+                    // 模态：弹出后设置窗口不可点（ShowDialog 非阻塞，返回 Task 不 await）
+                    _ = dialog.ShowDialog(this);
+                };
+                stack.Children.Add(settingsBtn);
+            }
+            var uninstallBtn = new Button
+            {
+                Content = I18n.T("ui.plugins.uninstall"),
+                Classes = { "pluginDanger" },
+                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left,
+            };
+            uninstallBtn.Click += async (_, _) =>
+            {
+                try
+                {
+                    ClosePluginDialog();   // 对话框持有插件实例，先关（热插拔回收需要）
+                    var fullyRemoved = await plugins.UninstallAsync(id);
+                    SetPluginStatus(I18n.T(fullyRemoved ? "ui.plugins.uninstalled" : "ui.plugins.uninstall.restarted", id));
+                    _ = RefreshPluginLists();
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"[plugins] Uninstall: {ex.Message}");
+                    SetPluginStatus(ex.Message);
+                }
+            };
+            stack.Children.Add(uninstallBtn);
+            card.Child = stack;
+            installedPanel.Children.Add(card);
+        }
+
+        // 服务端可用插件
+        try
+        {
+            var available = await plugins.FetchAvailableAsync();
+            if (available.Count == 0)
+            {
+                availablePanel.Children.Add(new TextBlock
+                {
+                    Text = I18n.T("ui.plugins.none"),
+                    Foreground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#8a8a8a")),
+                });
+            }
+            foreach (var available_entry in available)
+            {
+                if (plugins.ListInstalled().ContainsKey(available_entry.Id))
+                {
+                    continue;   // 已装
+                }
+                var card = new Border
+                {
+                    Classes = { "pluginCard" },
+                    Padding = new Thickness(10, 8),
+                    CornerRadius = new Avalonia.CornerRadius(8),
+                    Background = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#252525")),
+                };
+                var stack = new StackPanel { Spacing = 4 };
+                stack.Children.Add(new TextBlock
+                {
+                    Text = $"{available_entry.Name} ({available_entry.Latest})",
+                    Foreground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#e8e8e8")),
+                });
+                if (!string.IsNullOrEmpty(available_entry.Description))
+                {
+                    stack.Children.Add(new TextBlock
+                    {
+                        Text = available_entry.Description,
+                        Foreground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#9a9a9a")),
+                        TextWrapping = TextWrapping.Wrap,
+                    });
+                }
+                var installBtn = new Button
+                {
+                    Content = I18n.T("ui.plugins.install"),
+                    Classes = { "pluginPrimary" },
+                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left,
+                };
+                // 安装进度条（下载=确定态百分比；校验/解压/加载=不确定态）+ 字节文案
+                var installBar = new ProgressBar
+                {
+                    Minimum = 0,
+                    Maximum = 100,
+                    Height = 4,
+                    IsVisible = false,
+                };
+                var installStage = new TextBlock
+                {
+                    Foreground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#9a9a9a")),
+                    FontSize = 12,
+                    IsVisible = false,
+                    TextWrapping = TextWrapping.Wrap,
+                };
+                stack.Children.Add(installBar);
+                stack.Children.Add(installStage);
+                var captured = available_entry;
+                installBtn.Click += async (_, _) =>
+                {
+                    installBtn.IsEnabled = false;
+                    installBar.IsVisible = true;
+                    installBar.IsIndeterminate = true;
+                    installStage.IsVisible = true;
+                    installStage.Text = I18n.T("ui.plugins.installing", captured.Name);
+                    var progress = new Progress<PluginInstallProgress>(p =>
+                    {
+                        if (p.Stage == PluginInstallProgress.Download)
+                        {
+                            installBar.IsIndeterminate = p.Total is not > 0;
+                            if (p.Total is > 0)
+                            {
+                                installBar.Value = p.Bytes * 100.0 / p.Total.Value;
+                            }
+                            installStage.Text = $"{I18n.T("ui.plugins.downloading")} {p.Bytes * 100.0 / Math.Max(p.Total ?? 1, 1):0}%（{p.Bytes / 1048576.0:0.0}/{(p.Total ?? 0) / 1048576.0:0.0} MB）";
+                        }
+                        else if (p.Stage == PluginInstallProgress.Verify)
+                        {
+                            installBar.IsIndeterminate = true;
+                            installStage.Text = I18n.T("ui.plugins.verifying");
+                        }
+                        else if (p.Stage == PluginInstallProgress.Extract)
+                        {
+                            installBar.IsIndeterminate = true;
+                            installStage.Text = I18n.T("ui.plugins.extracting");
+                        }
+                        else if (p.Stage == PluginInstallProgress.Done)
+                        {
+                            installBar.IsIndeterminate = true;
+                            installStage.Text = I18n.T("ui.plugins.enabling");
+                        }
+                    });
+                    try
+                    {
+                        // 校验/解压/插件初始化是同步 CPU 阶段——整体放后台，UI 不卡死
+                        await Task.Run(() => plugins.InstallAsync(captured, progress: progress));
+                        await RefreshPluginLists();
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"[plugins] Install: {ex.Message}");
+                        SetPluginStatus($"{I18n.T("ui.plugins.install.failed")}：{ex.Message}");
+                        installStage.Text = $"{I18n.T("ui.plugins.install.failed")}：{ex.Message}";
+                    }
+                    finally
+                    {
+                        installBar.IsVisible = false;
+                        installStage.IsVisible = false;
+                        installBtn.IsEnabled = true;
+                    }
+                };
+                stack.Children.Add(installBtn);
+                card.Child = stack;
+                availablePanel.Children.Add(card);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[plugins] FetchAvailable: {ex.Message}");
+            SetPluginStatus(I18n.T("ui.plugins.server.unreachable", ex.Message));
+            availablePanel.Children.Add(new TextBlock
+            {
+                Text = I18n.T("ui.plugins.server.unreachable", ex.Message),
+                Foreground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#f0b0b0")),
+                TextWrapping = TextWrapping.Wrap,
+            });
         }
     }
 

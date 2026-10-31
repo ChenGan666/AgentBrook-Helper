@@ -14,7 +14,8 @@ internal static class WorkspacePrefs
 {
     private static string OverrideFile() => Path.Combine(Workspace.LocateAppRoot(), "workspace-override.json");
 
-    /// <summary>读取覆盖路径；未设置返回 null。</summary>
+    /// <summary>读取覆盖路径；未设置或目录在本机不存在时返回 null（覆盖文件随仓库跨机共享：
+    /// Windows 的 W:\ 路径在 mac 上无效，按未设置处理，避免在工作区里创建字面量垃圾目录）。</summary>
     public static string? LoadOverride()
     {
         try
@@ -27,7 +28,8 @@ internal static class WorkspacePrefs
             using var doc = JsonDocument.Parse(File.ReadAllText(f));
             if (doc.RootElement.ValueKind == JsonValueKind.Object &&
                 doc.RootElement.TryGetProperty("path", out var p) &&
-                p.GetString() is { Length: > 0 } v)
+                p.GetString() is { Length: > 0 } v &&
+                Directory.Exists(v))
             {
                 return v;
             }

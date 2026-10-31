@@ -139,7 +139,7 @@ public static class MediaBlock
             local.TrySetResult(null);
         }
 
-        ToolTip.SetTip(border, "点击打开原图 / 右键另存为");
+        ToolTip.SetTip(border, I18n.T("ui.click.to.open.original.right.click.to.save.as"));
         border.PointerReleased += (_, _) => _ = local.Task.ContinueWith(
             t => MarkdownView.OpenTarget(t.Result ?? src), TaskScheduler.Default);
         border.ContextMenu = BuildMenu(src, local.Task);
@@ -151,7 +151,7 @@ public static class MediaBlock
     private static Control BuildMediaCard(string src, Kind kind)
     {
         var icon = kind == Kind.Video ? "🎬" : "🎵";
-        var label = kind == Kind.Video ? "视频" : "音频";
+        var label = kind == Kind.Video ? I18n.T("ui.media.type.video") : I18n.T("ui.media.type.audio");
         var name = FileNameOf(src);
 
         var local = IsRemote(src) ? null : (File.Exists(src) ? src : null);
@@ -165,7 +165,7 @@ public static class MediaBlock
 
         var openBtn = new Button
         {
-            Content = "▶ 打开",
+            Content = "▶ " + I18n.T("ui.open"),
             Padding = new Thickness(10, 4),
             Background = new SolidColorBrush(Color.Parse("#3a6ea5")),
             BorderThickness = new Thickness(0),
@@ -180,7 +180,7 @@ public static class MediaBlock
 
         var saveBtn = new Button
         {
-            Content = "💾 另存为",
+            Content = "💾 " + I18n.T("ui.save.as"),
             Padding = new Thickness(10, 4),
             Margin = new Thickness(6, 0, 0, 0),
             Background = new SolidColorBrush(Color.Parse("#3d3d3d")),
@@ -221,7 +221,7 @@ public static class MediaBlock
 
     private static Control BuildFallback(string src) => new TextBlock
     {
-        Text = $"[媒体：{src}]",
+        Text = I18n.T("ui.media.fallback.value", src),
         Foreground = new SolidColorBrush(Color.Parse("#6cb6ff")),
         Cursor = new Cursor(StandardCursorType.Hand),
     };
@@ -231,9 +231,9 @@ public static class MediaBlock
     /// <summary>右键菜单：打开 / 另存为</summary>
     private static ContextMenu BuildMenu(string src, Task<string?> localTask)
     {
-        var open = new MenuItem { Header = "打开" };
+        var open = new MenuItem { Header = I18n.T("ui.open") };
         open.Click += async (_, _) => MarkdownView.OpenTarget(await localTask ?? src);
-        var save = new MenuItem { Header = "另存为…" };
+        var save = new MenuItem { Header = I18n.T("ui.save.as") + "…" };
         save.Click += async (_, _) => await SaveAsAsync(null, src, await localTask);
         return new ContextMenu { Items = { open, save } };
     }
@@ -249,7 +249,7 @@ public static class MediaBlock
 
             var file = await sp.SaveFilePickerAsync(new FilePickerSaveOptions
             {
-                Title = "另存为",
+                Title = I18n.T("ui.save.as"),
                 SuggestedFileName = FileNameOf(src),
             });
             if (file == null) return;

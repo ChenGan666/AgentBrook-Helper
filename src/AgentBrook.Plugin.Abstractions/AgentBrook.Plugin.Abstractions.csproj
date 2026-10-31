@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- 契约程序集：宿主与插件共同引用；v1 冻结，扩展只加新能力接口 -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- IChatClient 装饰能力需要；宿主默认上下文已加载同版本（版本对齐 Agent.Core 解析的 10.11.0） -->
+    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.11.0" />
+  </ItemGroup>
+
+</Project>

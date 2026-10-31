@@ -174,7 +174,7 @@ public partial class BubbleWindow : Window
             modelItem.Click += (_, _) => _controller.CycleModel();
             settingsItem.Click += (_, _) =>
             {
-                ModelSettingsWindow.ShowSingle();
+                SettingsWindow.ShowSingle();
             };
             exitItem.Click += (_, _) => _controller.Shutdown();
 

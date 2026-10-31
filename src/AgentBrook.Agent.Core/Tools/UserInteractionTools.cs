@@ -14,7 +14,7 @@ public sealed class UserInteractionTools(IBrookInteraction interaction)
     [Description("任务执行过程中需要用户补充信息、在方案之间做选择、或确认关键决定时调用。问题会实时展示给用户并等待其输入，用户的回答会作为结果返回。不要用它闲聊，也不要在同一轮里重复问相同的问题。")]
     public async Task<string> ask_user(
         [Description("向用户提出的问题，应当具体、可直接回答")] string question,
-        [Description("可选候选项，多个选项用 | 分隔，如：深色|浅色|跟随系统")] string? choices = null)
+        [Description("可选候选项，多个选项用 | 分隔，如：深色|浅色|跟随系统。只写选项纯文本，不要自带任何编号或序号前缀（如 1.、A、），编号由界面统一按顺序渲染")] string? choices = null)
     {
         var answer = await _interaction.AskUserAsync(question, choices);
 

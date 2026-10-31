@@ -203,7 +203,7 @@ internal static class LocalApiServer
     /// <summary>打开（或聚焦）设置窗口并定位到模型页的指定供应商。</summary>
     private static void ShowSettings(string providerName)
     {
-        var settings = ModelSettingsWindow.ShowSingle();
+        var settings = SettingsWindow.ShowSingle();
         settings.ShowModelsPage(providerName);
     }
 

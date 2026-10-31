@@ -21,12 +21,14 @@ public sealed class ModelRouter
 
     private readonly AppConfig _config;
     private readonly Func<ProviderConfig> _activeProvider;
+    private readonly Func<IChatClient, IChatClient>? _decorate;   // 隐私脱敏壳（D13 显式传入）
     private readonly ConcurrentDictionary<string, IChatClient> _clients = new(StringComparer.Ordinal);
 
-    public ModelRouter(AppConfig config, Func<ProviderConfig> activeProvider)
+    public ModelRouter(AppConfig config, Func<ProviderConfig> activeProvider, Func<IChatClient, IChatClient>? decorate = null)
     {
         _config = config;
         _activeProvider = activeProvider;
+        _decorate = decorate;
     }
 
     /// <summary>解析角色应使用的模型名。角色配置为空时取供应商清单中的首个模型（约定为轻量模型）。</summary>
@@ -50,7 +52,7 @@ public sealed class ModelRouter
             return (model, mainClient);
         }
         var key = $"{provider.BaseUrl}#{model}";
-        return (model, _clients.GetOrAdd(key, _ => AgentFactory.CreateChatClient(provider.BaseUrl, provider.ApiKey, model)));
+        return (model, _clients.GetOrAdd(key, _ => AgentFactory.CreateChatClient(provider.BaseUrl, provider.ApiKey, model, decorate: _decorate)));
     }
 
     /// <summary>供应商或其连接参数变化后清空辅助客户端缓存。</summary>

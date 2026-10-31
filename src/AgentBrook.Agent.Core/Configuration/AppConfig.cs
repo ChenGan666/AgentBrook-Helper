@@ -6,6 +6,9 @@ public sealed class AppConfig
     public LlmOptions LLM { get; set; } = new();
     public AgentOptions Agent { get; set; } = new();
     public McpOptions MCP { get; set; } = new();
+
+    /// <summary>插件系统配置。</summary>
+    public PluginsOptions Plugins { get; set; } = new();
 }
 
 /// <summary>模型接入参数（OpenAI 兼容端点）。</summary>
@@ -111,6 +114,13 @@ public sealed class AgentOptions
 }
 
 /// <summary>MCP 服务器接入配置（stdio 传输）。</summary>
+/// <summary>插件系统配置（doc/18）。</summary>
+public sealed class PluginsOptions
+{
+    /// <summary>插件索引地址（index.json）；空 = 用代码内生产默认；本地测试指向 AgentBrook.Service /updated/plugin/。</summary>
+    public string IndexUrl { get; set; } = "";
+}
+
 public sealed class McpOptions
 {
     public List<McpServerConfig> Servers { get; set; } = [];

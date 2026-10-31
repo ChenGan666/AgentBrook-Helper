@@ -1,0 +1,3 @@
+Privacy Masking Plugin 1.0.11
+- Fixes "some placeholders not restored": the session map (token -> real value) is now shared at plugin level across all client instances (main chat, sub-agents, pipeline rebuilds) instead of per-shell copies - tokens emitted by any path are now restorable everywhere in the same process
+- Includes all 1.0.10 fixes (list JSON casing, stream-as-is output with one-pass display-layer restoration)
