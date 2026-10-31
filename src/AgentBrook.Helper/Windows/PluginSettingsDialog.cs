@@ -142,11 +142,13 @@ public sealed class PluginSettingsDialog : WindowBase
     /// </summary>
     private Control BuildModelRow(JsonElement item)
     {
-        var row = NewRow("Auto,*,Auto,Auto");
-        var modelName = item.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
-        var installAction = item.TryGetProperty("installAction", out var ia) ? ia.GetString() ?? "install-model" : "install-model";
-        var checkAction = item.TryGetProperty("checkAction", out var ca) ? ca.GetString() ?? "run-self-check" : "run-self-check";
-        var readyAction = item.TryGetProperty("readyAction", out var ra) ? ra.GetString() ?? "model-ready" : "model-ready";
+        // 两列 Grid（标签 | 右侧控件组）——右侧用水平 StackPanel 装模型名/安装/测试，
+        // 规避 Grid 多列重叠问题；控件组垂直居中
+        var row = new Grid
+        {
+            ColumnDefinitions = new Avalonia.Controls.ColumnDefinitions("*,Auto"),
+            ColumnSpacing = 10,
+        };
 
         row.Children.Add(new TextBlock
         {
@@ -154,19 +156,31 @@ public sealed class PluginSettingsDialog : WindowBase
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = new SolidColorBrush(Color.Parse("#e8e8e8")),
         });
-        row.Children.Add(new TextBlock
+
+        var modelName = item.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+        var installAction = item.TryGetProperty("installAction", out var ia) ? ia.GetString() ?? "install-model" : "install-model";
+        var checkAction = item.TryGetProperty("checkAction", out var ca) ? ca.GetString() ?? "run-self-check" : "run-self-check";
+        var readyAction = item.TryGetProperty("readyAction", out var ra) ? ra.GetString() ?? "model-ready" : "model-ready";
+
+        var modelNameText = new TextBlock
         {
             Text = modelName,
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = new SolidColorBrush(Color.Parse("#c8c8c8")),
-        });
-
+        };
         var installBtn = DialogButton(I18n.T("ui.plugins.privacy.install.model"));
         var testBtn = DialogButton(I18n.T("ui.plugins.privacy.model.test"));
-        Grid.SetColumn(installBtn, 2);
-        Grid.SetColumn(testBtn, 3);
-        row.Children.Add(installBtn);
-        row.Children.Add(testBtn);
+
+        var controls = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        controls.Children.Add(modelNameText);
+        controls.Children.Add(installBtn);
+        controls.Children.Add(testBtn);
+        row.Children.Add(controls);
 
         // 初始就绪状态：已安装 → 按钮变"已安装"并禁用（异步查询，不阻塞 Build）
         _ = Task.Run(() => _contributor.RunActionAsync(readyAction))
