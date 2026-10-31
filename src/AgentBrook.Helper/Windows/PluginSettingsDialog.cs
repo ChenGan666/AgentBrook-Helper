@@ -254,6 +254,7 @@ public sealed class PluginSettingsDialog : WindowBase
             "slider" => BuildSlider(item),
             "choice" => BuildChoice(item),
             "action" => BuildAction(Action(item), I18n.T(ItemTitle(item))),
+            "model" => BuildModelRow(item),   // 识别模型复合行（名称+安装/已安装+测试）
             "note" => new TextBlock
             {
                 Text = I18n.T(ItemTitle(item)),
