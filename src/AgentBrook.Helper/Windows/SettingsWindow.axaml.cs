@@ -644,27 +644,38 @@ public partial class SettingsWindow : WindowBase
                     CornerRadius = new Avalonia.CornerRadius(8),
                     Background = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#252525")),
                 };
-                var stack = new StackPanel { Spacing = 4 };
-                stack.Children.Add(new TextBlock
+                // 单行布局（与已装卡片统一）：名称·版本（左） + 安装（右）；描述/进度为次要行
+                var head = new Grid
                 {
-                    Text = $"{available_entry.Name} ({available_entry.Latest})",
+                    ColumnDefinitions = new Avalonia.Controls.ColumnDefinitions("*,Auto"),
+                    ColumnSpacing = 10,
+                };
+                head.Children.Add(new TextBlock
+                {
+                    Text = $"{available_entry.Name} · {available_entry.Latest}",
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
                     Foreground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#e8e8e8")),
                 });
+                var installBtn = new Button
+                {
+                    Content = I18n.T("ui.plugins.install"),
+                    Classes = { "pluginPrimary" },
+                };
+                Grid.SetColumn(installBtn, 1);
+                head.Children.Add(installBtn);
+
+                var stack = new StackPanel { Spacing = 4 };
+                stack.Children.Add(head);
                 if (!string.IsNullOrEmpty(available_entry.Description))
                 {
                     stack.Children.Add(new TextBlock
                     {
                         Text = available_entry.Description,
+                        FontSize = 12,
                         Foreground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#9a9a9a")),
                         TextWrapping = TextWrapping.Wrap,
                     });
                 }
-                var installBtn = new Button
-                {
-                    Content = I18n.T("ui.plugins.install"),
-                    Classes = { "pluginPrimary" },
-                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left,
-                };
                 // 安装进度条（下载=确定态百分比；校验/解压/加载=不确定态）+ 字节文案
                 var installBar = new ProgressBar
                 {
