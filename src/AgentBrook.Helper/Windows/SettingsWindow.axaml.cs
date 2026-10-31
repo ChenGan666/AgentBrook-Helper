@@ -747,7 +747,7 @@ public partial class SettingsWindow : WindowBase
                         installBtn.IsEnabled = true;
                     }
                 };
-                stack.Children.Add(installBtn);
+
                 card.Child = stack;
                 availablePanel.Children.Add(card);
             }
