@@ -39,7 +39,7 @@ public sealed class PrivacyMaskingPlugin : IHelperPlugin, IChatClientDecorator, 
 
     public string Id => "privacy-masking";
     public string DisplayName => "隐私脱敏";
-    public string Version => "1.0.12";
+    public string Version => "1.0.14";
 
     public async Task InitializeAsync(IPluginHostContext host, CancellationToken cancellationToken = default)
     {
@@ -247,7 +247,7 @@ public sealed class PrivacyMaskingPlugin : IHelperPlugin, IChatClientDecorator, 
                 },
                 new
                 {
-                    title = "ui.plugins.privacy.model",
+                    title = "",   // 组标题置空：行内已有"识别模型"标签，避免灰色标题重复（渲染器跳过空标题）
                     items = (object[])
                     [
                         // 单模型部署（v1.0.12）：下拉移除，识别模型固定为裁决 A 默认档

@@ -94,11 +94,12 @@ public sealed class PluginSettingsDialog : WindowBase
         {
             foreach (var group in groups.EnumerateArray())
             {
-                if (group.TryGetProperty("title", out var title))
+                if (group.TryGetProperty("title", out var title)
+                    && title.GetString() is { Length: > 0 } titleText)
                 {
                     _contentPanel.Children.Add(new TextBlock
                     {
-                        Text = I18n.T(title.GetString() ?? ""),
+                        Text = I18n.T(titleText),
                         Foreground = new SolidColorBrush(Color.Parse("#8a8a8a")),
                         Margin = new Thickness(0, 8, 0, 2),
                     });
@@ -181,6 +182,7 @@ public sealed class PluginSettingsDialog : WindowBase
         controls.Children.Add(modelNameText);
         controls.Children.Add(installBtn);
         controls.Children.Add(testBtn);
+        Grid.SetColumn(controls, 1);   // 漏设列号会与标签叠在 col0（真机叠字案例）
         row.Children.Add(controls);
 
         // 初始就绪状态：已安装 → 按钮变"已安装"并禁用（异步查询，不阻塞 Build）
