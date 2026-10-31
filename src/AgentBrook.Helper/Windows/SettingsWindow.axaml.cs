@@ -538,12 +538,19 @@ public partial class SettingsWindow : WindowBase
                 CornerRadius = new Avalonia.CornerRadius(8),
                 Background = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#252525")),
             };
-            var stack = new StackPanel { Spacing = 4 };
-            stack.Children.Add(new TextBlock
+            // 单行布局：名称（左） + 开关 / 设置 / 卸载（右，垂直居中）
+            var row = new Grid
+            {
+                ColumnDefinitions = new Avalonia.Controls.ColumnDefinitions("*,Auto,Auto,Auto"),
+                ColumnSpacing = 10,
+            };
+            row.Children.Add(new TextBlock
             {
                 Text = $"{id} · {entry.Version}",
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
                 Foreground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#e8e8e8")),
             });
+
             var toggle = new ToggleSwitch
             {
                 IsChecked = entry.Enabled,
@@ -551,6 +558,7 @@ public partial class SettingsWindow : WindowBase
                 OnContent = "",
                 VerticalContentAlignment = Avalonia.Layout.VerticalAlignment.Center,
             };
+            Grid.SetColumn(toggle, 1);
             toggle.IsCheckedChanged += async (_, _) =>
             {
                 try { await plugins.SetEnabledAsync(id, toggle.IsChecked == true); }
@@ -560,7 +568,7 @@ public partial class SettingsWindow : WindowBase
                     SetPluginStatus(ex.Message);
                 }
             };
-            stack.Children.Add(toggle);
+            row.Children.Add(toggle);
 
             // 插件设置对话框（doc/18 §7.1：具体插件在弹出单独的设置界面对话框）
             var contributor = plugins.GetSettingsContributor(id);
@@ -570,7 +578,6 @@ public partial class SettingsWindow : WindowBase
                 {
                     Content = I18n.T("ui.plugins.settings"),
                     Classes = { "pluginSecondary" },
-                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left,
                 };
                 settingsBtn.Click += (_, _) =>
                 {
@@ -582,13 +589,13 @@ public partial class SettingsWindow : WindowBase
                     // 模态：弹出后设置窗口不可点（ShowDialog 非阻塞，返回 Task 不 await）
                     _ = dialog.ShowDialog(this);
                 };
-                stack.Children.Add(settingsBtn);
+                Grid.SetColumn(settingsBtn, 2);
+                row.Children.Add(settingsBtn);
             }
             var uninstallBtn = new Button
             {
                 Content = I18n.T("ui.plugins.uninstall"),
                 Classes = { "pluginDanger" },
-                HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left,
             };
             uninstallBtn.Click += async (_, _) =>
             {
@@ -605,8 +612,10 @@ public partial class SettingsWindow : WindowBase
                     SetPluginStatus(ex.Message);
                 }
             };
-            stack.Children.Add(uninstallBtn);
-            card.Child = stack;
+            Grid.SetColumn(uninstallBtn, 3);
+            row.Children.Add(uninstallBtn);
+
+            card.Child = row;
             installedPanel.Children.Add(card);
         }
 
