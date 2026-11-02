@@ -539,13 +539,15 @@ public partial class SettingsWindow : WindowBase
                 CornerRadius = new Avalonia.CornerRadius(8),
                 Background = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#252525")),
             };
-            // 单行布局：名称（左） + 开关 / 设置 / 卸载（右，垂直居中）
+
+            // 单行布局（DockPanel）：开关 / 设置 / 卸载 依次从右停靠，名称填充剩余——
+            // 布局系统保证子项永不重叠（Grid 手工列号曾致图标叠字，真机案例）
+            var row = new DockPanel { LastChildFill = true };
+
+            // 插件设置对话框（doc/18 §7.1：具体插件在弹出单独的设置界面对话框）
+            var contributor = plugins.GetSettingsContributor(id);
+
             var iconPath = plugins.GetIconPath(id);   // 插件包内 icon.png（约定）；无则不显示图标
-            var row = new Grid
-            {
-                ColumnDefinitions = new Avalonia.Controls.ColumnDefinitions("Auto,*,Auto,Auto,Auto"),
-                ColumnSpacing = 10,
-            };
             if (iconPath is not null)
             {
                 var iconImage = new Image
@@ -553,15 +555,19 @@ public partial class SettingsWindow : WindowBase
                     Source = new Bitmap(iconPath),
                     Width = 20, Height = 20,
                     VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                    Margin = new Thickness(0, 0, 10, 0),
                 };
-                row.Children.Add(iconImage);   // col 0
+                DockPanel.SetDock(iconImage, Dock.Right);
+                row.Children.Add(iconImage);
             }
-            row.Children.Add(new TextBlock
+
+            var nameText = new TextBlock
             {
                 Text = $"{id} · {entry.Version}",
                 VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
                 Foreground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#e8e8e8")),
-            });
+            };
+            row.Children.Add(nameText);   // LastChildFill：填充剩余宽度
 
             var toggle = new ToggleSwitch
             {
@@ -569,8 +575,10 @@ public partial class SettingsWindow : WindowBase
                 OffContent = "",
                 OnContent = "",
                 VerticalContentAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 10, 0),
             };
-            Grid.SetColumn(toggle, 2);
+            DockPanel.SetDock(toggle, Dock.Right);
+            row.Children.Add(toggle);
             toggle.IsCheckedChanged += async (_, _) =>
             {
                 try { await plugins.SetEnabledAsync(id, toggle.IsChecked == true); }
@@ -580,30 +588,29 @@ public partial class SettingsWindow : WindowBase
                     SetPluginStatus(ex.Message);
                 }
             };
-            row.Children.Add(toggle);
 
-            // 插件设置对话框（doc/18 §7.1：具体插件在弹出单独的设置界面对话框）
-            var contributor = plugins.GetSettingsContributor(id);
             if (contributor is not null)
             {
                 var settingsBtn = new Button
                 {
                     Content = I18n.T("ui.plugins.settings"),
                     Classes = { "pluginSecondary" },
+                    Margin = new Thickness(0, 0, 10, 0),
                 };
                 settingsBtn.Click += (_, _) =>
                 {
                     ClosePluginDialog();
-                    var dialog = new PluginSettingsDialog(id, id, contributor, plugins.GetIconPath(id));
+                    var dialog = new PluginSettingsDialog(id, id, contributor, iconPath);
                     dialog.Build();
                     dialog.Closed += (_, _) => { if (_openPluginDialog == dialog) _openPluginDialog = null; };
                     _openPluginDialog = dialog;
                     // 模态：弹出后设置窗口不可点（ShowDialog 非阻塞，返回 Task 不 await）
                     _ = dialog.ShowDialog(this);
                 };
-                Grid.SetColumn(settingsBtn, 3);
+                DockPanel.SetDock(settingsBtn, Dock.Right);
                 row.Children.Add(settingsBtn);
             }
+
             var uninstallBtn = new Button
             {
                 Content = I18n.T("ui.plugins.uninstall"),
@@ -624,7 +631,7 @@ public partial class SettingsWindow : WindowBase
                     SetPluginStatus(ex.Message);
                 }
             };
-            Grid.SetColumn(uninstallBtn, 4);
+            DockPanel.SetDock(uninstallBtn, Dock.Right);
             row.Children.Add(uninstallBtn);
 
             card.Child = row;
