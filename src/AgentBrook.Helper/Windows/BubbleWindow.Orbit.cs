@@ -104,24 +104,22 @@ public partial class BubbleWindow
         var iconPath = pm?.GetIconPath(pluginId);
         var emoji = pm?.GetPluginIcon(pluginId) ?? "";
 
-        var (iconKey, color) = OrbitStyle(pluginId);
+        // 插件芯片：透明背景、无边框、只显示图标本体（icon.png 优先，回退 emoji 元数据）；
+        // 悬停放大 20%（芯片尺寸 = 图标尺寸，无内边距）
         var chip = new Border
         {
             Width = OrbitChipSize,
             Height = OrbitChipSize,
-            CornerRadius = new CornerRadius(OrbitChipSize / 2),
-            Background = new SolidColorBrush(Color.Parse(color)),
-            BorderBrush = new SolidColorBrush(Color.Parse("#ffffff")),
-            BorderThickness = new Thickness(1.2),
-            IsHitTestVisible = false,
+            Background = Brushes.Transparent,   // 可命中（悬停放大用）
+            IsHitTestVisible = true,
         };
         if (!string.IsNullOrEmpty(iconPath) && File.Exists(iconPath))
         {
             chip.Child = new Image
             {
                 Source = new Bitmap(iconPath),
-                Width = OrbitChipSize - 8,
-                Height = OrbitChipSize - 8,
+                Width = OrbitChipSize,
+                Height = OrbitChipSize,
             };
         }
         else if (!string.IsNullOrEmpty(emoji))
@@ -134,6 +132,17 @@ public partial class BubbleWindow
                 VerticalAlignment = VerticalAlignment.Center,
             };
         }
+        // 悬停放大 20%（20 → 24）
+        chip.PointerEntered += (_, _) =>
+        {
+            chip.Width = OrbitChipSize * 1.2;
+            chip.Height = OrbitChipSize * 1.2;
+        };
+        chip.PointerExited += (_, _) =>
+        {
+            chip.Width = OrbitChipSize;
+            chip.Height = OrbitChipSize;
+        };
         _orbit.Add(new OrbitItem(key, chip));
         _orbitLayer.Children.Add(chip);
         LayoutOrbit();
