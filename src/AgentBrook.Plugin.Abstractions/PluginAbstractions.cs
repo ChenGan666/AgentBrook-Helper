@@ -13,6 +13,12 @@ public interface IHelperPlugin
     /// <summary>插件版本（SemVer，与 manifest.version 一致）。</summary>
     string Version { get; }
 
+    /// <summary>
+    /// 插件图标（v1.1 新增）：单字符 emoji 或符号，显示在插件名称前（插件列表 / 设置标题等）。
+    /// 默认空 = 不显示图标。建议使用单 emoji；跨平台字体覆盖有限的字符避免使用。
+    /// </summary>
+    string Icon => "";
+
     /// <summary>加载后初始化（读设置、预热）。抛异常 → 插件标记加载失败，不影响宿主。</summary>
     Task InitializeAsync(IPluginHostContext host, CancellationToken cancellationToken = default);
 
