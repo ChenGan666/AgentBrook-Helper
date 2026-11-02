@@ -25,6 +25,9 @@ public sealed class PluginIndexEntry
 
     [JsonPropertyName("description")] public string Description { get; set; } = "";
 
+    /// <summary>插件图标（单 emoji/符号，展示在名称前；缺省空）。</summary>
+    [JsonPropertyName("icon")] public string Icon { get; set; } = "";
+
     [JsonPropertyName("capabilities")] public List<string> Capabilities { get; set; } = [];
 
     /// <summary>模型清单地址（相对 index.json；doc/17 §5.1 下载+自检用）。</summary>
@@ -73,6 +76,9 @@ public sealed class PluginStateEntry
 
     /// <summary>插件声明式设置的当前值（宿主持有；插件未加载时设置页仍可显示）。</summary>
     [JsonPropertyName("settings")] public JsonElement? Settings { get; set; }
+
+    /// <summary>插件图标（安装时自 index/manifest 记录，展示在名称前）。</summary>
+    [JsonPropertyName("icon")] public string Icon { get; set; } = "";
 
     /// <summary>
     /// 实际安装目录名（plugins/{id}/ 下的叶子目录）。缺省 = {version}。

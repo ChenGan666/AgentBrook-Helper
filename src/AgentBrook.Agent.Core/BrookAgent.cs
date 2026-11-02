@@ -1269,7 +1269,9 @@ public sealed class BrookAgent : IAsyncDisposable
         var stats = telemetry?.GetLastTurnStats();
         if (stats is { MaskedCount: > 0 })
         {
-            yield return new BrookEvent.MaskingBadge(stats.MaskedCount, stats.MaskedLastUserText, stats.ImagesPresent);
+            var iconPath = PluginManager?.GetIconPath((telemetry as IHelperPlugin)?.Id ?? "");
+            yield return new BrookEvent.MaskingBadge(stats.MaskedCount, stats.MaskedLastUserText,
+                stats.ImagesPresent, iconPath);
         }
 
         yield return new BrookEvent.TurnCompleted();

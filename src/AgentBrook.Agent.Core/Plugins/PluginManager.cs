@@ -62,7 +62,9 @@ public sealed class PluginManager
         var entryDll = FindEntryDll(dir);
         await LoadFromDirectoryAsync(entry.Id, entry.Latest, dir, entryDll, enabled: true);
         // 实际入位目录名（热插拔下可能带 -r{n} 后缀），恢复加载时按此定位
-        _state.SetInstalled(entry.Id, entry.Latest, enabled: true, Path.GetFileName(dir.TrimEnd(Path.DirectorySeparatorChar)));
+        _state.SetInstalled(entry.Id, entry.Latest, enabled: true,
+            Path.GetFileName(dir.TrimEnd(Path.DirectorySeparatorChar)),
+            string.IsNullOrEmpty(entry.Icon) ? null : entry.Icon);
     }
 
     /// <summary>解析插件安装目录：优先 state.json 记录的实际目录名（热插拔下可能带 -r{n}），缺省 {version}。</summary>
@@ -119,6 +121,51 @@ public sealed class PluginManager
 
     /// <summary>聚合已启用插件的聊天客户端装饰器；无 → null（BrookAgent 接 ModelRouter/主客户端）。</summary>
     public Func<IChatClient, IChatClient>? BuildChatClientPipeline() => _registry.BuildChatClientPipeline();
+
+    /// <summary>插件图标路径：优先注册目录根的 icon.png；缺失时回退扫描同 id 的兄弟目录
+    /// （重装后缀 -rN 场景：旧目录无图标、新目录有），取最新修改的一份；都没有返回 null。</summary>
+    public string? GetIconPath(string id)
+    {
+        var version = _state.GetVersion(id);
+        if (version is null)
+        {
+            return null;
+        }
+        var parent = Path.Combine(Path.Combine(_workspaceRoot, "plugins"), id);
+        var registered = Path.Combine(parent, _state.Snapshot()[id].Dir ?? version);
+        var registeredPath = Path.Combine(registered, "icon.png");
+        if (File.Exists(registeredPath))
+        {
+            return registeredPath;
+        }
+        string? best = null;
+        var bestUtc = DateTime.MinValue;
+        try
+        {
+            if (Directory.Exists(parent))
+            {
+                foreach (var dir in Directory.EnumerateDirectories(parent))
+                {
+                    var cand = Path.Combine(dir, "icon.png");
+                    if (!File.Exists(cand))
+                    {
+                        continue;
+                    }
+                    var utc = File.GetLastWriteTimeUtc(cand);
+                    if (utc > bestUtc)
+                    {
+                        bestUtc = utc;
+                        best = cand;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // 枚举失败按无图标处理
+        }
+        return best;
+    }
 
     /// <summary>显示层一次性还原（v1.0.9 修订）：回合结束后宿主对最终文本调用；无还原插件时原样返回。</summary>
     public string RestoreDisplayText(string text)
