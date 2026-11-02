@@ -540,14 +540,12 @@ public partial class SettingsWindow : WindowBase
                 Background = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#252525")),
             };
 
-            // 单行布局（DockPanel）：开关 / 设置 / 卸载 依次从右停靠，名称填充剩余——
-            // 布局系统保证子项永不重叠（Grid 手工列号曾致图标叠字，真机案例）
-            var row = new DockPanel { LastChildFill = true };
-
-            // 插件设置对话框（doc/18 §7.1：具体插件在弹出单独的设置界面对话框）
+            // 单行布局（DockPanel）：图标 | 名称(填充) | 开关 | 设置 | 卸载（左→右）。
+            // Right 停靠"先加在最右"——所以按卸载→设置→开关的顺序添加，视觉恰为从左到右。
             var contributor = plugins.GetSettingsContributor(id);
-
             var iconPath = plugins.GetIconPath(id);   // 插件包内 icon.png（约定）；无则不显示图标
+            var row = new DockPanel { LastChildFill = false };
+
             if (iconPath is not null)
             {
                 var iconImage = new Image
@@ -555,9 +553,8 @@ public partial class SettingsWindow : WindowBase
                     Source = new Bitmap(iconPath),
                     Width = 20, Height = 20,
                     VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
-                    Margin = new Thickness(0, 0, 10, 0),
                 };
-                DockPanel.SetDock(iconImage, Dock.Right);
+                DockPanel.SetDock(iconImage, Dock.Left);
                 row.Children.Add(iconImage);
             }
 
@@ -565,51 +562,10 @@ public partial class SettingsWindow : WindowBase
             {
                 Text = $"{id} · {entry.Version}",
                 VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 10, 0),
                 Foreground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#e8e8e8")),
             };
-            row.Children.Add(nameText);   // LastChildFill：填充剩余宽度
-
-            var toggle = new ToggleSwitch
-            {
-                IsChecked = entry.Enabled,
-                OffContent = "",
-                OnContent = "",
-                VerticalContentAlignment = Avalonia.Layout.VerticalAlignment.Center,
-                Margin = new Thickness(0, 0, 10, 0),
-            };
-            DockPanel.SetDock(toggle, Dock.Right);
-            row.Children.Add(toggle);
-            toggle.IsCheckedChanged += async (_, _) =>
-            {
-                try { await plugins.SetEnabledAsync(id, toggle.IsChecked == true); }
-                catch (Exception ex)
-                {
-                    Console.Error.WriteLine($"[plugins] SetEnabled: {ex.Message}");
-                    SetPluginStatus(ex.Message);
-                }
-            };
-
-            if (contributor is not null)
-            {
-                var settingsBtn = new Button
-                {
-                    Content = I18n.T("ui.plugins.settings"),
-                    Classes = { "pluginSecondary" },
-                    Margin = new Thickness(0, 0, 10, 0),
-                };
-                settingsBtn.Click += (_, _) =>
-                {
-                    ClosePluginDialog();
-                    var dialog = new PluginSettingsDialog(id, id, contributor, iconPath);
-                    dialog.Build();
-                    dialog.Closed += (_, _) => { if (_openPluginDialog == dialog) _openPluginDialog = null; };
-                    _openPluginDialog = dialog;
-                    // 模态：弹出后设置窗口不可点（ShowDialog 非阻塞，返回 Task 不 await）
-                    _ = dialog.ShowDialog(this);
-                };
-                DockPanel.SetDock(settingsBtn, Dock.Right);
-                row.Children.Add(settingsBtn);
-            }
+            row.Children.Add(nameText);
 
             var uninstallBtn = new Button
             {
@@ -633,6 +589,46 @@ public partial class SettingsWindow : WindowBase
             };
             DockPanel.SetDock(uninstallBtn, Dock.Right);
             row.Children.Add(uninstallBtn);
+
+            if (contributor is not null)
+            {
+                var settingsBtn = new Button
+                {
+                    Content = I18n.T("ui.plugins.settings"),
+                    Classes = { "pluginSecondary" },
+                };
+                settingsBtn.Click += (_, _) =>
+                {
+                    ClosePluginDialog();
+                    var dialog = new PluginSettingsDialog(id, id, contributor, plugins.GetIconPath(id));
+                    dialog.Build();
+                    dialog.Closed += (_, _) => { if (_openPluginDialog == dialog) _openPluginDialog = null; };
+                    _openPluginDialog = dialog;
+                    // 模态：弹出后设置窗口不可点（ShowDialog 非阻塞，返回 Task 不 await）
+                    _ = dialog.ShowDialog(this);
+                };
+                DockPanel.SetDock(settingsBtn, Dock.Right);
+                row.Children.Add(settingsBtn);
+            }
+
+            var toggle = new ToggleSwitch
+            {
+                IsChecked = entry.Enabled,
+                OffContent = "",
+                OnContent = "",
+                VerticalContentAlignment = Avalonia.Layout.VerticalAlignment.Center,
+            };
+            DockPanel.SetDock(toggle, Dock.Right);
+            row.Children.Add(toggle);
+            toggle.IsCheckedChanged += async (_, _) =>
+            {
+                try { await plugins.SetEnabledAsync(id, toggle.IsChecked == true); }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"[plugins] SetEnabled: {ex.Message}");
+                    SetPluginStatus(ex.Message);
+                }
+            };
 
             card.Child = row;
             installedPanel.Children.Add(card);
