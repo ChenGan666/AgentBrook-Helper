@@ -100,7 +100,8 @@ public partial class BubbleWindow : Window
                 UpdateWindowLayoutMode();
                 UpdateClickThroughRegion();
             }, DispatcherPriority.Background);
-        };   // Opened 在 Show 后确定触发
+        }; 
+        RefreshPluginOrbit();   // 窗口打开（布局尺寸就绪）后重算上半圈图标位置  // Opened 在 Show 后确定触发
 
         ScalingChanged += (_, _) =>
             Dispatcher.UIThread.Post(UpdateClickThroughRegion, DispatcherPriority.Background);

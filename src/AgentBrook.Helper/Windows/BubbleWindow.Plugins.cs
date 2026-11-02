@@ -53,35 +53,39 @@ public partial class BubbleWindow
         }
 
         var (cx, cy, _) = BubbleLayout();
-        var r = BubbleHalf + 18;                       // 上半圈半径：贴气泡外沿
+        // 半径贴气泡上沿（=54：图标中心在气泡边缘上，略压边）：窗口顶部偏移仅 24px，
+        // 半径过大图标会超出窗口被裁剪（真机"看不到图标"案例）
+        var r = BubbleHalf + 6;
+        var iconSize = 26.0;
+        var half = iconSize / 2;
         var n = items.Count;
         for (var i = 0; i < n; i++)
         {
             var (id, _, path) = items[i];
             var angle = Math.PI * (1 - (i + 0.5) / n); // 上半圆均匀分布（180°→0°，从左到右）
-            var x = cx + r * Math.Cos(angle) - 14;     // 图标 28×28 的左上角
-            var y = cy - r * Math.Sin(angle) - 14;
+            var x = cx + r * Math.Cos(angle) - half;
+            var y = cy - r * Math.Sin(angle) - half;
 
             var img = new Image
             {
                 Source = new Bitmap(path),
-                Width = 28, Height = 28,
+                Width = iconSize, Height = iconSize,
                 Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
             };
             Canvas.SetLeft(img, x);
             Canvas.SetTop(img, y);
 
-            // 悬停放大：28 → 36（保持圆心不动）
+            // 悬停放大：26 → 34（保持圆心不动）
             img.PointerEntered += (_, _) =>
             {
-                img.Width = 36; img.Height = 36;
+                img.Width = 34; img.Height = 34;
                 Canvas.SetLeft(img, x - 4);
                 Canvas.SetTop(img, y - 4);
                 ToolTip.SetTip(img, id);
             };
             img.PointerExited += (_, _) =>
             {
-                img.Width = 28; img.Height = 28;
+                img.Width = iconSize; img.Height = iconSize;
                 Canvas.SetLeft(img, x);
                 Canvas.SetTop(img, y);
             };
