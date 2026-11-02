@@ -1,3 +1,3 @@
-Privacy Masking Plugin 1.0.13
-- Index fetches now carry a one-shot cache-buster parameter, so nginx/gateway GET caches can no longer serve a stale plugin index after publishing a new version
-- Includes all 1.0.12 changes (single-model row with Install/Test, model-ready query)
+Privacy Masking Plugin 1.0.16
+- Badge and orbit chips now render the plugin's icon.png image (previously emoji/text only)
+- Includes all 1.0.15 fixes and the icon.png resource in the package

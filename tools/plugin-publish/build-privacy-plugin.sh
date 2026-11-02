@@ -19,7 +19,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-VERSION="${VERSION:-1.0.15}"   # 图标资源：icon.png（64×64）随包分发，宿主列表/徽标显示
+VERSION="${VERSION:-1.0.16}"   # 徽标/轨道芯片改用 icon.png 图片（沿用 1.0.15 全部修复）
 PROJ="src/AgentBrook.Plugin.PrivacyMasking/AgentBrook.Plugin.PrivacyMasking.csproj"
 PUBLISH_BASE="${PUBLISH_BASE:-$(pwd)/src/publish}"
 PLUGIN_OUT="$PUBLISH_BASE/updated/plugin/privacy-masking/$VERSION"
