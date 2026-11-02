@@ -53,7 +53,18 @@ public sealed class BrookAgent : IAsyncDisposable
     private bool _titleAutoSet;   // 本会话标题是否已从首条用户消息自动生成
 
     // ── 会话转写（显示用全量历史）：与 LLM 上下文解耦，压缩不裁剪、只增不删 ──
-    private readonly List<(string Role, string Text)> _transcript = new();
+    private readonly List<TranscriptEntry> _transcript = new();
+    private Infrastructure.ArtifactCollector _artifacts = null!;
+    /// <summary>本回合采集到的任务产物（TurnCompleted 前定稿；无产物为 null）。</summary>
+    public Infrastructure.TaskArtifacts? TurnArtifacts { get; private set; }
+
+    /// <summary>回合异常终止（取消/出错）时由宿主调用：把已产出部分定稿并挂到待落盘产物，返回产物（可能为 null）。</summary>
+    public Infrastructure.TaskArtifacts? FinalizeTurnArtifacts()
+    {
+        TurnArtifacts ??= _artifacts.Finalize($"{_sessionId}:{DateTime.Now:yyyyMMddHHmmss}");
+        _pendingArtifacts = TurnArtifacts;
+        return TurnArtifacts;
+    }
     private readonly object _transcriptLock = new();
     private string? _transcriptLastSig;   // 已落盘最后一条记录的指纹；null = 尚无已落盘记录
 
@@ -83,6 +94,7 @@ public sealed class BrookAgent : IAsyncDisposable
         _session = session;
         ToolCatalog = toolCatalog;
         CurrentModel = config.LLM.DefaultModel;
+        Infrastructure.WorkspaceTempCleaner.SweepAsync(_workspace.Root, force: true);   // 启动强扫：回收遗留的 .chrome-* 等临时 profile 目录
     }
 
     public string Name => _config.Agent.Name;
@@ -259,18 +271,22 @@ public sealed class BrookAgent : IAsyncDisposable
         Action? brookRef2SetMasterIndex = null;
         // 多模态生成：media_generate 默认用已选 ActiveMediaModel；显式 model 参数按名跨供应商解析
         // （选择切换无需重建 Agent；须先创建：子 Agent 也要挂此工具）
+        var artifactCollector = new Infrastructure.ArtifactCollector(workspace);
         var mediaTools = new Tools.MediaGenerateTools(
             () => brookRef!._providers.Providers.FirstOrDefault(p => !string.IsNullOrEmpty(p.ActiveMediaModel))
                   ?? brookRef!._activeProvider,
             log,
-            () => brookRef!._providers.Providers);
+            () => brookRef!._providers.Providers,
+            onMediaUrl: url => artifactCollector.OnMediaUrl(url));
 
         var subAgentTools = new SubAgentTools(
             workspace.Root,
             () => brookRef!._router.Resolve(ModelRouter.RoleSubAgent, brookRef!._chatClient),
-            mediaTools);
+            mediaTools,
+            restore: t => brookRef!.PluginManager?.RestoreDisplayText(t) ?? t);   // 子 Agent 结论文本回主回合前还原
 
-        var fileTools = new FileTools(workspace, config.Agent.MaxToolOutputChars);
+        var fileTools = new FileTools(workspace, config.Agent.MaxToolOutputChars,
+            onWrite: path => artifactCollector.OnFileWritten(path));
         var shellTools = new ShellTools(workspace, config.Agent.ShellTimeoutSeconds, config.Agent.MaxToolOutputChars);
         var memoryTools = new MemoryTools(workspace, memory);
         var skillStore = new SkillStore(workspace.SkillsDir, workspace.Root);
@@ -349,6 +365,8 @@ public sealed class BrookAgent : IAsyncDisposable
             AIFunctionFactory.Create(mcpTools.mcp_list_servers),
             // 多模态生成（子Agent能力：所选多模态模型，异步任务轮询）
             AIFunctionFactory.Create(mediaTools.media_generate),
+            // 任务产物登记（最终交付文件入 deliverables/ 后调用，生成产物展示区数据）
+            AIFunctionFactory.Create(new Tools.ArtifactTools(workspace, artifactCollector).register_artifact),
         };
         toolCatalog.AddRange(tools.Select(t => new ToolInfo(t.Name, "内置")));
 
@@ -423,6 +441,7 @@ public sealed class BrookAgent : IAsyncDisposable
         brook._router = router!;
         brook.PluginManager = pluginManager;
         brook._refreshMasterIndex = brookRef2SetMasterIndex;
+        brook._artifacts = artifactCollector;
         brook._sessions = sessions;
         brook._skillStore = skillStore;
         brook._sessionId = current.Id;
@@ -745,11 +764,12 @@ public sealed class BrookAgent : IAsyncDisposable
     /// 数据源为全量转写镜像（transcript.jsonl）：与 LLM 上下文解耦，
     /// 自动压缩裁掉的早期对话仍可完整回放/滚动加载。
     /// </summary>
-    public IReadOnlyList<(string Role, string Text)> GetTranscript(int limit = 40)
+    public IReadOnlyList<(string Role, string Text, Infrastructure.TaskArtifacts? Artifacts)> GetTranscript(int limit = 40)
     {
         lock (_transcriptLock)
         {
-            return _transcript.Skip(Math.Max(0, _transcript.Count - limit)).ToList();
+            return _transcript.Skip(Math.Max(0, _transcript.Count - limit))
+                .Select(e => (e.Role, e.Text, e.Artifacts)).ToList();
         }
     }
 
@@ -763,19 +783,20 @@ public sealed class BrookAgent : IAsyncDisposable
     /// 分页取更早的可读对话记录：skipFromEnd = 从末尾跳过的条数，take = 最多返回多少条。
     /// 供 UI 滚动到顶时增量加载历史；过滤规则与 GetTranscript 完全一致。
     /// </summary>
-    public IReadOnlyList<(string Role, string Text)> GetTranscriptRange(int skipFromEnd, int take)
+    public IReadOnlyList<(string Role, string Text, Infrastructure.TaskArtifacts? Artifacts)> GetTranscriptRange(int skipFromEnd, int take)
     {
         lock (_transcriptLock)
         {
             var end = Math.Max(0, _transcript.Count - Math.Max(0, skipFromEnd));
             var start = Math.Max(0, end - Math.Max(0, take));
-            return _transcript.GetRange(start, end - start);
+            return _transcript.GetRange(start, end - start)
+                .Select(e => (e.Role, e.Text, e.Artifacts)).ToList();
         }
     }
 
     /// <summary>可读对话记录（user/assistant 文本对，跳过系统摘要与无正文轮）。
     /// 仅作转写对账的数据源：从内存历史提取记录，压缩裁剪不影响已落盘部分。</summary>
-    private List<(string Role, string Text)> BuildTranscriptList()
+    private List<(string Role, string Text)> BuildTranscriptTextList()
     {
         var list = new List<(string, string)>();
         try
@@ -828,6 +849,7 @@ public sealed class BrookAgent : IAsyncDisposable
     private static readonly System.Text.Json.JsonSerializerOptions TranscriptJsonOptions = new()
     {
         PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
     };
 
     private string TranscriptFilePath => Path.Combine(Path.GetDirectoryName(_sessionFile)!, "transcript.jsonl");
@@ -857,7 +879,13 @@ public sealed class BrookAgent : IAsyncDisposable
                         {
                             text = PluginManager?.RestoreDisplayText(text) ?? text;
                         }
-                        _transcript.Add((role, text));
+                        Infrastructure.TaskArtifacts? artifacts = null;
+                        if (doc.RootElement.TryGetProperty("artifacts", out var aj) && aj.ValueKind == JsonValueKind.Object)
+                        {
+                            try { artifacts = aj.Deserialize<Infrastructure.TaskArtifacts>(TranscriptJsonOptions); }
+                            catch { artifacts = null; }   // 产物反序列化失败不丢正文
+                        }
+                        _transcript.Add(new TranscriptEntry(role, text, artifacts));
                     }
                     catch { }   // 单行损坏跳过，不影响其余
                 }
@@ -880,7 +908,7 @@ public sealed class BrookAgent : IAsyncDisposable
         {
             return;   // 回合进行中：助手文本尚含占位符，落盘会污染 transcript（结束后还原再写）
         }
-        var list = BuildTranscriptList();
+        var list = BuildTranscriptTextList();
         lock (_transcriptLock)
         {
             var start = 0;
@@ -911,21 +939,27 @@ public sealed class BrookAgent : IAsyncDisposable
                 var sb = new System.Text.StringBuilder();
                 for (var i = start; i < list.Count; i++)
                 {
-                    sb.Append(JsonSerializer.Serialize(new TranscriptLine(list[i].Role, list[i].Text), TranscriptJsonOptions));
+                    // 本回合产物只挂到最后一条 assistant 记录（与 TurnCompleted 定稿时序一致）
+                    var art = i == list.Count - 1 && list[i].Role == "assistant" ? _pendingArtifacts : null;
+                    sb.Append(JsonSerializer.Serialize(new TranscriptLine(list[i].Role, list[i].Text, art), TranscriptJsonOptions));
                     sb.Append('\n');
                 }
                 File.AppendAllText(TranscriptFilePath, sb.ToString(), new System.Text.UTF8Encoding(false));
                 for (var i = start; i < list.Count; i++)
                 {
-                    _transcript.Add(list[i]);
+                    var art = i == list.Count - 1 && list[i].Role == "assistant" ? _pendingArtifacts : null;
+                    _transcript.Add(new TranscriptEntry(list[i].Role, list[i].Text, art));
                 }
+                _pendingArtifacts = null;
                 _transcriptLastSig = TranscriptSig(list[^1].Role, list[^1].Text);
             }
             catch { }   // 转写是显示增强，落盘失败不阻断回合（镜像/游标未推进，下次对账重试）
         }
     }
 
-    private sealed record TranscriptLine(string Role, string Text);
+    private sealed record TranscriptLine(string Role, string Text, Infrastructure.TaskArtifacts? Artifacts = null);
+    private sealed record TranscriptEntry(string Role, string Text, Infrastructure.TaskArtifacts? Artifacts = null);
+    private Infrastructure.TaskArtifacts? _pendingArtifacts;   // 待落盘的本回合产物（回合结束定稿后由 ReconcileTranscript 挂上）
 
     /// <summary>当前会话 ID 与标题。</summary>
     public string CurrentSessionId => _sessionId;
@@ -1083,6 +1117,9 @@ public sealed class BrookAgent : IAsyncDisposable
     {
         List<ChatMessage>? followUp = null;
         TurnAnswer = "";
+        TurnArtifacts = null;
+        _artifacts.BeginTurn();   // 产物采集：回合开始重置
+        Infrastructure.WorkspaceTempCleaner.SweepAsync(_workspace.Root);   // 节流复查（15min）：回收新增临时 profile 目录
         _turnCts?.Cancel();
         _turnCts = new CancellationTokenSource();
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _turnCts.Token);
@@ -1181,6 +1218,7 @@ public sealed class BrookAgent : IAsyncDisposable
                         var argsJson = call.Arguments is { Count: > 0 } args
                             ? JsonSerializer.Serialize(args)
                             : null;
+                        _artifacts.ObserveToolCall(argsJson);   // 任务目录线索捕获（tasks/<dir>/）
                         yield return new BrookEvent.ToolStarted(call.Name, argsJson);
                         if (call.Name != "ask_user")
                         {
@@ -1269,6 +1307,9 @@ public sealed class BrookAgent : IAsyncDisposable
             // 阶段素材积累：回合最终回答也进当前阶段（关闭时浓缩摘要用）
             _stageAccum.Append($"[助手] {(TurnAnswer.Length > 300 ? TurnAnswer[..300] + "…" : TurnAnswer)}\n");
         }
+        // 产物定稿：在转录落盘前完成，产物元数据随最后一条 assistant 记录写入 transcript.jsonl
+        TurnArtifacts = _artifacts.Finalize($"{_sessionId}:{DateTime.Now:yyyyMMddHHmmss}");
+        _pendingArtifacts = TurnArtifacts;
         await SaveSessionCoreAsync();
 
         // T5.3：脱敏徽标（有插件遥测且确有脱敏时）——数量 / 模型实际看到的最后一条用户文本 / 图片未脱敏提示
@@ -1281,6 +1322,10 @@ public sealed class BrookAgent : IAsyncDisposable
                 stats.ImagesPresent, iconPath);
         }
 
+        if (TurnArtifacts is { HasFiles: true } ta)
+        {
+            yield return new BrookEvent.ArtifactsReady(ta);   // 有产物才发：宿主在最终回复底部渲染产物卡
+        }
         yield return new BrookEvent.TurnCompleted();
         yield return new BrookEvent.Status(BrookRunState.Idle);
     }
@@ -1312,7 +1357,10 @@ public sealed class BrookAgent : IAsyncDisposable
             new ChatMessage(ChatRole.System, systemPrompt),
             new ChatMessage(ChatRole.User, userPrompt),
         ], new ChatOptions { ModelId = model }, cancellationToken);
-        return (response.Text ?? "").Trim();
+        var text = (response.Text ?? "").Trim();
+        // 旁路调用与主回合同走脱敏管线：出口文本必须先还原再消费
+        // （阶段标题/阶段摘要/历史压缩摘要都从这里出，未还原会把占位符带进 UI 与落盘文件）
+        return PluginManager?.RestoreDisplayText(text) ?? text;
     }
 
     private ChatClientAgentRunOptions BuildRunOptions() =>

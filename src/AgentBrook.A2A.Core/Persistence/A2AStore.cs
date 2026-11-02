@@ -342,9 +342,17 @@ public sealed class A2AStore : IAsyncDisposable
             }
             catch (SqliteException ex) when (ex.SqliteErrorCode == 19)
             {
+                // 约束冲突有两种来源：event_id 主键重复（同事件重发）与
+                // UNIQUE(session_id, sequence)（同序列不同 event_id 的重发/乱序投递）。
+                // 两种情况都按已有行幂等返回，避免把可恢复的重传当 500 抛给对端。
                 command.Parameters.Clear();
-                command.CommandText = "SELECT event_id, session_id, sender_node_id, sender_name, sender_icon, timestamp, sequence, type, payload_json, prev_hash, signature FROM events WHERE event_id = $eid;";
+                command.CommandText = """
+                    SELECT event_id, session_id, sender_node_id, sender_name, sender_icon, timestamp, sequence, type, payload_json, prev_hash, signature
+                    FROM events WHERE event_id = $eid OR (session_id = $sid AND sequence = $seq) ORDER BY sequence LIMIT 1;
+                    """;
                 command.Parameters.AddWithValue("$eid", entry.EventId);
+                command.Parameters.AddWithValue("$sid", entry.SessionId);
+                command.Parameters.AddWithValue("$seq", entry.Sequence);
                 using var reader = command.ExecuteReader();
                 if (reader.Read())
                 {

@@ -1,0 +1,89 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="AgentBrook.Helper.Windows.AvatarMakerWindow"
+        Title="制作 Helper 头像"
+        Width="420" Height="520" CanResize="False"
+        WindowStartupLocation="CenterOwner" Topmost="True"
+        Background="#1f1f1f" FontFamily="PingFang SC, Hiragino Sans GB, Microsoft YaHei">
+  <Window.Styles>
+    <Style Selector="Button.primaryBtn">
+      <Setter Property="Background" Value="#2f7bff"/>
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="CornerRadius" Value="7"/>
+      <Setter Property="Padding" Value="18,8"/>
+      <Setter Property="Cursor" Value="Hand"/>
+    </Style>
+    <Style Selector="Button.primaryBtn:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#4a8cff"/>
+      <Setter Property="Foreground" Value="White"/>
+    </Style>
+    <Style Selector="Button.ghostBtn">
+      <Setter Property="Background" Value="#303030"/>
+      <Setter Property="Foreground" Value="#dddddd"/>
+      <Setter Property="CornerRadius" Value="7"/>
+      <Setter Property="Padding" Value="14,7"/>
+      <Setter Property="Cursor" Value="Hand"/>
+    </Style>
+    <Style Selector="Button.ghostBtn:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#3d3d3d"/>
+      <Setter Property="Foreground" Value="#ffffff"/>
+    </Style>
+    <Style Selector="TextBlock.dim">
+      <Setter Property="Foreground" Value="#9a9a9a"/>
+      <Setter Property="FontSize" Value="12"/>
+    </Style>
+  </Window.Styles>
+
+  <Grid RowDefinitions="Auto,*,Auto,Auto" Margin="20">
+    <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+      <TextBlock Text="自定义 Helper 头像" FontSize="16" FontWeight="SemiBold" Foreground="#e8e8e8"
+                 VerticalAlignment="Center"/>
+    </StackPanel>
+
+    <Border Grid.Row="1" Margin="0,14" Background="#161616" CornerRadius="8" ClipToBounds="True">
+      <!-- 固定 320×320 视口：画布/遮罩/描边共用同一坐标系，保证对齐 -->
+      <Border Width="320" Height="320" HorizontalAlignment="Center" VerticalAlignment="Center" ClipToBounds="True">
+        <Grid>
+          <Canvas x:Name="PreviewCanvas" Width="320" Height="320" Background="Transparent">
+            <Image x:Name="SourceImage" Stretch="None" IsHitTestVisible="False"/>
+          </Canvas>
+          <!-- 圆外暗化遮罩：实心矩形挖去内切圆（Stretch=None 防 Grid 拉伸） -->
+          <Path Fill="#B3000000" IsHitTestVisible="False" Stretch="None">
+            <Path.Data>
+              <CombinedGeometry GeometryCombineMode="Exclude">
+                <CombinedGeometry.Geometry1>
+                  <RectangleGeometry Rect="0,0,320,320"/>
+                </CombinedGeometry.Geometry1>
+                <CombinedGeometry.Geometry2>
+                  <EllipseGeometry Center="160,160" RadiusX="158" RadiusY="158"/>
+                </CombinedGeometry.Geometry2>
+              </CombinedGeometry>
+            </Path.Data>
+          </Path>
+          <!-- 圆形取景框描边 -->
+          <Ellipse Width="316" Height="316" HorizontalAlignment="Center" VerticalAlignment="Center"
+                   Stroke="#2f7bff" StrokeThickness="2" IsHitTestVisible="False"/>
+          <TextBlock x:Name="EmptyHint" Text="点击「选择图片」载入本地图片&#x0a;支持 png / jpg / webp / bmp"
+                     Classes="dim" TextAlignment="Center"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"
+                     IsHitTestVisible="False"/>
+        </Grid>
+      </Border>
+    </Border>
+
+    <StackPanel Grid.Row="2" Spacing="10">
+      <Grid ColumnDefinitions="Auto,*">
+        <TextBlock Text="缩放" Classes="dim" VerticalAlignment="Center"/>
+        <Slider x:Name="ZoomSlider" Grid.Column="1" Minimum="100" Maximum="400" Value="100"
+                VerticalAlignment="Center" Margin="10,0,0,0"/>
+      </Grid>
+      <TextBlock Text="输出：64×64 PNG（正方形裁切区，可拖动调整位置）" Classes="dim"/>
+    </StackPanel>
+
+    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10" Margin="0,14,0,0">
+      <Button x:Name="PickBtn" Classes="ghostBtn" Content="选择图片"/>
+      <Button x:Name="CancelBtn" Classes="ghostBtn" Content="取消"/>
+      <Button x:Name="OkBtn" Classes="primaryBtn" Content="保存"/>
+    </StackPanel>
+  </Grid>
+</Window>

@@ -727,9 +727,9 @@ public partial class MainWindow : Window
         {
             return;   // 全新会话：保持问候引导
         }
-        foreach (var (role, text) in transcript)
+        foreach (var (role, text, artifacts) in transcript)
         {
-            _chatPanel!.Children.Add(BuildTranscriptItem(role, text));
+            _chatPanel!.Children.Add(BuildTranscriptItem(role, text, artifacts));
         }
         _lastKnownTotal = _controller.TranscriptCount;
         _visibleFromEnd = transcript.Count;
@@ -747,9 +747,9 @@ public partial class MainWindow : Window
 
         // 回放历史消息（最近 40 条，assistant 走 Markdown 渲染）；光标对账供后续滚动加载
         var transcript = _controller.GetTranscript();
-        foreach (var (role, text) in transcript)
+        foreach (var (role, text, artifacts) in transcript)
         {
-            _chatPanel!.Children.Add(BuildTranscriptItem(role, text));
+            _chatPanel!.Children.Add(BuildTranscriptItem(role, text, artifacts));
         }
         _lastKnownTotal = _controller.TranscriptCount;
         _visibleFromEnd = transcript.Count;
@@ -1030,10 +1030,16 @@ public partial class MainWindow : Window
                 UpdateTokenHeader();
                 break;
             case BrookEvent.Failed fail:
-                AddErrorBubble(fail.Message);
+                StopThinkLine();
+                StopStreamTimer();
+                RemoveStreamBubble();   // 流中断时流泡内可能残留未还原的脱敏标记，必须先撤下
+                AddErrorBubble(fail.Message, allowRetry: true);   // 回合失败（含流中断）：错误气泡带"重试"
                 break;
             case BrookEvent.MaskingBadge badge:
                 RenderMaskingBadge(badge);
+                break;
+            case BrookEvent.ArtifactsReady ar:
+                _pendingTurnArtifacts = ar.Artifacts;   // 暂存：TurnCompleted 时随最终回答渲染
                 break;
             case BrookEvent.TurnCompleted:
                 StopThinkLine();
@@ -1041,7 +1047,9 @@ public partial class MainWindow : Window
                 CollapseExecGroup();   // 完成后收起执行过程，保持主内容清爽
                 RemoveStreamBubble();  // 流式纯文本让位给 Markdown 渲染
                 ShowFinalAnswer();
+                AppendArtifactsCard();   // 产物卡：正文之后、token 统计行之上
                 AppendUsageLine();
+                AppendTurnElapsed();   // 本轮总耗时（秒/分钟/小时/天 自适应）
                 RebuildStageRail();   // 阶段摘要/关闭状态可能已更新
                 break;
         }
@@ -1066,6 +1074,10 @@ public partial class MainWindow : Window
 
             var busy = state is BrookRunState.Thinking or BrookRunState.CallingTool
                 or BrookRunState.AwaitingApproval or BrookRunState.AwaitingUserAnswer;
+            if (busy)
+            {
+                _turnStart ??= DateTime.Now;   // 本轮计时起点：首次进入忙碌
+            }
             _inputBox!.IsEnabled = true;   // 忙碌时仍可输入补充信息（自动排队）
         });
     }
@@ -1573,6 +1585,32 @@ public partial class MainWindow : Window
     private TextBlock? _thinkLine;
     private DispatcherTimer? _thinkTimer;
     private DateTime _thinkStart;
+    private DateTime? _turnStart;      // 本轮开始时刻（首个 busy 状态），TurnCompleted 出“本轮共耗时”行
+    private DateTime _execStart;       // 终端卡开始时刻
+    private DispatcherTimer? _execTimer;
+
+    /// <summary>耗时格式化：秒常驻，达到阈值逐级前置大单位——
+    /// &lt;1min「N 秒」；&lt;1h「N 分钟 N 秒」；&lt;1d「N 小时 N 分钟 N 秒」；否则「N 天 N 小时 N 分钟 N 秒」。</summary>
+    private static string FmtElapsed(TimeSpan t)
+    {
+        var s = Math.Max(0, (int)t.TotalSeconds);
+        var sec = I18n.T("ui.dur.seconds.value", s % 60);
+        if (s < 60)
+        {
+            return I18n.T("ui.dur.seconds.value", Math.Max(1, s));
+        }
+        var min = I18n.T("ui.dur.minutes.value", s % 3600 / 60);
+        if (s < 3600)
+        {
+            return $"{min} {sec}";
+        }
+        var hr = I18n.T("ui.dur.hours.value", s % 86400 / 3600);
+        if (s < 86400)
+        {
+            return $"{hr} {min} {sec}";
+        }
+        return $"{I18n.T("ui.dur.days.value", s / 86400)} {hr} {min} {sec}";
+    }
 
     /// <summary>显示「思考 · 持续了 N 秒」行，随时间实时更新；工具开始或回合结束时定格。</summary>
     private void StartThinkLine()
@@ -1636,6 +1674,42 @@ public partial class MainWindow : Window
         _chatPanel!.Children.Add(line);
         ScrollToEnd();
         _lastTurnUsage = null;
+    }
+
+    private AgentBrook.Agent.Infrastructure.TaskArtifacts? _pendingTurnArtifacts;
+
+    /// <summary>取出本回合暂存产物并构建卡片（一次性消费）；无产物返回 null。</summary>
+    private Control? TakePendingArtifactsCard()
+    {
+        var artifacts = _pendingTurnArtifacts;
+        _pendingTurnArtifacts = null;
+        return artifacts is null ? null : Views.ArtifactPanel.Build(artifacts);
+    }
+
+    /// <summary>回合末追加「本轮 · 共耗时 X」行；只在记录到起点时输出，随后复位供下轮。</summary>
+    private void AppendTurnElapsed()
+    {
+        if (_turnStart is not { } start)
+        {
+            return;
+        }
+        _turnStart = null;
+        _chatPanel!.Children.Add(new TextBlock
+        {
+            Classes = { "procLine" },
+            Text = I18n.T("ui.turn.elapsed.value", FmtElapsed(DateTime.Now - start)),
+        });
+        ScrollToEnd();
+    }
+
+    /// <summary>无正文回合兜底：产物卡独立追加（仍在 token 统计行之前）。</summary>
+    private void AppendArtifactsCard()
+    {
+        if (TakePendingArtifactsCard() is { } card)
+        {
+            _chatPanel!.Children.Add(card);
+            ScrollToEnd();
+        }
     }
 
     // ───────────────────────── 聊天流渲染 ─────────────────────────
@@ -1830,6 +1904,7 @@ public partial class MainWindow : Window
         var answer = _controller.FinalAnswer;
         if (string.IsNullOrWhiteSpace(answer))
         {
+            AppendArtifactsCard();   // 无正文（如纯文件产出）：产物卡独立占位
             return;
         }
         if (answer == _lastRenderedAnswer)
@@ -1955,8 +2030,15 @@ public partial class MainWindow : Window
             });
     }
 
-    private void AddErrorBubble(string message)
+    private void AddErrorBubble(string message, bool allowRetry = false)
     {
+        var border = new Border
+        {
+            Background = new SolidColorBrush(Color.Parse("#ffe9e7")),
+            CornerRadius = new CornerRadius(14),
+            Padding = new Thickness(12, 8),
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
         Control content = new TextBlock
         {
             Text = I18n.T("ui.error.value", WindowBase.IsBillingError(message) ? WindowBase.FriendlyRelayError(message) : message),
@@ -1966,9 +2048,10 @@ public partial class MainWindow : Window
         };
         if (WindowBase.IsBillingError(message))
         {
-            // 余额不足/卡失效：错误下方直接给充值入口（AgentBrook 卡自动带上当前 Key）
+            // 余额不足/卡失效：错误下方直接给充值入口（AgentBrook 卡自动带上当前 Key）；可重试时充值旁带"重试"（充值后直接重发）
             var stack = new StackPanel { Spacing = 8 };
             stack.Children.Add(content);
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
             var rechargeBtn = new Button
             {
                 Content = I18n.T("ui.token.recharge.btn"),
@@ -1977,19 +2060,44 @@ public partial class MainWindow : Window
                 HorizontalAlignment = HorizontalAlignment.Left,
             };
             rechargeBtn.Click += (_, _) => OpenTokenRechargePage();
-            stack.Children.Add(rechargeBtn);
+            actions.Children.Add(rechargeBtn);
+            if (allowRetry)
+            {
+                actions.Children.Add(BuildErrorRetryButton(border));
+            }
+            stack.Children.Add(actions);
             content = stack;
         }
-        var border = new Border
+        else if (allowRetry)
         {
-            Background = new SolidColorBrush(Color.Parse("#ffe9e7")),
-            CornerRadius = new CornerRadius(14),
-            Padding = new Thickness(12, 8),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            Child = content,
-        };
+            // 回合失败（网络中断/流断开/服务端错误等）：错误下方给"重试"，复用最后一条用户消息重发
+            var stack = new StackPanel { Spacing = 8 };
+            stack.Children.Add(content);
+            stack.Children.Add(BuildErrorRetryButton(border));
+            content = stack;
+        }
+        border.Child = content;
         _chatPanel!.Children.Add(border);
         ScrollToEnd();
+    }
+
+    /// <summary>错误气泡的"重试"按钮：点击移除该气泡并复用最后一条用户消息重发（标签复用三语键 ui.retry，与回答卡"重新生成"一致）。</summary>
+    private Button BuildErrorRetryButton(Border bubble)
+    {
+        var retryBtn = new Button
+        {
+            Content = I18n.T("ui.retry"),
+            Classes = { "actionOk" },
+            FontSize = 13,
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
+        retryBtn.Click += async (_, _) =>
+        {
+            if (_controller.Busy || _lastUserMessage is null) return;
+            _chatPanel!.Children.Remove(bubble);
+            await _controller.SendAsync(_lastUserMessage);
+        };
+        return retryBtn;
     }
 
     /// <summary>打开 AgentBrook Token卡充值页：当前供应商为 AgentBrook 时自动预填卡 Key。</summary>
@@ -2040,13 +2148,27 @@ public partial class MainWindow : Window
         _execCard = new InteractionCard(I18n.T("ui.terminal"), _execContent,
             InteractionState.Running, iconData: IconTerminal, collapsed: true, collapsible: true);
         _chatPanel!.Children.Add(_execCard);
+        _execStart = DateTime.Now;
+        _execTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _execTimer.Tick += (_, _) =>
+            _execCard?.SetState(InteractionState.Running, I18n.T("ui.exec.running.elapsed.value", FmtElapsed(DateTime.Now - _execStart)));
+        _execTimer.Start();
         ScrollToEnd();
     }
 
     private void CollapseExecGroup()
     {
-        // 回合结束：状态置为已完成并外层折叠，保持主内容清爽
-        _execCard?.SetState(InteractionState.Done);
+        // 回合结束：状态定格为“已完成 · 耗时”并外层折叠，保持主内容清爽
+        _execTimer?.Stop();
+        _execTimer = null;
+        if (_execCard is not null && _execStart > DateTime.MinValue)
+        {
+            _execCard.SetState(InteractionState.Done, I18n.T("ui.exec.done.elapsed.value", FmtElapsed(DateTime.Now - _execStart)));
+        }
+        else
+        {
+            _execCard?.SetState(InteractionState.Done);
+        }
         _execCard?.Collapse();
         _execCard = null;
         _execContent = null;
@@ -2388,7 +2510,7 @@ public partial class MainWindow : Window
 
     /// <summary>按角色构造对话记录条目（回放/滚动加载共用）：user 气泡、assistant 走 Markdown 渲染。
     /// 统一标记 Tag="history"：不计入直播裁剪上限（总量受会话记录窗口约束，有界）。</summary>
-    private Control BuildTranscriptItem(string role, string text)
+    private Control BuildTranscriptItem(string role, string text, AgentBrook.Agent.Infrastructure.TaskArtifacts? artifacts = null)
     {
         if (role == "user")
         {
@@ -2411,6 +2533,14 @@ public partial class MainWindow : Window
         Control render;
         try { render = MarkdownView.Render(text); }
         catch { render = new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Color.Parse("#e6e6e6")) }; }
+        // 历史产物：assistant 气泡内追加同一产物卡（与实时展示同构）
+        if (Views.ArtifactPanel.Build(artifacts) is { } card)
+        {
+            var stack = new StackPanel { Spacing = 2 };
+            stack.Children.Add(render);
+            stack.Children.Add(card);
+            return new Border { Classes = { "assistantBubble" }, Child = stack, Tag = "history" };
+        }
         return new Border { Classes = { "assistantBubble" }, Child = render, Tag = "history" };
     }
 
@@ -2478,7 +2608,7 @@ public partial class MainWindow : Window
             var prevExtent = _chatScroll!.Extent.Height;
             for (var i = 0; i < batch.Count; i++)
             {
-                _chatPanel!.Children.Insert(i, BuildTranscriptItem(batch[i].Role, batch[i].Text));
+                _chatPanel!.Children.Insert(i, BuildTranscriptItem(batch[i].Role, batch[i].Text, batch[i].Artifacts));
             }
             _visibleFromEnd += batch.Count;
             if (end - batch.Count <= 0)
@@ -3309,7 +3439,8 @@ public partial class MainWindow : Window
                 RenderAttachmentBar();
             };
             row.Children.Add(close);
-            bar.Children.Add(new Border { Classes = { "attachChip" }, Child = row });
+            // WrapPanel 无 Spacing：右/下 6px Margin 模拟原间距（换行后行距同样成立）
+            bar.Children.Add(new Border { Classes = { "attachChip" }, Child = row, Margin = new Thickness(0, 0, 6, 6) });
         }
     }
 

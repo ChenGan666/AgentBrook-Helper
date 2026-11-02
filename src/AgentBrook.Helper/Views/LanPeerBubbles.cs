@@ -343,6 +343,7 @@ internal sealed class LanPeerAvatar : Border
 
     private readonly ScaleTransform _scale = new();
     private readonly TextBlock _text;
+    private readonly Image _image;
     private readonly Avalonia.Controls.Shapes.Path _person;
     private PointerPressedEventArgs? _press;
     private Point _pressPoint;
@@ -379,6 +380,11 @@ internal sealed class LanPeerAvatar : Border
             FontSize = isMore ? 11 : 14,
             FontWeight = isMore ? FontWeight.SemiBold : FontWeight.Normal,
         };
+        _image = new Image
+        {
+            Stretch = Stretch.UniformToFill,
+            IsVisible = false,
+        };
         _person = new Avalonia.Controls.Shapes.Path
         {
             Fill = Brushes.White,
@@ -391,6 +397,7 @@ internal sealed class LanPeerAvatar : Border
             _person.Data = geo;
         }
         var grid = new Grid();
+        grid.Children.Add(_image);   // 图片头像铺满圆形气泡（Border 已 ClipToBounds + 圆角）
         grid.Children.Add(new Viewbox { Child = _text, Stretch = Stretch.Uniform, Margin = new Thickness(isMore ? 9 : 10) });
         grid.Children.Add(_person);
         Child = grid;
@@ -433,18 +440,28 @@ internal sealed class LanPeerAvatar : Border
     /// <summary>就地更新资料（名称/图标/状态），不重建控件。</summary>
     public void Update(LanPeerInfo info)
     {
-        if (string.IsNullOrWhiteSpace(info.Icon))
+        var bitmap = PeerIconCodec.TryDecode(info.Icon);
+        if (bitmap is not null)
         {
+            _image.Source = bitmap;
+            _image.IsVisible = true;
+            _text.IsVisible = false;
+            _person.IsVisible = false;
+        }
+        else if (string.IsNullOrWhiteSpace(info.Icon))
+        {
+            _image.IsVisible = false;
             _text.IsVisible = false;
             _person.IsVisible = _person.Data is not null;
         }
         else
         {
+            _image.IsVisible = false;
             _text.Text = info.Icon;
             _text.IsVisible = true;
             _person.IsVisible = false;
         }
-        _tip = $"{info.Icon ?? "👤"} {info.DisplayName}\n{info.Status}";
+        _tip = $"{PeerIconCodec.ForText(info.Icon ?? "👤")} {info.DisplayName}\n{info.Status}";
         ApplyTip();
     }
 

@@ -63,6 +63,10 @@ On the model side, any OpenAI-compatible endpoint plugs straight in, and multi-p
 
 A 🎬 Multimedia dropdown sits next to the model selector, listing the image and video models your providers expose — type metadata comes from the fetched model list, and the media choice never mixes with the chat model. Pick one and just ask: the agent composes the prompt plus the model's required parameters and calls `media_generate` — images come back from a synchronous endpoint right away, while video and other long jobs are submitted as async tasks and polled for up to five minutes (anything still running hands back a task id the agent can check later without resubmitting); the result renders right in the bubble, images inline and video/audio as playable cards. Delegated sub-agents can generate media too, and switching to a media model other than the selected one asks for your approval first.
 
+### Task artifacts: deliverables you can click
+
+When a turn produces files, the assistant's final reply ends with an artifacts card — the task workspace directory plus the final deliverables list, each entry one click from opening. The agent registers deliverables with `register_artifact` (path + one-line purpose); links produced by `media_generate` are registered automatically. Artifacts persist with the session, so replaying past turns restores their cards — and even a mid-turn failure keeps whatever was already produced. Deliverables live in the task directory's `deliverables/` folder (`tasks/<date>-<task>/`), kept apart from intermediate files and logs.
+
 ### Privacy masking: sensitive data never leaves your machine (optional plugin)
 
 Before anything is sent to the LLM, real names, organizations, phone numbers, addresses and ID numbers are automatically replaced with placeholders like `[PERSON_1]`; when the reply is displayed, the system restores them back to the real values - the model only ever sees placeholders. 11 built-in rule categories (phone / email / ID card / bank card / license plate / IP / URL / passport, with checksum validation); an optional local recognition model (~97MB, offline inference) covers entities beyond the dictionary. Every reply carries a shield badge showing how many items were masked, with a hover to inspect exactly what the model received. The sensitive dictionary supports custom categories (API keys, secrets...), CSV import/export; a whitelist exempts specific content; recognition categories can be toggled individually; on failure the send is aborted by default - raw text never leaks. Ships as an optional plugin with hot-plug support.
@@ -73,7 +77,7 @@ Shell commands, skill installation, MCP server registration and worker spawning 
 
 ### Interrupt, queue, and switch sessions anytime
 
-While a turn is running, the send button turns into a stop button (Esc works too) and whatever completed is kept; anything you type while busy is queued and sent automatically when the turn ends. Sessions are managed from the top-bar switcher: titles are generated from the first message, "new session" archives the old one instead of wiping it, and switching replays recent history — scroll to the top to keep loading older messages back to the session archive's start — with context and rolling summary intact. Any session can be distilled into a `session-` skill with one click — other sessions can `load_skill` those conclusions and outputs, and the skill survives session deletion.
+While a turn is running, the send button turns into a stop button (Esc works too) and whatever completed is kept; anything you type while busy is queued and sent automatically when the turn ends. If a turn fails — a network drop or a server timeout — the error card carries a Retry button that re-sends your original message as-is; on billing errors the retry sits next to the top-up shortcut, so recharging and re-running happen in the same place. Sessions are managed from the top-bar switcher: titles are generated from the first message, "new session" archives the old one instead of wiping it, and switching replays recent history — scroll to the top to keep loading older messages back to the session archive's start — with context and rolling summary intact. Any session can be distilled into a `session-` skill with one click — other sessions can `load_skill` those conclusions and outputs, and the skill survives session deletion.
 
 ### On-demand context loading
 
@@ -89,7 +93,7 @@ The network does more than chat. **File transfers** are chunked, SHA-256 verifie
 
 A built-in business scenario shows the pattern: Helpers acting for different departments file daily sales reports with signed, idempotent, de-duplicated submissions, aggregated by a coordinator.
 
-Paired Helpers that are online on your LAN also show up as small avatar bubbles tucked under the main bubble — up to three, then a +N badge. Hover to fan them out into rings, hover an avatar for its name and state (online, away, busy, waiting for user…), and click one to jump straight to your session with that Helper.
+Paired Helpers that are online on your LAN also show up as small avatar bubbles tucked under the main bubble — up to three, then a +N badge. Hover to fan them out into rings, hover an avatar for its name and state (online, away, busy, waiting for user…), and click one to jump straight to your session with that Helper. Icons are no longer limited to emoji: pick a custom image in Settings → General and crop it in the built-in avatar maker (drag to position, slider to zoom, 64×64 export) — your icon travels with your messages, so peers see it on their side too.
 
 ### Token cards: 24-hour trial, pay-as-you-go top-ups
 
@@ -215,7 +219,7 @@ Runtime state is generated automatically and stays out of version control:
 
 ## Built-in tools
 
-Around 56 tools ship with the core, grouped by surface:
+Around 57 tools ship with the core, grouped by surface:
 
 | Surface | Tools |
 |---|---|
@@ -226,6 +230,7 @@ Around 56 tools ship with the core, grouped by surface:
 | **MCP** | `mcp_list_servers` `mcp_add_server` `mcp_call` `mcp_tool_help` — plus every tool the configured servers expose |
 | **Team** | `start_project` `spawn_worker` `assign_task` `send_message` `broadcast_to_workers` `list_workers` `read_shared` `check_messages` |
 | **Media** | `media_generate` — image/video/audio generation through the selected media model (async task submit + polling; cross-model calls need approval) |
+| **Artifacts** | `register_artifact` — register a deliverable (path + purpose) for the artifacts card shown under the final reply |
 | **Interaction** | `ask_user` — suspends the turn for a real answer |
 | **A2A** | `a2a_status` `a2a_list_peers` `a2a_pair` `a2a_send_message` `a2a_send_all` `a2a_send_file` `a2a_create_group` `a2a_group_send` `a2a_group_rename` `a2a_list_groups` `a2a_report_daily_sales` — LAN discovery, pairing, messaging, files, groups and business scenarios |
 
@@ -240,7 +245,8 @@ AgentBrook-Helper/
     ├── AgentBrook.Agent.Core/       ← the agent (shared by every host)
     │   ├── BrookAgent.cs            ← event-driven agent; RunAsync yields BrookEvent
     │   ├── IBrookInteraction.cs     ← HITL abstraction (approval / ask_user)
-    │   ├── Infrastructure/          ← workspace sandbox, agent factory, provider settings
+    │   ├── Infrastructure/          ← workspace sandbox, agent factory, provider settings,
+    │   │                              artifact collector, workspace temp cleaner
     │   ├── Memory/  Skills/  Tools/  Team/  Mcp/  Configuration/
     ├── AgentBrook.Agent/            ← console host (REPL)
     ├── AgentBrook.A2A.Core/         ← A2A protocol core (Peer/Group sessions, events, identity)
@@ -254,9 +260,10 @@ AgentBrook-Helper/
         ├── Windows/                 ← every window: BubbleWindow (split into 7 partials: dock/
         │                              hit-test/orbit/peer ring/positioning/toast/visual), MainWindow
         │                              (stream/@-mentions/approval cards), ModelSettingsWindow,
-        │                              OnboardingWindow, A2ASessionWindow, WindowBase
+        │                              OnboardingWindow, A2ASessionWindow, AvatarMakerWindow, WindowBase
         ├── Views/                   ← conversation controls: MarkdownView (hand-written renderer),
-        │                              MediaBlock, InteractionCard, LanPeerBubbles
+        │                              MediaBlock, InteractionCard, ArtifactPanel (per-turn deliverables),
+        │                              PeerIconView (emoji/image icons), LanPeerBubbles
         ├── Support/                 ← trilingual I18n, ModelCatalog, AutoStart, UiPrefs,
         │                              ClientFingerprint (trial-card anti-duplicate), NotifySound
         ├── Environment/             ← environment checks with one-click repair

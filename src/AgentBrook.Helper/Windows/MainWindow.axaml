@@ -1,6 +1,7 @@
 ﻿<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="using:AgentBrook.Helper.Windows"
+        xmlns:views="using:AgentBrook.Helper.Views"
         x:Class="AgentBrook.Helper.Windows.MainWindow"
         RequestedThemeVariant="Dark"
         Title="Brook 助手"
@@ -242,7 +243,7 @@
                     <TextBlock Grid.Column="1" x:Name="TokenText" Text="" FontSize="12" Foreground="#8a8a8a"
                                VerticalAlignment="Center" IsVisible="False"/>
                     <!-- 会话切换器：助手名 + 当前会话标题，点击弹出会话列表 -->
-                    <Button Grid.Column="2" x:Name="SessionBtn" Background="Transparent" Padding="6,3" CornerRadius="6"
+                    <Button Grid.Column="0" Grid.ColumnSpan="3" x:Name="SessionBtn" Background="Transparent" Padding="6,3" CornerRadius="6"
                             HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" ToolTip.Tip="切换会话">
                         <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6">
                             <!-- 助手名已在窗口标题中显示，会话按钮只留会话标题 -->
@@ -284,8 +285,9 @@
             <Border x:Name="InputCardBorder" CornerRadius="16" Background="#292929" BorderBrush="#3a3a3a"
                     BorderThickness="1" Padding="14,8,10,8">
                 <Grid RowDefinitions="Auto,*,Auto" RowSpacing="4">
+                    <!-- WrapPanel 无 Spacing：间距由 attachChip 子项 Margin 模拟（见 RenderAttachmentBar） -->
                     <WrapPanel Grid.Row="0" x:Name="AttachmentBar" Orientation="Horizontal"
-                                Spacing="6" IsVisible="False"/>
+                               IsVisible="False"/>
                     <!-- 排队列表：一条消息一个块，逐条可删/可插队；多条时输入区自然增高 -->
                     <StackPanel Grid.Row="0" x:Name="QueueList" Spacing="4" Margin="0,0,0,2"
                                 IsVisible="False"/>
@@ -355,7 +357,7 @@
                         <DataTemplate x:DataType="local:MentionItem">
                             <Panel>
                                 <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                    <TextBlock Text="{Binding Icon}" FontSize="15" VerticalAlignment="Center"/>
+                                    <views:PeerIconView Icon="{Binding Icon}" Size="15" VerticalAlignment="Center"/>
                                     <TextBlock Text="{Binding Display}" FontSize="13.5" Foreground="#e6e6e6" VerticalAlignment="Center"/>
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" Spacing="5" HorizontalAlignment="Right" VerticalAlignment="Center">

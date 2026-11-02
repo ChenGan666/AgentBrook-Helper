@@ -344,13 +344,40 @@ public partial class SettingsWindow : WindowBase
             btn.Click += (_, _) =>
             {
                 _selectedHelperIcon = choice;
-                button.Content = choice;
+                SetHelperIconPreview(button, choice);
                 _helperIconFlyout?.Hide();
                 _ = ApplyHelperIconAsync(choice);
             };
             wrap.Children.Add(btn);
         }
-        // 弹层内容套滚动条：图标多时不撑破屏幕，滚轮直接滚动。
+        // 「自定义」入口：固定于弹层底部（不进滚动区）；本地图片 → 头像制作器裁切 64×64 PNG → img: 图标
+        var customBtn = new Button
+        {
+            Content = "🖼️ " + I18n.T("ui.avatar.custom"),
+            Height = 40,
+            FontSize = 14,
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(0),
+            Margin = new Thickness(0, 6, 0, 0),
+            HorizontalContentAlignment = Avalonia.Layout.HorizontalAlignment.Center,
+            VerticalContentAlignment = Avalonia.Layout.VerticalAlignment.Center,
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch,
+            Background = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#2f7bff")),
+            Foreground = Brushes.White,
+        };
+        customBtn.Click += async (_, _) =>
+        {
+            _helperIconFlyout?.Hide();
+            var maker = new AvatarMakerWindow();
+            await maker.ShowDialog(this);
+            if (maker.ResultIcon is { } icon)
+            {
+                _selectedHelperIcon = icon;
+                SetHelperIconPreview(button, icon);
+                _ = ApplyHelperIconAsync(icon);
+            }
+        };
+        // 弹层结构：emoji 网格滚动 + 底部固定「自定义」按钮
         var scroll = new ScrollViewer
         {
             Content = wrap,
@@ -358,8 +385,17 @@ public partial class SettingsWindow : WindowBase
             HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
             VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
         };
-        _helperIconFlyout = new Flyout { Content = scroll };
+        var panel = new StackPanel { MaxWidth = 268 };
+        panel.Children.Add(scroll);
+        panel.Children.Add(customBtn);
+        _helperIconFlyout = new Flyout { Content = panel };
         button.Flyout = _helperIconFlyout;   // 附加后点击按钮自动弹出
+    }
+
+    /// <summary>Helper 图标按钮预览：emoji 直显；img: 图片经 PeerIconView 渲染。</summary>
+    private static void SetHelperIconPreview(Button button, string icon)
+    {
+        button.Content = new Views.PeerIconView { Icon = icon, Size = 18 };
     }
 
     private async Task ApplyHelperIconAsync(string icon)
@@ -369,7 +405,7 @@ public partial class SettingsWindow : WindowBase
         try
         {
             await controller.ApplyIconAsync(icon);
-            Hint(I18n.T("ui.helper.value.2", icon));
+            Hint(I18n.T("ui.helper.value.2", Views.PeerIconCodec.ForText(icon)));
         }
         catch (Exception ex)
         {
@@ -404,7 +440,7 @@ public partial class SettingsWindow : WindowBase
         // Helper 图标（A2A 对外展示）：读取当前配置并构建选择弹层（仅初始化一次）。
         _selectedHelperIcon = App.A2A?.Controller.Config.Icon ?? "🤖";
         var helperIconBtn = this.FindControl<Button>("HelperIconPickerButton")!;
-        helperIconBtn.Content = _selectedHelperIcon;
+        SetHelperIconPreview(helperIconBtn, _selectedHelperIcon);
         if (!_helperIconUiBuilt)
         {
             _helperIconUiBuilt = true;

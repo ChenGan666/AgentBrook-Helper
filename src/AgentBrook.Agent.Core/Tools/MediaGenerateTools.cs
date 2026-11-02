@@ -23,15 +23,18 @@ public sealed class MediaGenerateTools
     private readonly Func<ProviderConfig?> _activeProvider;
     private readonly Func<IReadOnlyList<ProviderConfig>>? _allProviders;
     private readonly Action<string> _log;
+    private readonly Action<string>? _onMediaUrl;   // 产物采集：成功 URL 登记为 link 产物
 
     public MediaGenerateTools(
         Func<ProviderConfig?> activeProvider,
         Action<string>? log = null,
-        Func<IReadOnlyList<ProviderConfig>>? allProviders = null)
+        Func<IReadOnlyList<ProviderConfig>>? allProviders = null,
+        Action<string>? onMediaUrl = null)
     {
         _activeProvider = activeProvider;
         _allProviders = allProviders;
         _log = log ?? (_ => { });
+        _onMediaUrl = onMediaUrl;
     }
 
     /// <summary>
@@ -118,6 +121,7 @@ public sealed class MediaGenerateTools
                 }
                 var qStatus = ExtractStatus(qBody);
                 var qUrl = ExtractMediaUrl(qBody);
+                if (qUrl is not null) _onMediaUrl?.Invoke(qUrl);
                 return JsonSerializer.Serialize(new
                 {
                     ok = true, task_id, model, status = qStatus,
@@ -166,6 +170,7 @@ public sealed class MediaGenerateTools
                 return Fail($"图像生成响应中未找到媒体 URL：{Truncate(genBody, 400)}");
             }
             _log($"✅ 图像生成完成 model={model}");
+            _onMediaUrl?.Invoke(genMediaUrl);
             return JsonSerializer.Serialize(new
             {
                 ok = true, model,
@@ -229,6 +234,7 @@ public sealed class MediaGenerateTools
             {
                 var url = ExtractMediaUrl(lastBody);
                 _log($"✅ 媒体任务完成 task={taskId}");
+                if (url is not null) _onMediaUrl?.Invoke(url);
                 return JsonSerializer.Serialize(new
                 {
                     ok = true, task_id = taskId, model,

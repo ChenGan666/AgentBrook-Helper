@@ -216,10 +216,11 @@ public sealed class AssistantController : IBrookInteraction
     public event Action? SessionsChanged;
 
     public string CurrentSessionTitle => Ready ? Agent!.CurrentSessionTitle : "新对话";
-    public IReadOnlyList<(string Role, string Text)> GetTranscript() => Ready ? Agent!.GetTranscript() : [];
+    public IReadOnlyList<(string Role, string Text, AgentBrook.Agent.Infrastructure.TaskArtifacts? Artifacts)> GetTranscript() =>
+        Ready ? Agent!.GetTranscript() : [];
     /// <summary>滚动加载历史用：可读记录总条数与分页读取（skipFromEnd=从末尾跳过的条数）。</summary>
     public int TranscriptCount => Ready ? Agent!.TranscriptCount : 0;
-    public IReadOnlyList<(string Role, string Text)> GetTranscriptRange(int skipFromEnd, int take) =>
+    public IReadOnlyList<(string Role, string Text, AgentBrook.Agent.Infrastructure.TaskArtifacts? Artifacts)> GetTranscriptRange(int skipFromEnd, int take) =>
         Ready ? Agent!.GetTranscriptRange(skipFromEnd, take) : [];
     public IReadOnlyList<SessionMeta> Sessions => Ready ? Agent!.Sessions : [];
     /// <summary>当前会话的阶段清单（左侧阶段导航数据源）。</summary>
@@ -516,6 +517,11 @@ public sealed class AssistantController : IBrookInteraction
             RaiseState(BrookRunState.Idle, null);
             if (!sawTurnCompleted)
             {
+                // 异常终止：已产出部分仍定稿展示（产物随下次转录对账落盘）
+                if (Agent?.FinalizeTurnArtifacts() is { HasFiles: true } partial)
+                {
+                    EventRaised?.Invoke(new BrookEvent.ArtifactsReady(partial));
+                }
                 EventRaised?.Invoke(new BrookEvent.TurnCompleted());   // 异常终止时保底
             }
             // 任务完成且对话窗非活动：提示音提醒用户回来看结果（用户主动停止/出错不响）

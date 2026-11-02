@@ -57,8 +57,8 @@ public sealed class A2APeerItem : INotifyPropertyChanged
     public string Presence => _presence;
     public string Mood => _mood;
 
-    /// <summary>第一行：对方图标 + 显示名称。</summary>
-    public string DisplayName => $"{Icon} {Name}";
+    /// <summary>第一行：对方图标 + 显示名称（文本上下文：图片图标用占位）。</summary>
+    public string DisplayName => $"{Views.PeerIconCodec.ForText(Icon)} {Name}";
 
     /// <summary>第二行：稳定 nodeId（缩略）。</summary>
     public string NodeIdShort => NodeId.Length <= 24 ? NodeId : NodeId[..24] + "…";
@@ -145,7 +145,8 @@ public sealed class A2AMemberItem : INotifyPropertyChanged
 {
     public required string NodeId { get; init; }
     public required string NodeIdShort { get; init; }
-    public required string DisplayName { get; init; }   // 图标 + 名称；本机成员带「（本机）」后缀
+    public required string DisplayName { get; init; }   // 纯名称文本；本机成员带「（本机）」后缀
+    public required string Icon { get; init; }          // 原始图标形态（emoji / img: / data:），供 PeerIconView 渲染
     public required string Role { get; init; }
 
     /// <summary>本机为群主且该成员不是自己时为 true：成员行悬停显示「踢出」按钮。</summary>
@@ -191,10 +192,12 @@ public sealed class A2AEventItem
     public required SessionEvent Event { get; init; }
     public string Time => Event.Timestamp.LocalDateTime.ToString("HH:mm:ss");
     public string SenderIcon => string.IsNullOrWhiteSpace(Event.SenderIcon) ? "🤖" : Event.SenderIcon!;
+
+    /// <summary>事件行文字前缀：图片头像无法嵌入文本，用占位 emoji。</summary>
+    public string Sender => $"{Views.PeerIconCodec.ForText(SenderIcon)} {SenderName}";
     public string SenderName => string.IsNullOrWhiteSpace(Event.SenderName)
         ? Event.SenderNodeId[..Math.Min(10, Event.SenderNodeId.Length)]
         : Event.SenderName!;
-    public string Sender => $"{SenderIcon} {SenderName}";
     public bool IsRemote => !string.Equals(Event.SenderName, A2ASessionViewModel.LocalDisplayName, StringComparison.Ordinal);
     public string Type => Event.Type.ToString();
     public string Content
@@ -267,6 +270,9 @@ public sealed class A2ASessionViewModel : INotifyPropertyChanged, IDisposable
     /// <summary>本机 Helper 显示名，用于区分事件流中的本机/远端发送主体。</summary>
     internal static string LocalDisplayName = "";
 
+    /// <summary>本机 Helper 图标（emoji 或 img:/data: 图片形态），供「本机 Helper」卡片渲染。</summary>
+    public string LocalIcon { get; private set; } = "🤖";
+
     private readonly A2AExtensionController _controller;
     private readonly string _sessionsFile;
     private readonly CancellationTokenSource _cts = new();
@@ -279,6 +285,7 @@ public sealed class A2ASessionViewModel : INotifyPropertyChanged, IDisposable
     {
         _controller = controller;
         LocalDisplayName = controller.Host?.Identity.Identity.DisplayName ?? controller.Config.DisplayName;
+        LocalIcon = controller.Config.Icon;   // 本机卡片头像原始形态（emoji / img:）
         _sessionsFile = Path.Combine(UiPrefs.WorkspaceDir(), "a2a", "helper-sessions.json");
         _controller.Changed += OnControllerChanged;
         // 群自动交流决策轨迹上状态栏（exe 启动时看不到 stderr，这是排障的唯一可见出口）
@@ -464,11 +471,11 @@ public sealed class A2ASessionViewModel : INotifyPropertyChanged, IDisposable
 
     public async Task PairAsync(A2APeerItem peer)
     {
-        Status = $"正在与 {peer.Icon} {peer.Name} 配对…（请在气泡/A2A 窗口确认验证码）";
+        Status = $"正在与 {Views.PeerIconCodec.ForText(peer.Icon)} {peer.Name} 配对…（请在气泡/A2A 窗口确认验证码）";
         try
         {
             await _controller.PairAsync(peer, _cts.Token);
-            Status = $"✅ 已与 {peer.Icon} {peer.Name} 完成配对";
+            Status = $"✅ 已与 {Views.PeerIconCodec.ForText(peer.Icon)} {peer.Name} 完成配对";
         }
         catch
         {
@@ -481,11 +488,11 @@ public sealed class A2ASessionViewModel : INotifyPropertyChanged, IDisposable
     /// <summary>单方面解除配对：通知对端 + 本端置为已解除；重新配对需重新双端确认。</summary>
     public async Task UnpairAsync(A2APeerItem peer)
     {
-        Status = $"正在解除与 {peer.Icon} {peer.Name} 的配对…";
+        Status = $"正在解除与 {Views.PeerIconCodec.ForText(peer.Icon)} {peer.Name} 的配对…";
         try
         {
             await _controller.UnpairAsync(peer, _cts.Token);
-            Status = $"已解除与 {peer.Icon} {peer.Name} 的配对（重新配对需双方再次确认）";
+            Status = $"已解除与 {Views.PeerIconCodec.ForText(peer.Icon)} {peer.Name} 的配对（重新配对需双方再次确认）";
         }
         catch
         {
@@ -558,10 +565,10 @@ public sealed class A2ASessionViewModel : INotifyPropertyChanged, IDisposable
         {
             var isSelf = member.NodeId == item.LocalNodeId;
             // 本机不在 Peers 资料库里（不会作为别人的 Peer 出现），直接取本机身份的图标+名称，避免回退成截断 nodeId
-            var selfIcon = string.IsNullOrWhiteSpace(_controller.Config.Icon) ? "🤖" : _controller.Config.Icon;
+            var icon = isSelf ? _controller.Config.Icon : _controller.CurrentPeerIcon(member.NodeId);
             var label = isSelf
-                ? $"{selfIcon} {_controller.Config.DisplayName}（本机）"
-                : item.ResolveMember?.Invoke(member.NodeId) ?? member.NodeId;
+                ? $"{_controller.Config.DisplayName}（本机）"
+                : _controller.CurrentPeerName(member.NodeId);   // 图标已由模板 PeerIconView 渲染，标签只留纯名称
             var online = isSelf;
             if (!isSelf && presences?.TryGetValue(member.NodeId, out var presence) == true
                 && presence?.Availability is PresenceAvailability.Online or PresenceAvailability.Away)
@@ -573,6 +580,7 @@ public sealed class A2ASessionViewModel : INotifyPropertyChanged, IDisposable
                 NodeId = member.NodeId,
                 NodeIdShort = Short(member.NodeId),
                 DisplayName = label,
+                Icon = icon,
                 Role = member.Role,
                 Online = online,
                 CanKick = isCoordinator && !isSelf
@@ -751,7 +759,7 @@ public sealed class A2ASessionViewModel : INotifyPropertyChanged, IDisposable
             {
                 var peer = peers.FirstOrDefault(x => x.NodeId == nodeId);
                 if (peer is null) return nodeId.Length > 12 ? nodeId[..12] + "…" : nodeId;
-                var icon = string.IsNullOrWhiteSpace(peer.Icon) ? "🤖" : peer.Icon!;
+                var icon = Views.PeerIconCodec.ForText(peer.Icon);
                 var name = string.IsNullOrWhiteSpace(peer.DisplayName) ? nodeId[..Math.Min(10, nodeId.Length)] : peer.DisplayName!;
                 return $"{icon} {name}";
             }

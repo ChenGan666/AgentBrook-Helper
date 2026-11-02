@@ -100,6 +100,15 @@ public partial class App : Application
                 else
                 {
                     IsQuitting = true;
+                    // 退出若被外部中止（其他应用阻止关机等），旗标不能永久残留——
+                    // 否则之后关闭对话窗会被误放行成真正关闭/退出。10 秒后自动复位。
+                    var resetTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
+                    resetTimer.Tick += (_, _) =>
+                    {
+                        resetTimer.Stop();
+                        IsQuitting = false;
+                    };
+                    resetTimer.Start();
                 }
             };
 

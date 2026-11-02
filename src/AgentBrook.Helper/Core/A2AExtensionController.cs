@@ -146,7 +146,7 @@ public sealed class A2AExtensionController : IAsyncDisposable
             {
                 DataDirectory = _dataDirectory,
                 DisplayName = string.IsNullOrWhiteSpace(Config.DisplayName) ? AssistantIdentity.Current : Config.DisplayName.Trim(),
-                Icon = Config.Icon,
+                Icon = Views.PeerIconCodec.ToWire(Config.Icon),   // img: → data-URL：对端才可解码渲染
                 ListenPort = Config.ListenPort,
                 BindToLoopback = false
             };
@@ -383,7 +383,7 @@ public sealed class A2AExtensionController : IAsyncDisposable
         SaveConfig();
         if (_host is not null)
         {
-            await _host.Identity.UpdateProfileAsync(_host.Identity.Identity.DisplayName, icon);
+            await _host.Identity.UpdateProfileAsync(_host.Identity.Identity.DisplayName, Views.PeerIconCodec.ToWire(icon));
         }
         Changed?.Invoke();
     }
@@ -417,7 +417,7 @@ public sealed class A2AExtensionController : IAsyncDisposable
         {
             NodeId = NodeId,
             DisplayName = string.IsNullOrWhiteSpace(Config.DisplayName) ? AssistantIdentity.Current : Config.DisplayName,
-            Icon = Config.Icon,
+            Icon = Views.PeerIconCodec.ToWire(Config.Icon),   // img: → data-URL
             AgentVersion = "Helper 3.0",
             Platform = Environment.OSVersion.ToString(),
             Models = models,

@@ -17,17 +17,19 @@ public sealed class SubAgentTools
     private readonly string _workspaceRoot;
     private readonly Func<(string Model, IChatClient Client)> _resolveClient;
     private readonly MediaGenerateTools? _mediaTools;
+    private readonly Func<string, string>? _restore;
     private int _running;
 
     private const int MaxResultChars = 8_000;
     private static readonly TimeSpan DelegateTimeout = TimeSpan.FromMinutes(8);
 
     public SubAgentTools(string workspaceRoot, Func<(string Model, IChatClient Client)> resolveClient,
-        MediaGenerateTools? mediaTools = null)
+        MediaGenerateTools? mediaTools = null, Func<string, string>? restore = null)
     {
         _workspaceRoot = workspaceRoot;
         _resolveClient = resolveClient;
         _mediaTools = mediaTools;
+        _restore = restore;
     }
 
     [Description("把一个复杂子任务委派给子Agent独立完成（文献调研、多文件梳理、长报告撰写、批量整理等）。" +
@@ -68,6 +70,7 @@ public sealed class SubAgentTools
 
             var response = await agent.RunAsync(prompt, cancellationToken: timeoutCts.Token);
             var answer = response.Text ?? "";
+            answer = _restore?.Invoke(answer) ?? answer;   // 脱敏标记还原（子 Agent 输出直接进主回合历史与展示预览）
             if (answer.Length > MaxResultChars)
             {
                 answer = answer[..MaxResultChars] + "\n…（子Agent结论过长已截断，完整产出见其产出目录）";

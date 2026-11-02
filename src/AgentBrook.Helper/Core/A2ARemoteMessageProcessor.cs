@@ -117,7 +117,7 @@ public sealed class A2ARemoteMessageProcessor
         {
             c.SetRemoteBusy(true);
             var interaction = c.AddInteraction(A2AInteractionKind.RemoteTask,
-                $"收到 {args.SenderIcon} {args.SenderDisplayName ?? args.SenderNodeId[..Math.Min(10, args.SenderNodeId.Length)]} 的远程请求",
+                $"收到 {PeerIconCodec.ForText(args.SenderIcon)} {args.SenderDisplayName ?? args.SenderNodeId[..Math.Min(10, args.SenderNodeId.Length)]} 的远程请求",
                 text.Length > 120 ? text[..120] + "…" : text,
                 sessionId: args.SessionId);
 
@@ -134,7 +134,7 @@ public sealed class A2ARemoteMessageProcessor
 
             await SendReplyAsync(c, args.SenderNodeId, args.SessionId, result);
             c.AddInteraction(A2AInteractionKind.RemoteTask,
-                $"已回复 {args.SenderIcon} {args.SenderDisplayName ?? ""}".TrimEnd(),
+                $"已回复 {PeerIconCodec.ForText(args.SenderIcon)} {args.SenderDisplayName ?? ""}".TrimEnd(),
                 result.Length > 200 ? result[..200] + "…" : result,
                 sessionId: args.SessionId);
         }
@@ -157,7 +157,7 @@ public sealed class A2ARemoteMessageProcessor
 
     private async Task<string> ProcessAsync(A2AExtensionController c, string senderNodeId, string sessionId, string text)
     {
-        var senderLabel = $"{c.CurrentPeerIcon(senderNodeId)} {c.CurrentPeerName(senderNodeId)}";
+        var senderLabel = $"{PeerIconCodec.ForText(c.CurrentPeerIcon(senderNodeId))} {c.CurrentPeerName(senderNodeId)}";
         // 等同用户下发指令：使用主 Agent 的完整工具面与当前激活模型——能力与主对话完全一致。
         var (model, client) = _assistant.Agent!.ResolveActiveClient();
         var tools = _assistant.Agent!.ToolSet;
@@ -348,6 +348,8 @@ public sealed class A2ARemoteMessageProcessor
         }
 
         answer = StripLeakedToolMarkup(answer.Trim());
+        // 脱敏标记还原：远程请求经同一脱敏管线，出站答复必须先还原再发送（对端无从解析本地标记）
+        answer = _assistant.Agent?.PluginManager?.RestoreDisplayText(answer) ?? answer;
         if (string.IsNullOrWhiteSpace(answer))
         {
             return "已收到消息，但本机未能生成有效回复，请稍后重试或换一种说法。";
@@ -396,7 +398,7 @@ public sealed class A2ARemoteMessageProcessor
                 host, args.SenderNodeId, args.SessionId, announcement);
 
             var interaction = c.AddInteraction(A2AInteractionKind.FileReceive,
-                $"收到 {args.SenderIcon} {args.SenderDisplayName ?? ""} 的文件：{descriptor.Name}".TrimEnd(),
+                $"收到 {PeerIconCodec.ForText(args.SenderIcon)} {args.SenderDisplayName ?? ""} 的文件：{descriptor.Name}".TrimEnd(),
                 $"大小 {descriptor.Size} 字节 · SHA256 校验通过 · 已存入隔离区（artifactId {descriptor.ArtifactId[..Math.Min(12, descriptor.ArtifactId.Length)]}…）",
                 sessionId: args.SessionId);
             if (interaction is not null) interaction.State = A2AInteractionState.Accepted;
@@ -410,7 +412,7 @@ public sealed class A2ARemoteMessageProcessor
             Console.Error.WriteLine($"[a2a-remote] 文件接收失败：{ex}");
             await SendReplyAsync(c, args.SenderNodeId, args.SessionId, $"⚠️ 文件接收失败：{ex.Message}");
             c.AddInteraction(A2AInteractionKind.FileReceive,
-                $"收到 {args.SenderIcon} {args.SenderDisplayName ?? ""} 的文件（接收失败）",
+                $"收到 {PeerIconCodec.ForText(args.SenderIcon)} {args.SenderDisplayName ?? ""} 的文件（接收失败）",
                 ex.Message, sessionId: args.SessionId);
         }
     }

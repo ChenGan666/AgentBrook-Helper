@@ -42,6 +42,9 @@ public abstract record BrookEvent
     /// <summary>一个回合结束（最终回答已完整输出）。</summary>
     public sealed record TurnCompleted() : BrookEvent;
 
+    /// <summary>本回合任务产物已采集完成（有产物才发出；宿主在最终回复底部渲染产物卡）。</summary>
+    public sealed record ArtifactsReady(Infrastructure.TaskArtifacts Artifacts) : BrookEvent;
+
     /// <summary>本回合出站脱敏徽标（T5.3）：挂在用户气泡旁，悬停看模型实际收到的脱敏后文本。
     /// IconPath = 插件包内 icon.png（不存在时 UI 回退 emoji）。</summary>
     public sealed record MaskingBadge(int MaskedCount, string? MaskedPreview, bool ImagesPresent, string? IconPath) : BrookEvent;

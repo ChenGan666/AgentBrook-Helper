@@ -5,10 +5,11 @@ using AgentBrook.Agent.Infrastructure;
 namespace AgentBrook.Agent.Tools;
 
 /// <summary>工作区沙箱内的文件读写工具（所有路径都被限制在 workspace 根目录内）。</summary>
-public sealed class FileTools(Workspace workspace, int maxOutputChars)
+public sealed class FileTools(Workspace workspace, int maxOutputChars, Action<string>? onWrite = null)
 {
     private readonly Workspace _workspace = workspace;
     private readonly int _maxOutputChars = maxOutputChars;
+    private readonly Action<string>? _onWrite = onWrite;   // 产物采集：每次落盘登记绝对路径
 
     [Description("列出工作区内目录的内容。path 相对工作区根目录，默认列出根目录。")]
     public string list_dir([Description("目录相对路径，如 notes 或 .")] string path = ".")
@@ -91,6 +92,7 @@ public sealed class FileTools(Workspace workspace, int maxOutputChars)
         var full = _workspace.ResolveInside(path);
         Directory.CreateDirectory(Path.GetDirectoryName(full)!);
         await File.WriteAllTextAsync(full, content, Encoding.UTF8);
+        _onWrite?.Invoke(full);
         return $"已写入 {Path.GetRelativePath(_workspace.Root, full)}（{content.Length:N0} 字符）。";
     }
 
@@ -101,7 +103,8 @@ public sealed class FileTools(Workspace workspace, int maxOutputChars)
     {
         var full = _workspace.ResolveInside(path);
         Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        await File.AppendAllTextAsync(full, content, Encoding.UTF8);
+        await File.AppendAllTextAsync(full, content);
+        _onWrite?.Invoke(full);
         return $"已追加 {content.Length:N0} 字符到 {Path.GetRelativePath(_workspace.Root, full)}。";
     }
 }

@@ -363,6 +363,8 @@ public sealed class GroupAutoTalkProcessor
             }
 
             answer = A2ARemoteMessageProcessor.StripLeakedToolMarkup(answer.Trim());
+            // 脱敏标记还原：出站群消息必须先还原再广播（群内成员无法解析本地标记）
+            answer = _assistant.Agent?.PluginManager?.RestoreDisplayText(answer) ?? answer;
             if (string.IsNullOrWhiteSpace(answer))
             {
                 return;   // 沉默也是合法收尾

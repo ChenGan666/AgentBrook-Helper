@@ -1,6 +1,7 @@
 ﻿<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="using:AgentBrook.Helper.Windows" xmlns:core="using:AgentBrook.Helper.Core"
+xmlns:views="using:AgentBrook.Helper.Views"
         x:Class="AgentBrook.Helper.Windows.A2ASessionWindow"
         x:DataType="local:A2ASessionViewModel"
         RequestedThemeVariant="Dark"
@@ -49,7 +50,10 @@
           <Border Background="#292929" CornerRadius="9" Padding="10">
             <StackPanel Spacing="3">
               <TextBlock x:Name="LocalHelperText" Text="本机 Helper" FontWeight="SemiBold" Foreground="#eeeeee"/>
-              <TextBlock FontSize="20" HorizontalAlignment="Left">🤖 <Run Text="{Binding DisplayName}"/></TextBlock>
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <views:PeerIconView Icon="{Binding LocalIcon}" Size="20" VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding DisplayName}" FontSize="20" HorizontalAlignment="Left" VerticalAlignment="Center"/>
+              </StackPanel>
               <TextBlock Text="{Binding NodeId}" FontSize="10" Foreground="#777777" TextTrimming="CharacterEllipsis"/>
             </StackPanel>
           </Border>
@@ -59,7 +63,10 @@
               <ListBox.ItemTemplate><DataTemplate x:DataType="local:A2APeerItem">
                 <Grid ColumnDefinitions="*,Auto">
                   <StackPanel Spacing="1">
-                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" Foreground="#e8eef5"/>
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <views:PeerIconView Icon="{Binding Icon}" Size="16" VerticalAlignment="Center"/>
+                      <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="#e8eef5" VerticalAlignment="Center"/>
+                    </StackPanel>
                     <TextBlock Text="{Binding NodeIdShort}" FontSize="10" Foreground="#6f7b88" TextTrimming="CharacterEllipsis"/>
                     <TextBlock Text="{Binding Summary}" FontSize="11" Foreground="#8d9bad"/>
                   </StackPanel>
@@ -134,7 +141,10 @@
             <Border Background="#252525" CornerRadius="9" Padding="11,8" Margin="0,3">
               <Grid ColumnDefinitions="Auto,Auto,*" RowDefinitions="Auto,Auto,Auto">
                 <TextBlock Text="{Binding Time}" FontSize="11" Foreground="#777777" Margin="0,0,10,0"/>
-                <TextBlock Grid.Column="1" Text="{Binding Sender}" FontSize="11" FontWeight="SemiBold" Foreground="#9ecbff" Margin="0,0,10,0"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="5" VerticalAlignment="Center" Margin="0,0,10,0">
+                  <views:PeerIconView Icon="{Binding SenderIcon}" Size="16" VerticalAlignment="Center"/>
+                  <TextBlock Text="{Binding SenderName}" FontSize="11" FontWeight="SemiBold" Foreground="#9ecbff" VerticalAlignment="Center"/>
+                </StackPanel>
                 <TextBlock Grid.Column="2" Text="{Binding Type}" FontSize="11" Foreground="#78b7ff"/>
                 <TextBlock Grid.Row="1" Grid.ColumnSpan="3" Text="{Binding Content}" TextWrapping="Wrap" Foreground="#e2e2e2" Margin="0,5,0,0"/>
                 <!-- 附件芯片：文件传输事件显示，点击用系统默认程序打开本机文件 -->
@@ -166,9 +176,12 @@
                 <ListBox.ItemTemplate>
                   <DataTemplate x:DataType="local:A2AMemberItem">
                     <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,2" ToolTip.Tip="{Binding NodeId}">
-                      <StackPanel Spacing="1">
-                        <TextBlock Text="{Binding DisplayName}" Foreground="#e8eef5" TextTrimming="CharacterEllipsis"/>
-                        <TextBlock Text="{Binding NodeIdShort}" FontSize="10" Foreground="#6f7b88" TextTrimming="CharacterEllipsis"/>
+                      <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+                        <views:PeerIconView Icon="{Binding Icon}" Size="20" VerticalAlignment="Center"/>
+                        <StackPanel Spacing="1">
+                          <TextBlock Text="{Binding DisplayName}" Foreground="#e8eef5" TextTrimming="CharacterEllipsis"/>
+                          <TextBlock Text="{Binding NodeIdShort}" FontSize="10" Foreground="#6f7b88" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
                       </StackPanel>
                       <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
                         <TextBlock Text="{Binding RoleText}" FontSize="10" Foreground="#78b7ff" HorizontalAlignment="Right"/>
@@ -258,7 +271,7 @@
             <DataTemplate x:DataType="local:MentionItem">
               <Panel>
                 <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                  <TextBlock Text="{Binding Icon}" FontSize="14" VerticalAlignment="Center"/>
+                  <views:PeerIconView Icon="{Binding Icon}" Size="16" VerticalAlignment="Center"/>
                   <TextBlock Text="{Binding Display}" FontSize="13" Foreground="#e6e6e6" VerticalAlignment="Center"/>
                 </StackPanel>
                 <TextBlock Text="{Binding StatusText}" FontSize="11" Foreground="#9a9a9a"

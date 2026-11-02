@@ -63,6 +63,10 @@ AgentBrook Helper 是一个真正跑在你机器上的 AI 智能体的桌面客�
 
 模型选择器旁有一个 🎬 多媒体下拉，列出各供应商提供的图像与视频模型——类型信息来自拉取的模型列表元数据，媒体模型与对话模型互不混选。选中后直接开口即可：智能体自动组装提示词与模型所需参数调用 `media_generate`——图像走同步接口即时返回，视频等耗时任务提交异步任务并轮询（最长五分钟，仍在执行的会交回任务 ID，之后可随时续查而不重复提交）；结果直接呈现在气泡里，图片内联显示、视频/音频以可播放卡片呈现。委派出去的子智能体同样能生成媒体；改用当前所选之外的其他媒体模型会先征求你的授权。
 
+### 任务产物：可点击打开的交付文件
+
+回合产生文件时，助手最终回复底部会出现「任务产物」卡片——任务工作目录 + 最终交付文件清单，每项一键直达。交付文件由智能体调用 `register_artifact` 登记（路径 + 一句话用途）；`media_generate` 产生的链接自动登记。产物随会话持久化，历史回放同样还原产物卡片——即使回合中途出错，已产出的部分也会保留。交付文件统一放在任务目录的 `deliverables/` 子目录（`tasks/<日期>-<任务名>/`），与中间文件、日志隔离。
+
 ### 隐私脱敏：敏感信息不出门（插件，可选安装）
 
 发送给大模型之前，真实姓名、机构、电话、地址、证件号等敏感信息会被自动替换为形如 `[PERSON_1]` 的占位符；模型回复展示前，系统再把占位符完整还原为真实值——模型全程只见占位符，真实数据不出本机。内置 11 类规则（手机号 / 邮箱 / 证件号 / 银行卡 / 车牌 / IP / 网址 / 护照等，带校验位复算）；可选下载本地识别模型（约 97MB，离线推理）覆盖词典外的人名等实体。每条回复旁有「🛡 已脱敏 N 处」徽标，悬停可查看模型实际收到的文本。敏感词典支持任意自定义类别（如 API Key、SECRET）与 CSV 批量导入导出；白名单让特定内容原样通过；识别类别可逐类开关，失败时默认中止发送（绝不让原文出门）。以插件形式按需安装，支持热插拔。
@@ -73,7 +77,7 @@ AgentBrook Helper 是一个真正跑在你机器上的 AI 智能体的桌面客�
 
 ### 随时打断、排队与多会话
 
-回合进行中发送按钮变成停止键（按 Esc 同样有效），已完成的部分保留；忙碌时继续输入会自动排队，回合结束后逐条发送。多会话由顶栏切换器管理：会话按首条消息自动命名，「新对话」归档旧会话而不是清空历史，切换后回放最近的对话——继续向上滚动会一路加载更早的消息，直到会话存档开头——上下文与前情摘要一起跟随。任何会话都能一键把成果沉淀为 `session-` 前缀技能——其他会话 `load_skill` 即可复用这些结论与产出，会话删除后技能依然保留。
+回合进行中发送按钮变成停止键（按 Esc 同样有效），已完成的部分保留；忙碌时继续输入会自动排队，回合结束后逐条发送。回合失败时（网络中断、服务端超时等）错误卡片直接带「重试」按钮，原样重发你的消息；余额不足/卡失效的提示里，重试与充值入口并排——充值完原地重新执行。多会话由顶栏切换器管理：会话按首条消息自动命名，「新对话」归档旧会话而不是清空历史，切换后回放最近的对话——继续向上滚动会一路加载更早的消息，直到会话存档开头——上下文与前情摘要一起跟随。任何会话都能一键把成果沉淀为 `session-` 前缀技能——其他会话 `load_skill` 即可复用这些结论与产出，会话删除后技能依然保留。
 
 ### 上下文按需加载
 
@@ -89,7 +93,7 @@ AgentBrook Helper 是一个真正跑在你机器上的 AI 智能体的桌面客�
 
 已内置一个行业协作场景示范：多个 Helper 扮演不同部门，自动完成销售日报的签名填报、幂等去重与每日聚合、周报协调。
 
-局域网内在线且已配对的 Helper 还会以小头像的形式叠放在主气泡下方——最多三个，更多则以「+N」汇总；悬停即展开成环形，悬停头像可见名称与状态（在线、离开、忙碌、等待用户……），点击头像直达与该 Helper 的会话。
+局域网内在线且已配对的 Helper 还会以小头像的形式叠放在主气泡下方——最多三个，更多则以「+N」汇总；悬停即展开成环形，悬停头像可见名称与状态（在线、离开、忙碌、等待用户……），点击头像直达与该 Helper 的会话。图标不再局限于 emoji：设置 → 通用里可选自定义图片，并在内置头像制作器中裁切（拖动定位、滑杆缩放、导出 64×64）——你的图标随消息一起出去，对方那边同样能看到。
 
 ### Token卡：24 小时试用与即充即用
 
@@ -215,7 +219,7 @@ cd src/AgentBrook.Agent && dotnet run
 
 ## 内置工具
 
-核心内置约 56 个工具，按能力面分组：
+核心内置约 57 个工具，按能力面分组：
 
 | 能力面 | 工具 |
 |---|---|
@@ -226,6 +230,7 @@ cd src/AgentBrook.Agent && dotnet run
 | **MCP** | `mcp_list_servers` `mcp_add_server` `mcp_call` `mcp_tool_help` —— 外加已配置服务器暴露的全部工具 |
 | **团队** | `start_project` `spawn_worker` `assign_task` `send_message` `broadcast_to_workers` `list_workers` `read_shared` `check_messages` |
 | **媒体** | `media_generate` —— 经所选多模态模型生成图片/视频/音频（异步任务提交+轮询；跨模型调用需授权） |
+| **产物** | `register_artifact` —— 登记交付文件（路径 + 用途），在最终回复底部的产物卡片中展示 |
 | **交互** | `ask_user` —— 挂起当前回合，等一个真实回答 |
 | **A2A 协作** | `a2a_status` `a2a_list_peers` `a2a_pair` `a2a_send_message` `a2a_send_all` `a2a_send_file` `a2a_create_group` `a2a_group_send` `a2a_group_rename` `a2a_list_groups` `a2a_report_daily_sales` —— 局域网发现、配对、消息、文件、群组与行业协作场景 |
 
@@ -240,7 +245,8 @@ AgentBrook-Helper/
     ├── AgentBrook.Agent.Core/       ← 智能体内核（所有宿主共用）
     │   ├── BrookAgent.cs            ← 事件驱动智能体，RunAsync 产出 BrookEvent 流
     │   ├── IBrookInteraction.cs     ← HITL 抽象（审批 / ask_user）
-    │   ├── Infrastructure/          ← 工作区沙箱、AgentFactory、ProviderSettings
+    │   ├── Infrastructure/          ← 工作区沙箱、AgentFactory、ProviderSettings、
+    │   │                              产物采集器、工作区临时目录清扫
     │   ├── Memory/  Skills/  Tools/  Team/  Mcp/  Configuration/
     ├── AgentBrook.Agent/            ← 控制台宿主（REPL）
     ├── AgentBrook.A2A.Core/         ← A2A 协议内核：Peer/Group 会话、事件账本、节点身份
@@ -254,9 +260,11 @@ AgentBrook-Helper/
         ├── Windows/                 ← 全部窗口：BubbleWindow（按职责拆 7 个 partial：磁吸/命中/
         │                              轨道/伙伴环/定位/Toast/视觉）、MainWindow（聊天流/@ 提记/
         │                              审批卡片）、ModelSettingsWindow、OnboardingWindow、
-        │                              A2ASessionWindow（A2A 会话中心）、WindowBase
+        │                              A2ASessionWindow（A2A 会话中心）、AvatarMakerWindow（头像制作）、
+        │                              WindowBase
         ├── Views/                   ← 对话流控件：MarkdownView（自研渲染器）、MediaBlock、
-        │                              InteractionCard、LanPeerBubbles
+        │                              InteractionCard、ArtifactPanel（任务产物卡）、
+        │                              PeerIconView（emoji/图片图标）、LanPeerBubbles
         ├── Support/                 ← 三语 I18n、ModelCatalog、AutoStart、UiPrefs、
         │                              ClientFingerprint（试用卡防重复）、NotifySound
         ├── Environment/             ← 环境检测与一键修复
