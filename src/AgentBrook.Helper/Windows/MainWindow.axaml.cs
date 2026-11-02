@@ -3264,7 +3264,7 @@ public partial class MainWindow : Window
     /// <summary>重建附件预览条（图片缩略 + 名称 + 移除）。</summary>
     private void RenderAttachmentBar()
     {
-        var bar = this.FindControl<StackPanel>("AttachmentBar");
+        var bar = this.FindControl<WrapPanel>("AttachmentBar");
         if (bar is null)
         {
             return;

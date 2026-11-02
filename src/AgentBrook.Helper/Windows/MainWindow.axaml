@@ -284,7 +284,7 @@
             <Border x:Name="InputCardBorder" CornerRadius="16" Background="#292929" BorderBrush="#3a3a3a"
                     BorderThickness="1" Padding="14,8,10,8">
                 <Grid RowDefinitions="Auto,*,Auto" RowSpacing="4">
-                    <StackPanel Grid.Row="0" x:Name="AttachmentBar" Orientation="Horizontal"
+                    <WrapPanel Grid.Row="0" x:Name="AttachmentBar" Orientation="Horizontal"
                                 Spacing="6" IsVisible="False"/>
                     <!-- 排队列表：一条消息一个块，逐条可删/可插队；多条时输入区自然增高 -->
                     <StackPanel Grid.Row="0" x:Name="QueueList" Spacing="4" Margin="0,0,0,2"
