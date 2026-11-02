@@ -19,7 +19,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-VERSION="${VERSION:-1.0.14}"   # 模型组标题置空（行内标签不重复）；对话框 controls 补列号
+VERSION="${VERSION:-1.0.15}"   # 图标资源：icon.png（64×64）随包分发，宿主列表/徽标显示
 PROJ="src/AgentBrook.Plugin.PrivacyMasking/AgentBrook.Plugin.PrivacyMasking.csproj"
 PUBLISH_BASE="${PUBLISH_BASE:-$(pwd)/src/publish}"
 PLUGIN_OUT="$PUBLISH_BASE/updated/plugin/privacy-masking/$VERSION"
@@ -74,7 +74,7 @@ with open(os.path.join(plugin_out, "manifest.json"), "w", encoding="utf-8") as f
 
 packages = {r: {"url": f"privacy-masking/{version}/privacy-masking-{version}-{r}.zip", "sha256": h, "size": s}
             for r, h, s in zip(rids, shas, sizes)}
-entry = {"id": "privacy-masking", "name": "Privacy Masking", "latest": version, "minHost": "1.1.0",
+entry = {"id": "privacy-masking", "name": "Privacy Masking", "latest": version, "minHost": "1.1.0", "icon": "🛡",
          "capabilities": ["chat-client-decorator", "settings-contributor"],
          "modelsUrl": "privacy-masking/models/models.json", "packages": packages}
 with open(os.path.join(plugin_out, "index.entry.json"), "w", encoding="utf-8") as f:

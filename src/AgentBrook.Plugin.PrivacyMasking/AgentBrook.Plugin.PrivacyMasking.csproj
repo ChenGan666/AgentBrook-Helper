@@ -8,6 +8,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Include="icon.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- 契约（宿主加载，回退共享） -->
     <ProjectReference Include="..\AgentBrook.Plugin.Abstractions\AgentBrook.Plugin.Abstractions.csproj" />
   </ItemGroup>

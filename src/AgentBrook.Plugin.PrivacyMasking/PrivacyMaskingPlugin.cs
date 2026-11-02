@@ -39,7 +39,7 @@ public sealed class PrivacyMaskingPlugin : IHelperPlugin, IChatClientDecorator, 
 
     public string Id => "privacy-masking";
     public string DisplayName => "隐私脱敏";
-    public string Version => "1.0.14";
+    public string Version => "1.0.15";
     public string Icon => "🛡";
 
     public async Task InitializeAsync(IPluginHostContext host, CancellationToken cancellationToken = default)
