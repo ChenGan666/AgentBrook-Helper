@@ -10,6 +10,7 @@ using Avalonia.Controls;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using System.Diagnostics;
 using System.Net.Http;
@@ -539,11 +540,22 @@ public partial class SettingsWindow : WindowBase
                 Background = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#252525")),
             };
             // 单行布局：名称（左） + 开关 / 设置 / 卸载（右，垂直居中）
+            var iconPath = plugins.GetIconPath(id);   // 插件包内 icon.png（约定）；无则不显示图标
             var row = new Grid
             {
-                ColumnDefinitions = new Avalonia.Controls.ColumnDefinitions("*,Auto,Auto,Auto"),
+                ColumnDefinitions = new Avalonia.Controls.ColumnDefinitions("Auto,*,Auto,Auto,Auto"),
                 ColumnSpacing = 10,
             };
+            if (iconPath is not null)
+            {
+                var iconImage = new Image
+                {
+                    Source = new Bitmap(iconPath),
+                    Width = 20, Height = 20,
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                };
+                row.Children.Add(iconImage);   // col 0
+            }
             row.Children.Add(new TextBlock
             {
                 Text = $"{id} · {entry.Version}",
@@ -558,7 +570,7 @@ public partial class SettingsWindow : WindowBase
                 OnContent = "",
                 VerticalContentAlignment = Avalonia.Layout.VerticalAlignment.Center,
             };
-            Grid.SetColumn(toggle, 1);
+            Grid.SetColumn(toggle, 2);
             toggle.IsCheckedChanged += async (_, _) =>
             {
                 try { await plugins.SetEnabledAsync(id, toggle.IsChecked == true); }
@@ -582,14 +594,14 @@ public partial class SettingsWindow : WindowBase
                 settingsBtn.Click += (_, _) =>
                 {
                     ClosePluginDialog();
-                    var dialog = new PluginSettingsDialog(id, id, contributor);
+                    var dialog = new PluginSettingsDialog(id, id, contributor, plugins.GetIconPath(id));
                     dialog.Build();
                     dialog.Closed += (_, _) => { if (_openPluginDialog == dialog) _openPluginDialog = null; };
                     _openPluginDialog = dialog;
                     // 模态：弹出后设置窗口不可点（ShowDialog 非阻塞，返回 Task 不 await）
                     _ = dialog.ShowDialog(this);
                 };
-                Grid.SetColumn(settingsBtn, 2);
+                Grid.SetColumn(settingsBtn, 3);
                 row.Children.Add(settingsBtn);
             }
             var uninstallBtn = new Button
@@ -612,7 +624,7 @@ public partial class SettingsWindow : WindowBase
                     SetPluginStatus(ex.Message);
                 }
             };
-            Grid.SetColumn(uninstallBtn, 3);
+            Grid.SetColumn(uninstallBtn, 4);
             row.Children.Add(uninstallBtn);
 
             card.Child = row;

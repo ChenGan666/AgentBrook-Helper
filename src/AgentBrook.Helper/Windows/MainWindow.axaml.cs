@@ -1720,13 +1720,30 @@ public partial class MainWindow : Window
         {
             return;
         }
-        var chip = new TextBlock
+        var chipStack = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
+        if (!string.IsNullOrEmpty(badge.IconPath) && File.Exists(badge.IconPath))
+        {
+            try
+            {
+                chipStack.Children.Add(new Image
+                {
+                    Source = new Bitmap(badge.IconPath),
+                    Width = 14, Height = 14,
+                    VerticalAlignment = VerticalAlignment.Center,
+                });
+            }
+            catch { }
+        }
+        // 无 icon.png → 不显示图标（用户规则：有图用图，无图不显示 emoji）
+        chipStack.Children.Add(new TextBlock
         {
             Text = I18n.T("ui.privacy.badge", badge.MaskedCount)
                 + (badge.ImagesPresent ? " " + I18n.T("ui.privacy.badge.images") : ""),
             FontSize = 11.5,
+            VerticalAlignment = VerticalAlignment.Center,
             Foreground = new SolidColorBrush(Color.Parse("#7fbf7f")),
-        };
+        });
+        var chip = new Border { Child = chipStack, VerticalAlignment = VerticalAlignment.Center };
         if (!string.IsNullOrEmpty(badge.MaskedPreview))
         {
             var tip = new StackPanel { Spacing = 4, MaxWidth = 460 };

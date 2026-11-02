@@ -34,13 +34,21 @@ public partial class BubbleWindow
             MaxWidth = 228,
         };
         var stack = new StackPanel { Spacing = 6 };
-        stack.Children.Add(new TextBlock
+        // 内容过长时出滚动条（上限高度内可滚动阅读，不再截断）
+        var scroll = new ScrollViewer
+        {
+            MaxHeight = 260,
+            VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+        };
+        scroll.Content = new TextBlock
         {
             Text = text,
             FontSize = 12.5,
             TextWrapping = TextWrapping.Wrap,
             Foreground = Brushes.White,
-        });
+        };
+        stack.Children.Add(scroll);
         if (actions is not null)
         {
             var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right };

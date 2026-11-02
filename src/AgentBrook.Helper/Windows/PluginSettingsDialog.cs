@@ -33,10 +33,16 @@ public sealed class PluginSettingsDialog : WindowBase
 
     private sealed record TermRow(long Id, string Category, string Term, bool Enabled, string Source);
 
-    public PluginSettingsDialog(string pluginId, string displayName, ISettingsContributor contributor)
+    public PluginSettingsDialog(string pluginId, string displayName, ISettingsContributor contributor,
+        string? iconPath = null)
     {
         _pluginId = pluginId;
         _contributor = contributor;
+
+        if (!string.IsNullOrEmpty(iconPath) && File.Exists(iconPath))
+        {
+            try { Icon = new WindowIcon(iconPath); } catch { }
+        }
 
         Title = $"{displayName} · {I18n.T("ui.plugins.settings")}";
 
