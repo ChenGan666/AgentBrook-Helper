@@ -1,4 +1,5 @@
-﻿using AgentBrook.Helper.Support;
+﻿using System.IO;
+using AgentBrook.Helper.Support;
 using AgentBrook.Helper.Core;
 using AgentBrook.Helper.Views;
 using AgentBrook.Agent;
@@ -6,6 +7,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using Avalonia.Animation;
 using Avalonia.Animation.Easings;
 using Avalonia.Threading;
@@ -38,7 +40,15 @@ public partial class BubbleWindow
                 case BrookEvent.ToolCompleted tc:
                     RemoveOrbit(tc.Name);
                     break;
+                case BrookEvent.PluginsInvoked pi:
+                    // v1.1：回合启用的插件 → 插件图标上轨（名称前展示；最少 3 秒，回合结束渐隐）
+                    foreach (var pid in pi.Ids)
+                    {
+                        AddPluginOrbit(pid);
+                    }
+                    break;
                 case BrookEvent.TurnCompleted or BrookEvent.Failed:
+                    SchedulePluginOrbitClear();   // 插件图标最少展示 3 秒再渐隐（不足 3 秒的短回合也满足）
                     ClearOrbits();   // 回合兜底清理（异常路径也有 ToolCompleted 配对，这里是保险）
                     break;
             }
@@ -77,6 +87,82 @@ public partial class BubbleWindow
         LayoutOrbit();
         UpdateWindowLayoutMode();   // 有轨道时退出紧凑模式；必须在入列之后调用——退出判定基于"轨道非空"，放前面首个图标会拿到空轨道而留在紧凑窗口，轨道图标被窗口边缘裁剪
         StartOrbitTimer();
+    }
+
+    /// <summary>
+    /// 插件图标上轨（v1.1）：芯片内容 = 插件包 icon.png（回退 Icon emoji），key = "plugin:{id}"。
+    /// 最少展示 3 秒：回合结束 ClearOrbits 时插件芯片改走 3 秒延迟渐隐（见 SchedulePluginOrbitClear）。
+    /// </summary>
+    private void AddPluginOrbit(string pluginId)
+    {
+        var key = "plugin:" + pluginId;
+        if (_orbit.Any(o => o.Tool == key))
+        {
+            return;   // 同插件重复发起（多轮工具调用）不叠加
+        }
+        var pm = _controller.Agent?.PluginManager;
+        var iconPath = pm?.GetIconPath(pluginId);
+        var emoji = pm?.GetPluginIcon(pluginId) ?? "";
+
+        var (iconKey, color) = OrbitStyle(pluginId);
+        var chip = new Border
+        {
+            Width = OrbitChipSize,
+            Height = OrbitChipSize,
+            CornerRadius = new CornerRadius(OrbitChipSize / 2),
+            Background = new SolidColorBrush(Color.Parse(color)),
+            BorderBrush = new SolidColorBrush(Color.Parse("#ffffff")),
+            BorderThickness = new Thickness(1.2),
+            IsHitTestVisible = false,
+        };
+        if (!string.IsNullOrEmpty(iconPath) && File.Exists(iconPath))
+        {
+            chip.Child = new Image
+            {
+                Source = new Bitmap(iconPath),
+                Width = OrbitChipSize - 8,
+                Height = OrbitChipSize - 8,
+            };
+        }
+        else if (!string.IsNullOrEmpty(emoji))
+        {
+            chip.Child = new TextBlock
+            {
+                Text = emoji,
+                FontSize = 13,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+        }
+        _orbit.Add(new OrbitItem(key, chip));
+        _orbitLayer.Children.Add(chip);
+        LayoutOrbit();
+        UpdateWindowLayoutMode();
+        StartOrbitTimer();
+    }
+
+    /// <summary>移除插件芯片（key = "plugin:{id}"）。</summary>
+    private void RemovePluginOrbit(string pluginId) => RemoveOrbit("plugin:" + pluginId);
+
+    /// <summary>回合结束时插件芯片延迟 3 秒渐隐（满足"最少展示 3 秒"；期间新回合会重新上轨）。</summary>
+    private void SchedulePluginOrbitClear()
+    {
+        var pluginKeys = _orbit.Where(o => o.Tool.StartsWith("plugin:", StringComparison.Ordinal))
+            .Select(o => o.Tool).ToList();
+        if (pluginKeys.Count == 0)
+        {
+            return;
+        }
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            foreach (var key in pluginKeys)
+            {
+                RemoveOrbit(key.StartsWith("plugin:", StringComparison.Ordinal) ? key["plugin:".Length..] : key);
+            }
+        };
+        timer.Start();
     }
 
     private void RemoveOrbit(string tool)

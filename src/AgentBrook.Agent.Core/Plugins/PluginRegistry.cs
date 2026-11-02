@@ -61,6 +61,10 @@ public sealed class PluginRegistry
     public T? GetCapability<T>() where T : class, IPluginCapability =>
         _loaded.Values.FirstOrDefault(l => l.Enabled && l.Plugin is T)?.Plugin as T;
 
+    /// <summary>当前已启用插件的 id 清单（回合开始时宿主经事件告知 UI）。</summary>
+    public IReadOnlyList<string> EnabledIds() =>
+        _loaded.Values.Where(l => l.Enabled).Select(l => l.Plugin.Id).ToList();
+
     /// <summary>聚合所有已启用插件的聊天客户端装饰器（按注册序依次包装）；无装饰器 → null。</summary>
     public Func<IChatClient, IChatClient>? BuildChatClientPipeline()
     {

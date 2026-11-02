@@ -1140,6 +1140,13 @@ public sealed class BrookAgent : IAsyncDisposable
                       $"（估算 {compacted.EstimatedTokensBefore / 1000}K → {compacted.EstimatedTokensAfter / 1000}K tokens），最近对话保留", null);
         }
 
+        // v1.1：本回合启用的插件（管线装饰链）——气泡据此显示插件图标（最少 3 秒，回合结束隐藏）
+        var invoked = PluginManager?.Registry.EnabledIds();
+        if (invoked is { Count: > 0 })
+        {
+            yield return new BrookEvent.PluginsInvoked(invoked);
+        }
+
         yield return new BrookEvent.Status(BrookRunState.Thinking);
 
         while (true)

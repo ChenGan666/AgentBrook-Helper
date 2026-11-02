@@ -18,6 +18,9 @@ public abstract record BrookEvent
     /// <summary>运行状态变化。</summary>
     public sealed record Status(BrookRunState State, string? Detail = null) : BrookEvent;
 
+    /// <summary>本回合启用的插件清单（v1.1）：气泡据此在上方显示插件图标（最少 3 秒，回合结束隐藏）。</summary>
+    public sealed record PluginsInvoked(IReadOnlyList<string> Ids) : BrookEvent;
+
     /// <summary>助手文本增量。</summary>
     public sealed record TextDelta(string Text) : BrookEvent;
 

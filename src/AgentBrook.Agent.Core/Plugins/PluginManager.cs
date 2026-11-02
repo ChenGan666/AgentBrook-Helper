@@ -122,6 +122,10 @@ public sealed class PluginManager
     /// <summary>聚合已启用插件的聊天客户端装饰器；无 → null（BrookAgent 接 ModelRouter/主客户端）。</summary>
     public Func<IChatClient, IChatClient>? BuildChatClientPipeline() => _registry.BuildChatClientPipeline();
 
+    /// <summary>插件图标 emoji（index/contract 声明，无 icon.png 时轨道芯片回退显示）。</summary>
+    public string GetPluginIcon(string id) =>
+        _state.Snapshot().TryGetValue(id, out var e) ? e.Icon : "";
+
     /// <summary>插件图标路径：优先注册目录根的 icon.png；缺失时回退扫描同 id 的兄弟目录
     /// （重装后缀 -rN 场景：旧目录无图标、新目录有），取最新修改的一份；都没有返回 null。</summary>
     public string? GetIconPath(string id)
