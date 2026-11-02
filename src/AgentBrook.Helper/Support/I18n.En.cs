@@ -242,7 +242,7 @@ internal static partial class I18n
         ["ui.plugins.privacy.tab.whitelist"] = "Whitelist",
         ["ui.plugins.privacy.whitelist.hint"] = "Matched content is exempt from masking and sent to the model as-is (one per line, literal match).",
         // ── Privacy plugin T5.1–T5.3 ──
-        ["ui.privacy.badge"] = "\U0001F6E1 {0} masked",
+        ["ui.privacy.badge"] = "{0} masked",
         ["ui.privacy.badge.images"] = "(image content not masked)",
         ["ui.privacy.badge.hover"] = "What the model actually received (copyable)",
         ["ui.plugins.privacy.mask.note"] = "Inject placeholder note for the model",

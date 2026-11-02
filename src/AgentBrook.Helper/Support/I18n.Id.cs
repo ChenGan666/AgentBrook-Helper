@@ -242,7 +242,7 @@ internal static partial class I18n
         ["ui.plugins.privacy.tab.whitelist"] = "Whitelist",
         ["ui.plugins.privacy.whitelist.hint"] = "Konten yang cocok dikecualikan dari masking dan dikirim ke model apa adanya (satu per baris, cocok persis).",
         // ── Plugin privasi T5.1–T5.3 ──
-        ["ui.privacy.badge"] = "\U0001F6E1 {0} disamarkan",
+        ["ui.privacy.badge"] = "{0} disamarkan",
         ["ui.privacy.badge.images"] = "(konten gambar tidak disamarkan)",
         ["ui.privacy.badge.hover"] = "Teks yang benar-benar diterima model (dapat disalin)",
         ["ui.plugins.privacy.mask.note"] = "Sisipkan catatan placeholder untuk model",

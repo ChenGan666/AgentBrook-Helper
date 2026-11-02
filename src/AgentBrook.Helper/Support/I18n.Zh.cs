@@ -242,7 +242,7 @@ internal static partial class I18n
         ["ui.plugins.privacy.tab.whitelist"] = "白名单",
         ["ui.plugins.privacy.whitelist.hint"] = "命中的内容不参与脱敏，原样发送给模型（一行一条，精确匹配）。",
         // ── 隐私插件 T5.1–T5.3（徽标/类别/策略/词典 v2/CSV） ──
-        ["ui.privacy.badge"] = "🛡 已脱敏 {0} 处",
+        ["ui.privacy.badge"] = "已脱敏 {0} 处",
         ["ui.privacy.badge.images"] = "（图片内容未脱敏）",
         ["ui.privacy.badge.hover"] = "模型实际收到的文本（可复制）",
         ["ui.plugins.privacy.mask.note"] = "向模型注入占位符说明",
