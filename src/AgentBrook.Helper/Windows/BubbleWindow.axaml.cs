@@ -123,6 +123,8 @@ public partial class BubbleWindow : Window
             UpdateClickThroughRegion();
         };
         _peerBubbles.PeerClicked += nodeId => App.ShowA2AWindow(nodeId);
+        root.PointerEntered += (_, _) => RefreshPluginOrbit();   // 进入气泡刷新（启停/装卸后同步）
+        RefreshPluginOrbit();   // 上半圈：已启用插件图标（启动即刷新）
         _peerBubbles.MoreClicked += () => App.ShowA2AWindow();
         _peerBubbles.DragRequested += e =>
         {

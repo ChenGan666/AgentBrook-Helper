@@ -634,6 +634,13 @@ public partial class SettingsWindow : WindowBase
             installedPanel.Children.Add(card);
         }
 
+        // 气泡上半圈插件图标同步刷新（启停/装卸/安装后保持一致）
+        if (App.Current.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop
+            && desktop.MainWindow is BubbleWindow bubble)
+        {
+            bubble.RefreshPluginOrbit();
+        }
+
         // 服务端可用插件
         try
         {
