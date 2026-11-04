@@ -36,6 +36,13 @@ public sealed class HelperImAgentHost
             if (_agent is not null) return _agent;
             var config = LoadConfig();
             var provider = ResolveProvider(config);
+            var key = provider.ApiKey ?? "";
+            var keyDesc = string.IsNullOrWhiteSpace(key)
+                ? "(空)"
+                : ProviderConfig.IsPlaceholderApiKey(key)
+                    ? "(占位符！模型未配置)"
+                    : $"{key[..Math.Min(4, key.Length)]}…（{key.Length} 字符）";
+            ImDiag.Log($"[im] IM 模型：{provider.BaseUrl} / {provider.ActiveModel ?? config.LLM.DefaultModel} / key={keyDesc}");
             _chatClient = AgentFactory.CreateChatClient(provider.BaseUrl, provider.ApiKey,
                 provider.ActiveModel ?? config.LLM.DefaultModel);
             _agent = AgentFactory.CreateAgent(config, _chatClient, [], "", new NoopImContextProvider());

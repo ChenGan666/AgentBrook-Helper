@@ -124,8 +124,8 @@ public sealed class A2AAgentTools
         [Description("目标 Helper 的 nodeId（可前缀）或名称关键字")] string peer)
     {
         var c = RequireController();
-        var item = FindPeer(c, peer, requireTrusted: false)
-            ?? returnNotFound(peer);
+        var item = FindPeer(c, peer, requireTrusted: false);
+        if (item is null) return NotFoundMessage(peer);
         if (item.Peer.TrustState == PeerTrustState.Trusted)
         {
             return $"已与 {item.Name} {item.Icon} 处于可信配对状态，无需重复配对。";
@@ -147,7 +147,8 @@ public sealed class A2AAgentTools
     {
         var c = RequireController();
         var host = c.Host ?? throw new InvalidOperationException("A2A 尚未启动");
-        var item = FindPeer(c, peer, requireTrusted: true) ?? returnNotFound(peer);
+        var item = FindPeer(c, peer, requireTrusted: true);
+        if (item is null) return NotFoundMessage(peer);
         RefreshEndpointsFromDiscovery(c, item.Peer);
         var endpoint = item.Peer.Endpoints.FirstOrDefault();
         if (string.IsNullOrEmpty(endpoint) || IsLoopbackEndpoint(endpoint))
@@ -234,7 +235,8 @@ public sealed class A2AAgentTools
         var displayNames = new List<string>();
         foreach (var token in members.Split([',', '，', '、'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            var item = FindPeer(c, token, requireTrusted: true) ?? returnNotFound(token);
+            var item = FindPeer(c, token, requireTrusted: true);
+            if (item is null) return NotFoundMessage(token);
             if (item.NodeId == selfNodeId || nodeIds.Contains(item.NodeId))
             {
                 continue;
@@ -344,14 +346,17 @@ public sealed class A2AAgentTools
         return list;
     }
 
-    [Description("向已配对的 Helper 发送本机文件（自动 SHA256 完整性校验）。对方收到后存入其隔离区并向其用户展示")]
+    [Description("向**局域网已配对的另一个 Helper/智能体**发送本机文件（自动 SHA256 校验）。"
+        + "仅用于跨设备协作；若用户要把图片/文件发给**他自己**（例如发到微信/Telegram），不要用本工具——"
+        + "直接在回复里说明文件路径即可，IM 通道会把产物回传给用户。")]
     public async Task<string> SendFile(
         [Description("目标 Helper 的 nodeId（可前缀）或名称关键字")] string peer,
         [Description("要发送的本机文件路径（绝对路径，或相对于工作区的路径）")] string path)
     {
         var c = RequireController();
         var host = c.Host ?? throw new InvalidOperationException("A2A 尚未启动");
-        var item = FindPeer(c, peer, requireTrusted: true) ?? returnNotFound(peer);
+        var item = FindPeer(c, peer, requireTrusted: true);
+        if (item is null) return NotFoundMessage(peer);
 
         // 路径解析：支持绝对路径与工作区相对路径
         var localPath = Path.IsPathRooted(path) ? path : Path.Combine(UiPrefs.WorkspaceDir(), path);
@@ -480,8 +485,10 @@ public sealed class A2AAgentTools
         return host is "127.0.0.1" or "localhost" or "[::1]" or "::1" or "" || host.StartsWith("[::1]", StringComparison.Ordinal);
     }
 
-    private static A2APeerItem returnNotFound(string peer) =>
-        throw new InvalidOperationException($"未找到匹配 \"{peer}\" 的 Helper。请先 a2a_list_peers 查看已发现的节点（未配对的需先 a2a_pair）。");
+    /// <summary>未找到对端时的**可读结果**（不抛异常：工具异常会让模型收到硬错误并在调试器里断点）。</summary>
+    private static string NotFoundMessage(string peer) =>
+        $"⚠️ 未找到匹配 \"{peer}\" 的 Helper。请先 a2a_list_peers 查看已发现的节点（未配对的需先 a2a_pair）。"
+        + "如果用户只是想让你把文件/图片发给他自己，请不要用 A2A 工具——直接在回复里给出文件即可（IM 通道会自动回传）。";
 
     private A2AExtensionController RequireController()
     {

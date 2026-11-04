@@ -85,6 +85,13 @@ public partial class App : Application
             };
             _ = A2A.StartAsync();
 
+            // 未观察的后台任务异常：只记录（插件/通道后台循环的取消与偶发失败不应弹框打断用户）
+            TaskScheduler.UnobservedTaskException += (_, e) =>
+            {
+                Console.Error.WriteLine($"[app] 后台任务异常（已观察处理）：{e.Exception.GetBaseException().Message}");
+                e.SetObserved();
+            };
+
             // 本机回环 API（127.0.0.1）：收银台「自动回填」写入模型配置并打开设置窗
             LocalApiServer.Start();
 

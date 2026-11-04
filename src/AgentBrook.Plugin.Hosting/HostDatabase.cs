@@ -23,7 +23,12 @@ public sealed class HostDatabase : IAsyncDisposable
         Directory.CreateDirectory(rootPath);
         var dbPath = Path.Combine(rootPath, "im.db");
         _connection = new Microsoft.Data.Sqlite.SqliteConnection(
-            new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = dbPath, Pooling = false }.ToString());
+            new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+            {
+                DataSource = dbPath,
+                Pooling = false,
+                DefaultTimeout = 15,   // 多连接（宿主/登录/设置页各一）并发时等锁，不立即失败
+            }.ToString());
         _connection.Open();
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
@@ -39,23 +44,57 @@ public sealed class HostDatabase : IAsyncDisposable
 
     public Microsoft.Data.Sqlite.SqliteConnection Connection => _connection;
 
+    /// <summary>
+    /// 串行门：SqliteConnection **非线程安全**（并发命令会破坏内部命令表，抛
+    /// "Index was out of range ... RemoveCommand"）。宿主多通道（Telegram/微信/登录）并发取凭据时必然踩中，
+    /// 故所有对该连接的访问都必须在 <see cref="Gate"/> 内完成。
+    /// </summary>
+    public object Gate { get; } = new();
+
     public int Execute(string sql, params (string Name, object? Value)[] parameters)
     {
-        using var cmd = _connection.CreateCommand();
-        cmd.CommandText = sql;
-        foreach (var (name, value) in parameters) cmd.Parameters.AddWithValue(name, value ?? DBNull.Value);
-        return cmd.ExecuteNonQuery();
+        lock (Gate)
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = sql;
+            foreach (var (name, value) in parameters) cmd.Parameters.AddWithValue(name, value ?? DBNull.Value);
+            return cmd.ExecuteNonQuery();
+        }
     }
 
+    /// <summary>
+    /// 在串行门内执行一次查询（**推荐用法**）：命令的创建、读取与释放都在锁内，
+    /// 避免"锁内建命令、锁外读"导致的并发崩溃。
+    /// </summary>
+    public T WithCommand<T>(string sql, Func<Microsoft.Data.Sqlite.SqliteCommand, T> body,
+        params (string Name, object? Value)[] parameters)
+    {
+        lock (Gate)
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = sql;
+            foreach (var (name, value) in parameters) cmd.Parameters.AddWithValue(name, value ?? DBNull.Value);
+            return body(cmd);
+        }
+    }
+
+    /// <summary>⚠ 直接取命令：仅在调用方已持有 <see cref="Gate"/> 或单线程场景使用（遗留用法）。</summary>
     public Microsoft.Data.Sqlite.SqliteCommand CreateCommand(string sql, params (string Name, object? Value)[] parameters)
     {
-        var cmd = _connection.CreateCommand();
-        cmd.CommandText = sql;
-        foreach (var (name, value) in parameters) cmd.Parameters.AddWithValue(name, value ?? DBNull.Value);
-        return cmd;
+        lock (Gate)
+        {
+            var cmd = _connection.CreateCommand();
+            cmd.CommandText = sql;
+            foreach (var (name, value) in parameters) cmd.Parameters.AddWithValue(name, value ?? DBNull.Value);
+            return cmd;
+        }
     }
 
-    public ValueTask DisposeAsync() => _connection.DisposeAsync();
+    public ValueTask DisposeAsync()
+    {
+        _connection.Dispose();
+        return ValueTask.CompletedTask;
+    }
 }
 
 /// <summary>

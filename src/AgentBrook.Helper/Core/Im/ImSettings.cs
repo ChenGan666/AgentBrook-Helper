@@ -13,6 +13,8 @@ public sealed class ImChannelConfig
     public string DisplayName { get; set; } = "";
     public string SecretRef { get; set; } = "";     // 宿主凭据引用（不落明文）
     public string? BridgeUrl { get; set; }          // 桥专用：http://127.0.0.1:<port>
+    public string? BaseUrl { get; set; }            // 微信专用：iLink 业务节点（登录响应 baseurl）
+    public string? AccountId { get; set; }          // 微信专用：ilink_bot_id（入站 AccountId）
     public string? BotUsername { get; set; }         // telegram 展示用
 }
 

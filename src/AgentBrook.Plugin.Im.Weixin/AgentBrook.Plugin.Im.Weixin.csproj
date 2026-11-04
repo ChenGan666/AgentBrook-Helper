@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- 微信通道插件（iLink / ClawBot 协议，2026 腾讯开放的个人微信 Bot 通道）：
+         只引用公共契约，禁止引用 Runtime/Hosting/Messaging 实现（A01/A02 架构门禁）。
+         平台基地址由配置提供（测试指向本地模拟服务器；无默认真实域名——A04）。 -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AgentBrook.Runtime.Abstractions\AgentBrook.Runtime.Abstractions.csproj" />
+    <ProjectReference Include="..\AgentBrook.Plugin.Hosting.Abstractions\AgentBrook.Plugin.Hosting.Abstractions.csproj" />
+    <ProjectReference Include="..\AgentBrook.Messaging.Abstractions\AgentBrook.Messaging.Abstractions.csproj" />
+    <InternalsVisibleTo Include="AgentBrook.Plugin.Im.Weixin.Tests" />
+  </ItemGroup>
+
+</Project>

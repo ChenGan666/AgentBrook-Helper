@@ -83,15 +83,17 @@ AgentBrook Helper 是一个真正跑在你机器上的 AI 智能体的桌面客�
 
 固定 token 成本被刻意压低：MCP 工具的 JSON Schema 不整体常驻上下文，主索引只列「工具名 + 一句话用途」，模型按需 `mcp_call` 调用、`mcp_tool_help` 查参数；复杂子任务（调研、长报告、批量整理）可委派给拥有独立上下文的子智能体 `delegate_task`，只有最终结论回到主对话；子智能体与会话摘要走模型清单中的轻量模型（分级用模，可在 appsettings 配置）；历史超预算时自动把早期对话浓缩为滚动摘要注入头部，长会话与重启恢复都保持精干。
 
-### IM 连接：把 Telegram 装进兜里
+### IM 连接：Telegram 与微信，装进兜里
 
-设置 → IM 连接里安装 Telegram 通道插件，用 @BotFather 建一个 Bot、粘贴 Token、跑一次连接测试再保存——手机就能和同一个 Helper 对话。接收走长轮询，不需要公网 IP，也不需要隧道。
+设置 → IM 连接里安装通道插件——**Telegram**（用 @BotFather 建 Bot、粘贴 Token）或**微信**（扫码登录，手机如提示则输入数字配对码）。接收走长轮询，不需要公网 IP，也不需要隧道；微信走腾讯 2026 年开放的 iLink（ClawBot）通道，登录约 24 小时有效，失效时卡片会提示重新扫码。
 
-IM 来的消息执行**与主界面输入完全相同的 Agent 回合**：多轮工具调用、终端命令、文件读写、查资料、生成媒体，执行过程在主窗口实时可见。只有最终结果回到手机；多轮工具回合会把完整正文送达，而不是只剩最后一段。
+IM 来的消息执行**与主界面输入完全相同的 Agent 回合**：多轮工具调用、终端命令、文件读写、查资料、生成媒体，执行过程在主窗口实时可见；只有最终结果回到手机。
 
-每个 IM 聊天在会话列表里有自己的会话（有则复用、无则新建，标题形如 `你的名字［telegram］`）。在桌面这个会话里输入，结果同样发到手机；手机来信时，正在查看的会话会自动刷新——不用切换、不用重启。
+每个 IM 聊天在会话列表里有自己的会话（有则复用、无则新建，标题形如 `你的名字［telegram］`）。在桌面这个会话里输入，结果同样发到手机；手机来信时，正在查看的会话会自动刷新。重新扫码换号会自动迁移配对与会话映射，历史不丢。
 
-**附件双向互通**：手机发来的图片进入会话并内嵌显示；只有当前所选模型声明了图片输入（取模型目录的 `input_types`）才会解析，否则给出"请切换到多模态模型"的明确提示，而不是答非所问。Helper 产出的交付物——截图、图表、报告——以照片或文件形式传回手机。附件与指令可以分条发送：每个附件先回「已收到附件，等待具体指令」，随后的指令（如"把这几张图合成一张"）带着待处理附件一起执行。删除 IM 会话即归档，下一条消息会开启全新会话。
+**附件双向互通**：手机发来的图片经 iLink CDN 下载并用 AES-128-ECB 解密，进入会话内嵌显示；只有当前所选模型声明了图片输入才会解析，否则给出明确提示。Helper 产出的交付物——截图、图表、报告——加密上传后以图片或文件消息回传微信。附件与指令可分条发送：每个附件先回执，随后的指令带着待处理附件一起执行。
+
+两个按钮让 IM 真正可运维：**重新绑定通道** 与 **打开诊断日志**（通道收发与回合执行都写入 `im/host-log.txt`）。
 
 ### A2A 网络：多台机器，一支团队
 
@@ -130,7 +132,7 @@ IM 来的消息执行**与主界面输入完全相同的 Agent 回合**：多轮
 | `AgentBrook.Messaging` / `.Messaging.Abstractions` | IM 领域：幂等 inbox/outbox、路由、投递状态机 |
 | `AgentBrook.Plugin.Hosting` / `.Hosting.Abstractions` | 隔离插件宿主：凭据、出站白名单、Blob/Webhook 服务 |
 | `AgentBrook.Agent.IM` | MAF 会话编解码 + 版本化会话存储适配 |
-| `AgentBrook.Plugin.Im.Telegram` / `.Im.Bridge` | 通道插件（运行时从插件目录加载） |
+| `AgentBrook.Plugin.Im.Telegram` / `.Im.Bridge` / `.Im.Weixin` | 通道插件（运行时从插件目录加载）；微信经 iLink，媒体走 CDN+AES |
 
 ## 快速开始
 
@@ -276,6 +278,7 @@ AgentBrook-Helper/
     ├── AgentBrook.Plugin.Hosting.Abstractions/ ← 宿主扩展契约
     ├── AgentBrook.Plugin.Im.Telegram/ ← Telegram 通道插件（长轮询、附件、文件）
     ├── AgentBrook.Plugin.Im.Bridge/ ← 桥通道插件（同机第三方桥）
+    ├── AgentBrook.Plugin.Im.Weixin/ ← 微信通道插件（iLink/ClawBot：长轮询、扫码登录、媒体双向）
     └── AgentBrook.Helper/           ← 桌面宿主（Avalonia）；macOS + Windows
         ├── App.axaml(.cs) / Program.cs ← 应用入口与生命周期（退出保护、单实例）
         ├── Core/Im/                 ← IM 组合根：设置、网关、组合、回合执行器、会话工厂、Blob/审批宿主

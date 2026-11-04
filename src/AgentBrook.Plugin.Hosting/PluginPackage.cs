@@ -46,6 +46,28 @@ public static class PluginPackageLoader
     /// 形态 B（服务端分发，与 PrivacyMasking 发布一致）：{id,version,files:[{path,sha256}]}——
     /// entry 由目录内唯一 AgentBrook.Plugin.*.dll 推导，files 逐文件校验。
     /// </summary>
+    /// <summary>
+    /// 文件 SHA256（带重试）：安装/卸载刚落盘或旧 ALC 尚未释放时，瞬时读取可能得到旧内容——
+    /// 直接判定"篡改/损坏"会误报（用户实测"第一次安装失败、再点一次成功"）。
+    /// </summary>
+    private static string HashFileStable(string path)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                var hash = Convert.ToHexString(SHA256.HashData(fs)).ToLowerInvariant();
+                if (attempt > 0) Thread.Sleep(50);   // 让写入方有机会完成
+                return hash;
+            }
+            catch (IOException) when (attempt < 5)
+            {
+                Thread.Sleep(200);
+            }
+        }
+    }
+
     public static PluginPackageManifest Validate(string packageDir)
     {
         if (!Directory.Exists(packageDir))
@@ -88,7 +110,7 @@ public static class PluginPackageLoader
                     var filePath = Path.Combine(packageDir, path);
                     if (!File.Exists(filePath))
                         throw new PluginPackageException(ImErrorCodes.BadPayload, $"包文件缺失：{path}");
-                    var actualFile = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(filePath))).ToLowerInvariant();
+                    var actualFile = HashFileStable(filePath);
                     if (actualFile != sha)
                         throw new PluginPackageException(ImErrorCodes.BadPayload,
                             $"文件 hash 不符（篡改/损坏）：{path}");
@@ -124,7 +146,7 @@ public static class PluginPackageLoader
             var entrySha = GetString("entrySha256");
             if (ContentRef.IsValidSha256(entrySha ?? ""))
             {
-                var actual = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(entryPath))).ToLowerInvariant();
+                var actual = HashFileStable(entryPath);
                 if (actual != entrySha)
                     throw new PluginPackageException(ImErrorCodes.BadPayload,
                         $"entry hash 不符（篡改/损坏）：{entry} 期望 {entrySha![..12]}… 实际 {actual[..12]}…");
@@ -137,7 +159,7 @@ public static class PluginPackageLoader
                     if ((f.TryGetProperty("path", out var pe) ? pe.GetString() : "") == fileName)
                     {
                         var expected = f.TryGetProperty("sha256", out var se) ? se.GetString() : null;
-                        var actual = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(entryPath))).ToLowerInvariant();
+                        var actual = HashFileStable(entryPath);
                         if (!string.IsNullOrEmpty(expected) && actual != expected)
                             throw new PluginPackageException(ImErrorCodes.BadPayload,
                                 $"entry hash 不符（篡改/损坏）：{entry}");
@@ -153,6 +175,44 @@ public static class PluginPackageLoader
                 entry, string.IsNullOrEmpty(minContract) ? HostingContract.Version : minContract,
                 capabilityId ?? "", ContentRef.IsValidSha256(declaredSha ?? "") ? declaredSha : "");
         }
+    }
+
+    /// <summary>
+    /// 加载 entry 程序集内的**全部**能力工厂（一个包可同时提供通道与登录等能力，
+    /// 如微信通道包内 weixin-channel + weixin-login）。宿主按 CapabilityId 注册，互不覆盖。
+    /// </summary>
+    public static (IReadOnlyList<ICapabilityFactory> Factories, PluginPackageManifest Manifest) LoadFactories(
+        string packageDir)
+    {
+        var manifest = Validate(packageDir);
+        if (!HostingContract.IsCompatible(HostingContract.Version, manifest.MinContractVersion))
+            throw new PluginPackageException(ImErrorCodes.ContractVersionMismatch,
+                $"包要求契约 {manifest.MinContractVersion}，宿主 {HostingContract.Version}（加载前拒绝）。");
+
+        var context = new PluginPackageLoadContext(packageDir);
+        var entryPath = Path.Combine(packageDir, manifest.Entry);
+        Assembly assembly;
+        try
+        {
+            assembly = context.LoadFromAssemblyPath(entryPath);
+        }
+        catch (BadImageFormatException ex)
+        {
+            throw new PluginPackageException(ImErrorCodes.BadPayload, $"entry 程序集不可加载（RID/架构不符）：{ex.Message}");
+        }
+
+        var factories = new List<ICapabilityFactory>();
+        foreach (var type in assembly.GetTypes().Where(t => typeof(ICapabilityFactory).IsAssignableFrom(t) && !t.IsAbstract))
+        {
+            var factory = (ICapabilityFactory)Activator.CreateInstance(type)!;
+            if (!HostingContract.IsCompatible(HostingContract.Version, factory.MinContractVersion))
+                throw new PluginPackageException(ImErrorCodes.ContractVersionMismatch,
+                    $"工厂要求契约 {factory.MinContractVersion}，宿主 {HostingContract.Version}。");
+            factories.Add(factory);
+        }
+        if (factories.Count == 0)
+            throw new PluginPackageException(ImErrorCodes.BadPayload, "包内未找到 ICapabilityFactory 实现。");
+        return (factories, manifest);
     }
 
     /// <summary>加载 entry 程序集（ALC：包目录私有依赖优先，公共契约回退默认上下文）并实例化能力工厂。</summary>

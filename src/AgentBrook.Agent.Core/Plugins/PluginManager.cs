@@ -75,6 +75,17 @@ public sealed class PluginManager
         return _categoryLoaders.TryGetValue(category ?? "", out loader!);
     }
 
+    private readonly Dictionary<string, Func<string, Task>> _categoryUnloaders = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>注册类别卸载器（外部宿主提供）：卸载前释放程序集（注销工厂/停实例/卸 ALC），
+    /// 否则 Windows 上 DLL 被占用导致卸载失败（"Access to the path ... is denied"）。</summary>
+    public void RegisterCategoryUnloader(string category, Func<string, Task> unloader) =>
+        _categoryUnloaders[category] = unloader;
+
+    /// <summary>由外部宿主加载的类别（不适用旧 IHelperPlugin 生命周期）。</summary>
+    private static bool IsExternalCategory(string? category) =>
+        string.Equals(category, "im", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>获取条目的有效类别：优先调用方覆盖，回退 index 声明。</summary>
     internal string GetEffectiveCategory(PluginIndexEntry entry)
     {
@@ -100,6 +111,13 @@ public sealed class PluginManager
             await categoryLoader(dir).ConfigureAwait(false);
             progress?.Report(new PluginInstallProgress(PluginInstallProgress.Done, 0, null));
             return;
+        }
+        if (IsExternalCategory(effectiveCategory))
+        {
+            // 外部宿主类别（如 im）但加载器尚未注册：绝不回落旧生命周期
+            //（插件会因缺 IM 扩展契约抛 ContractVersionMissing，且能力不会被宿主注册）
+            throw new InvalidOperationException(
+                $"[ServiceNotGranted] IM 宿主尚未就绪，无法安装 {entry.Id}；请稍后重试（或重启 Helper）。");
         }
         progress?.Report(new PluginInstallProgress(PluginInstallProgress.Done, 0, null));
         await LoadFromDirectoryAsync(entry.Id, entry.Latest, dir, entryDll, enabled: true);
@@ -145,14 +163,58 @@ public sealed class PluginManager
     public async Task<bool> UninstallAsync(string id)
     {
         _state.SetEnabled(id, false);
-        var unloaded = await _registry.TryUnloadAsync(id);
+        var category = _state.Snapshot().TryGetValue(id, out var st) ? st.Category : "plugin";
+        Func<string, Task>? externalUnloader = null;
+        var hasUnloader = IsExternalCategory(category)
+            && _categoryUnloaders.TryGetValue(category, out externalUnloader);
+        bool unloaded;
+        if (hasUnloader && externalUnloader is not null)
+        {
+            // 外部宿主负责释放（停实例→注销工厂→卸 ALC→GC）。
+            // 即便宿主释放过程中抛错（旧插件在取消路径抛异常），也继续走"标记删除 + 状态清理"，
+            // 不让用户卡在"卸载不掉"的死局里。
+            try
+            {
+                await externalUnloader(id).ConfigureAwait(false);
+                unloaded = true;
+            }
+            catch (Exception ex)
+            {
+                _log?.Invoke($"[plugins] {id} 宿主释放异常（继续卸载）：{ex.Message}");
+                unloaded = true;   // 已尽力释放：允许目录标记删除
+            }
+        }
+        else
+        {
+            unloaded = await _registry.TryUnloadAsync(id);
+        }
         var version = _state.GetVersion(id);
         if (version is not null)
         {
             var dir = ResolveDir(id, version);
-            if (Directory.Exists(dir) && unloaded)
+            if (Directory.Exists(dir))
             {
-                Directory.Delete(dir, true);
+                if (unloaded)
+                {
+                    try { Directory.Delete(dir, true); }
+                    catch (IOException)
+                    {
+                        // 程序集仍被占用（ALC 回收滞后）：改名为待清理目录，下次启动清扫
+                        var trash = dir + ".deleted-" + Guid.NewGuid().ToString("N")[..8];
+                        try { Directory.Move(dir, trash); } catch { /* 留着下次再试 */ }
+                        _log?.Invoke($"[plugins] {id} 目录占用中，已标记清理：{Path.GetFileName(trash)}");
+                    }
+                    catch (UnauthorizedAccessException)
+                    {
+                        var trash = dir + ".deleted-" + Guid.NewGuid().ToString("N")[..8];
+                        try { Directory.Move(dir, trash); } catch { }
+                        _log?.Invoke($"[plugins] {id} 目录占用中，已标记清理：{Path.GetFileName(trash)}");
+                    }
+                }
+                else
+                {
+                    _log?.Invoke($"[plugins] {id} 未能卸载（宿主未释放），目录保留：{dir}");
+                }
             }
         }
         _state.Remove(id);
@@ -240,6 +302,13 @@ public sealed class PluginManager
                 {
                     await categoryLoader(dir).ConfigureAwait(false);
                     _log?.Invoke($"[plugins] {id} {entry.Version} 已由类别宿主恢复加载（{entry.Category}）");
+                    continue;
+                }
+                if (IsExternalCategory(entry.Category))
+                {
+                    // 外部宿主类别但加载器未注册（Agent 早于 IM 组合启动）：跳过旧生命周期，
+                    // IM 组合启动时会自行扫描 plugins/{id}/ 加载（通道与登录能力）
+                    _log?.Invoke($"[plugins] {id} 属外部宿主类别（{entry.Category}），交由 IM 宿主加载");
                     continue;
                 }
                 var entryDll = FindEntryDll(dir);

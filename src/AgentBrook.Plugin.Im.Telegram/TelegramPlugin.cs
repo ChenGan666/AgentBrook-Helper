@@ -414,6 +414,9 @@ public sealed class TelegramChannel : IImChannel, ICapabilityInstance
 
     internal static DeliveryResult InterpretSendResponse(HttpResult response)
     {
+        // StatusCode 0 = 宿主网络层"取消/超时/断连"（不抛异常的约定）：平台是否收到未知 → Unknown
+        if (response.StatusCode == 0)
+            return DeliveryResult.Unknown("传输失败/超时：结果未知（平台是否收到未知）");
         try
         {
             using var doc = JsonDocument.Parse(response.Body);

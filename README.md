@@ -83,15 +83,17 @@ While a turn is running, the send button turns into a stop button (Esc works too
 
 The fixed token cost is deliberately kept low: MCP tool JSON Schemas are not loaded wholesale — the master index lists one line per tool, and the model calls them via `mcp_call` / inspects them via `mcp_tool_help` on demand. Heavy subtasks (research, long reports, bulk filing) can be delegated to a sub-agent with its own isolated context via `delegate_task`; only the conclusion returns to the main conversation. Sub-agents and session summarization run on the lightest model in your model list (tiered routing, configurable in appsettings). When history exceeds budget, older turns are condensed into a rolling summary injected at the head — long sessions and restarts stay lean.
 
-### IM connections: Telegram in your pocket
+### IM connections: Telegram and WeChat in your pocket
 
-Install the Telegram channel plugin from Settings → IM Connections, create a bot with @BotFather, paste the token, run the connection test and hit save — your phone now talks to the same Helper. Receiving uses long polling, so no public IP or tunnel is required.
+Install a channel plugin from Settings → IM Connections — **Telegram** (create a bot with @BotFather, paste the token) or **WeChat** (scan a QR code; enter the pairing code if your phone asks for one). Receiving uses long polling, so no public IP or tunnel is required; WeChat rides Tencent's iLink (ClawBot) channel opened in 2026 and stays valid for about 24 hours, with the card telling you when to scan again.
 
-IM messages run the **exact same agent turn as typing in the main window**: multi-round tool calls, terminal commands, file access, research, media generation — with the run visible live in the desktop conversation. Only the final answer goes back to the phone, and multi-round turns deliver the full text rather than just the last fragment.
+IM messages run the **exact same agent turn as typing in the main window**: multi-round tool calls, terminal commands, file access, research, media generation — with the run visible live in the desktop conversation. Only the final answer goes back to the phone.
 
-Each IM chat gets its own session in the session list (reused if it exists, created otherwise, titled like `Your Name [telegram]`). Type in that session on the desktop and the result is delivered to the phone too; when a phone message arrives the open session refreshes automatically — no switching, no restart.
+Each IM chat gets its own session in the session list (reused if it exists, created otherwise, titled like `Your Name [telegram]`). Type in that session on the desktop and the result is delivered to the phone too; when a phone message arrives the open session refreshes automatically. Re-scanning an account migrates the pairing and session mapping to the new bot identity, so nothing is lost.
 
-**Files travel both ways.** Photos sent from the phone land in the conversation and render inline; the model reads them only if the selected model declares image input (served from the model catalog's `input_types`), otherwise you get an explicit "switch to a multimodal model" hint instead of a nonsense answer. Deliverables produced by the Helper — screenshots, charts, reports — are uploaded back to the phone as photos or documents. Attachments and instructions can be sent separately: each attachment is acknowledged with "received, waiting for instructions", and your next instruction (e.g. "merge those images") runs with all pending attachments in context. Deleting an IM session archives it; the next message starts a fresh one.
+**Files travel both ways.** Photos sent from the phone are downloaded and decrypted (iLink CDN + AES-128-ECB), land in the conversation and render inline; the model reads them only if the selected model declares image input, otherwise you get an explicit hint. Deliverables produced by the Helper — screenshots, charts, reports — are encrypted and uploaded back to WeChat as image or file messages. Attachments and instructions can be sent separately: each attachment is acknowledged, and your next instruction runs with the pending attachments in context.
+
+Two buttons make IM supportable in practice: **Rebind channels** and **Open diagnostic log** (channel traffic and turn execution are written to `im/host-log.txt`).
 
 ### An A2A network: many machines, one team
 
@@ -130,7 +132,7 @@ Anything requiring a human is routed through the `IBrookInteraction` interface: 
 | `AgentBrook.Messaging` / `.Messaging.Abstractions` | IM domain: inbox/outbox with idempotency, routes, delivery state machine |
 | `AgentBrook.Plugin.Hosting` / `.Hosting.Abstractions` | Isolated plugin host: credentials, network allow-list, blob/webhook services |
 | `AgentBrook.Agent.IM` | MAF session codec + versioned session store adapter |
-| `AgentBrook.Plugin.Im.Telegram` / `.Im.Bridge` | Channel plugins (loaded from the plugin directory at runtime) |
+| `AgentBrook.Plugin.Im.Telegram` / `.Im.Bridge` / `.Im.Weixin` | Channel plugins (loaded from the plugin directory at runtime); WeChat via iLink with CDN+AES media |
 
 ## Quick start
 
@@ -276,6 +278,7 @@ AgentBrook-Helper/
     ├── AgentBrook.Plugin.Hosting.Abstractions/ ← host extension contracts
     ├── AgentBrook.Plugin.Im.Telegram/ ← Telegram channel plugin (long polling, attachments, files)
     ├── AgentBrook.Plugin.Im.Bridge/ ← bridge channel plugin (same-machine third-party bridge)
+    ├── AgentBrook.Plugin.Im.Weixin/ ← WeChat channel plugin (iLink/ClawBot: long polling, QR login, media both ways)
     └── AgentBrook.Helper/           ← desktop host (Avalonia); macOS + Windows
         ├── App.axaml(.cs) / Program.cs ← app entry & lifecycle (quit protection, single instance)
         ├── Core/Im/                 ← IM composition root: settings, gateway, composition, turn executor,

@@ -23,9 +23,8 @@ public sealed class NamespaceStateStore(HostDatabase db, ActivationRegistry acti
     public Task<string?> GetAsync(string key, CancellationToken cancellationToken)
     {
         EnsureAlive();
-        using var cmd = db.CreateCommand("SELECT value FROM host_plugin_state WHERE ns = $ns AND key = $key",
-            ("$ns", _ns), ("$key", key));
-        var value = cmd.ExecuteScalar() as string;
+        var value = db.WithCommand("SELECT value FROM host_plugin_state WHERE ns = $ns AND key = $key",
+            cmd => cmd.ExecuteScalar() as string, ("$ns", _ns), ("$key", key));
         return Task.FromResult(value);
     }
 
@@ -100,9 +99,8 @@ public sealed class CredentialService(HostDatabase db, string namespaceId, Activ
     internal string Resolve(string secretRef)
     {
         var parts = secretRef.Split('/', 2);
-        using var cmd = db.CreateCommand("SELECT value FROM host_secrets WHERE ns = $ns AND name = $name",
-            ("$ns", parts[0]), ("$name", parts[1]));
-        var value = cmd.ExecuteScalar() as string
+        var value = db.WithCommand("SELECT value FROM host_secrets WHERE ns = $ns AND name = $name",
+            cmd => cmd.ExecuteScalar() as string, ("$ns", parts[0]), ("$name", parts[1]))
             ?? throw new HostPipelineException(ImErrorCodes.ServiceNotGranted, "凭据引用不存在或已撤销。");
         return value;
     }
@@ -110,16 +108,19 @@ public sealed class CredentialService(HostDatabase db, string namespaceId, Activ
     /// <summary>日志/审计脱敏：已知 secret 的值与引用名都替换为占位。</summary>
     public string Redact(string text)
     {
-        using var cmd = db.CreateCommand("SELECT name, value FROM host_secrets WHERE ns = $ns", ("$ns", _ns));
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
+        return db.WithCommand("SELECT name, value FROM host_secrets WHERE ns = $ns", cmd =>
         {
-            var name = reader.GetString(0);
-            var value = reader.GetString(1);
-            if (!string.IsNullOrEmpty(value)) text = text.Replace(value, "***");
-            text = text.Replace($"{_ns}/{name}", $"***secret:{name}***");
-        }
-        return text;
+            using var reader = cmd.ExecuteReader();
+            var result = text;
+            while (reader.Read())
+            {
+                var name = reader.GetString(0);
+                var value = reader.GetString(1);
+                if (!string.IsNullOrEmpty(value)) result = result.Replace(value, "***");
+                result = result.Replace($"{_ns}/{name}", $"***secret:{name}***");
+            }
+            return result;
+        }, ("$ns", _ns));
     }
 }
 
@@ -163,15 +164,25 @@ public sealed class NetworkService : INetworkService
         for (var hop = 0; ; hop++)
         {
             using var msg = new HttpRequestMessage(request.Method, current);
+            var declaredContentType = request.Headers
+                .FirstOrDefault(h => h.Name.Equals("Content-Type", StringComparison.OrdinalIgnoreCase))?.Value;
             foreach (var header in request.Headers)
+            {
+                if (header.Name.Equals("Content-Type", StringComparison.OrdinalIgnoreCase)) continue;   // 内容头单独处理
                 msg.Headers.TryAddWithoutValidation(header.Name, header.Value);
+            }
             if (request.Body is not null && request.Method != HttpMethod.Get)
+            {
                 msg.Content = new ByteArrayContent(request.Body);
+                if (!string.IsNullOrWhiteSpace(declaredContentType))
+                    msg.Content.Headers.TryAddWithoutValidation("Content-Type", declaredContentType);
+            }
 
             ApplyHeaderInjections(msg, request.Injections);
 
-            response = await client.SendAsync(msg, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
-                .ConfigureAwait(false);
+            var raced = await SendRacingAsync(client, msg, request.Timeout, cancellationToken).ConfigureAwait(false);
+            if (raced is null) return new HttpResult(0, [], redirectChain);   // 取消/超时：无响应
+            response = raced;
 
             if ((int)response.StatusCode is 301 or 302 or 307 or 308)
             {
@@ -188,8 +199,27 @@ public sealed class NetworkService : INetworkService
             break;
         }
 
-        var body = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
-        return new HttpResult((int)response.StatusCode, body, redirectChain);
+        var body = await response.Content.ReadAsByteArrayAsync(CancellationToken.None).ConfigureAwait(false);
+        return new HttpResult((int)response.StatusCode, body, redirectChain, CollectHeaders(response));
+    }
+
+    /// <summary>
+    /// 发送请求并"竞速等待"：**不把取消令牌交给 HttpClient**——平台长轮询在停止/解绑时取消会产生
+    /// OperationCanceledException，在开启"引发异常时中断"的调试器里会被当成崩溃（各插件都踩过）。
+    /// 取消/超时 → 返回 StatusCode=0（调用方按"无响应/未知"处理）；被放弃的请求由内部 Timeout 收敛，
+    /// 其异常就地观察（不产生未观察任务异常）。
+    /// </summary>
+    private static async Task<HttpResponseMessage?> SendRacingAsync(HttpClient client, HttpRequestMessage msg,
+        TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var sendTask = client.SendAsync(msg, HttpCompletionOption.ResponseHeadersRead, CancellationToken.None);
+        var finished = await Task.WhenAny(sendTask, Task.Delay(timeout, cancellationToken)).ConfigureAwait(false);
+        if (finished != sendTask)
+        {
+            _ = sendTask.ContinueWith(static t => _ = t.Exception, TaskScheduler.Default);
+            return null;   // 取消/超时
+        }
+        return await sendTask.ConfigureAwait(false);
     }
 
     private void ApplyHeaderInjections(HttpRequestMessage msg, IReadOnlyList<SecretInjection>? injections)
@@ -249,9 +279,20 @@ public sealed class NetworkService : INetworkService
             msg.Content.Headers.TryAddWithoutValidation("Content-Type",
                 string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType);
         }
-        var response = await client.SendAsync(msg, cancellationToken).ConfigureAwait(false);
-        var responseBody = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
-        return new HttpResult((int)response.StatusCode, responseBody, []);
+        var raced = await SendRacingAsync(client, msg, timeout, cancellationToken).ConfigureAwait(false);
+        if (raced is null) return new HttpResult(0, [], []);   // 取消/超时：无响应（调用方按未知/退避处理）
+        var response = raced;
+        var responseBody = await response.Content.ReadAsByteArrayAsync(CancellationToken.None).ConfigureAwait(false);
+        return new HttpResult((int)response.StatusCode, responseBody, [], CollectHeaders(response));
+    }
+
+    /// <summary>收集响应头（响应头 + 内容头，名称小写化便于查找，如 x-encrypted-param）。</summary>
+    private static Dictionary<string, string> CollectHeaders(HttpResponseMessage response)
+    {
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var h in response.Headers) headers[h.Key] = string.Join(",", h.Value);
+        foreach (var h in response.Content.Headers) headers[h.Key] = string.Join(",", h.Value);
+        return headers;
     }
 
     private void EnsureHostAllowed(string host)

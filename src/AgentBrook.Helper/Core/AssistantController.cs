@@ -781,6 +781,8 @@ public sealed class AssistantController : IBrookInteraction
             foreach (var p in providers)
             {
                 if (string.IsNullOrWhiteSpace(p.BaseUrl) || string.IsNullOrWhiteSpace(p.ApiKey)) continue;
+                // 占位/示例 Key（如 sk-please-fill-in-your-api-key）不发请求：必然 401，且在调试器里表现为"引发异常"
+                if (AgentBrook.Agent.Infrastructure.ProviderConfig.IsPlaceholderApiKey(p.ApiKey)) continue;
                 var fetched = await FetchModelEntriesAsync(p);
                 if (fetched.Count == 0) continue;
 

@@ -59,6 +59,9 @@ public sealed class PluginHost(HostDatabase db, string rootPath) : IPluginHostEx
     private readonly AuditLog _audit = new(Path.Combine(rootPath, "audit.jsonl"));
 
     public AuditLog Audit => _audit;
+
+    /// <summary>插件日志镜像出口（宿主注入：让插件日志与宿主日志落到同一诊断文件，用户一处可见）。</summary>
+    public static Action<string>? DiagnosticsSink { get; set; }
     public ActivationRegistry Activations => _activations;
 
     /// <summary>共享契约清单（§15.4：宿主控制、加载前版本检查；不整体共享 AgentBrook.* 内部实现）。</summary>
@@ -80,6 +83,40 @@ public sealed class PluginHost(HostDatabase db, string rootPath) : IPluginHostEx
         var lease = new RegistrationLease();
         lock (_gate) _factories[factory.CapabilityId] = (factory, lease);
         return lease;
+    }
+
+    /// <summary>
+    /// 卸载某插件的全部能力（卸载前调用）：先停其所有实例，再注销工厂并撤销注册租约。
+    /// 程序集回收由 <see cref="PluginPackageLoadContext"/>（collectible）在引用释放后完成——
+    /// 调用方应随后 GC 并重试删除目录（文件锁在 ALC 卸下后才释放）。
+    /// </summary>
+    public async Task<int> UnloadPluginAsync(string pluginId, TimeSpan gracePeriod)
+    {
+        List<string> instanceIds;
+        int removed = 0;
+        lock (_gate)
+        {
+            instanceIds = [.. _instances
+                .Where(kv => kv.Value.Instance.PluginId == pluginId)
+                .Select(kv => kv.Key)];
+        }
+        foreach (var instanceId in instanceIds)
+        {
+            try { await StopInstanceAsync(instanceId, gracePeriod).ConfigureAwait(false); }
+            catch (Exception) { /* 停实例失败不阻断工厂注销（卸载尽力而为） */ }
+        }
+        lock (_gate)
+        {
+            foreach (var key in _factories
+                .Where(kv => kv.Value.Factory.PluginId == pluginId)
+                .Select(kv => kv.Key).ToList())
+            {
+                _factories[key].Lease.Revoke();
+                _factories.Remove(key);
+                removed++;
+            }
+        }
+        return removed;
     }
 
     // ── 实例生命周期 ──
@@ -127,7 +164,9 @@ public sealed class PluginHost(HostDatabase db, string rootPath) : IPluginHostEx
 
         record.Capability = capability;
         record.State = PluginRunState.Active;
-        lock (_gate) _instances[instanceId] = record;
+        // 键 = {capabilityId}+{instanceId}：各通道实例 id 都叫 "inst-1"，只按 instanceId 索引会互相覆盖，
+        // 导致"停错实例、旧轮询存活 → 持续报错/抢同一游标"
+        lock (_gate) _instances[InstanceKey(instance.CapabilityId, instanceId)] = record;
         return record;
     }
 
@@ -135,14 +174,36 @@ public sealed class PluginHost(HostDatabase db, string rootPath) : IPluginHostEx
     /// 停用实例（§15.4 停用语义）：撤销活动代次（旧句柄全部失效）→ 取消后台任务 →
     /// 协作等待在途（超时 → Failed）→ 注销。停用一个实例不影响其他实例（工厂与租约是插件级/实例级分离）。
     /// </summary>
-    public async Task<bool> StopInstanceAsync(string instanceId, TimeSpan gracePeriod)
+    private static string InstanceKey(string capabilityId, string instanceId) => $"{capabilityId}+{instanceId}";
+
+    /// <summary>按（能力, 实例）停止：多通道共用 "inst-1" 时必须带能力 id，否则会停错实例。</summary>
+    public async Task<bool> StopInstanceAsync(string capabilityId, string instanceId, TimeSpan gracePeriod)
     {
         PluginInstanceRecord? record;
         lock (_gate)
         {
-            if (!_instances.TryGetValue(instanceId, out record)) return false;
-            _instances.Remove(instanceId);
+            if (!_instances.TryGetValue(InstanceKey(capabilityId, instanceId), out record)) return false;
+            _instances.Remove(InstanceKey(capabilityId, instanceId));
         }
+        return await StopRecordAsync(record, gracePeriod).ConfigureAwait(false);
+    }
+
+    /// <summary>兼容重载：仅按 instanceId 停止（命中第一个匹配；新代码请用带 capabilityId 的重载）。</summary>
+    public Task<bool> StopInstanceAsync(string instanceId, TimeSpan gracePeriod)
+    {
+        PluginInstanceRecord? record;
+        lock (_gate)
+        {
+            var matched = _instances.FirstOrDefault(kv => kv.Value.Instance.InstanceId == instanceId);
+            if (matched.Value is null) return Task.FromResult(false);
+            _instances.Remove(matched.Key);
+            record = matched.Value;
+        }
+        return StopRecordAsync(record, gracePeriod);
+    }
+
+    private async Task<bool> StopRecordAsync(PluginInstanceRecord record, TimeSpan gracePeriod)
+    {
         record.State = PluginRunState.Stopping;
 
         // ① 撤销活动代次：此后旧句柄的所有服务调用立即拒绝（H02）
@@ -176,9 +237,12 @@ public sealed class PluginHost(HostDatabase db, string rootPath) : IPluginHostEx
         return stoppedCleanly;
     }
 
-    public PluginInstanceRecord? GetInstance(string instanceId)
+    public PluginInstanceRecord? GetInstance(string instanceId) =>
+        ListInstances().FirstOrDefault(r => r.Instance.InstanceId == instanceId);
+
+    public PluginInstanceRecord? GetInstance(string capabilityId, string instanceId)
     {
-        lock (_gate) return _instances.GetValueOrDefault(instanceId);
+        lock (_gate) return _instances.GetValueOrDefault(InstanceKey(capabilityId, instanceId));
     }
 
     public IReadOnlyList<PluginInstanceRecord> ListInstances()
@@ -211,6 +275,10 @@ public sealed class PluginHost(HostDatabase db, string rootPath) : IPluginHostEx
     {
         public bool IsRevoked { get; private set; }
         public event Action? Revoked;
+
+        /// <summary>显式撤销（卸载插件时注销工厂用；与 Dispose 同语义）。</summary>
+        public void Revoke() => Dispose();
+
         public void Dispose()
         {
             if (IsRevoked) return;
@@ -242,11 +310,15 @@ public sealed class ExtensionContextImpl(
         return services.Get<T>();
     }
 
-    public void Log(string message) => audit.Write("plugin", "log", new Dictionary<string, string?>
+    public void Log(string message)
     {
-        ["instance"] = $"{Instance.PluginId}/{Instance.InstanceId}",
-        ["message"] = message,
-    });
+        audit.Write("plugin", "log", new Dictionary<string, string?>
+        {
+            ["instance"] = $"{Instance.PluginId}/{Instance.InstanceId}",
+            ["message"] = message,
+        });
+        try { PluginHost.DiagnosticsSink?.Invoke($"[{Instance.PluginId}] {message}"); } catch { /* 诊断出口失败不影响插件 */ }
+    }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

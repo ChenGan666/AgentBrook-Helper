@@ -20,7 +20,7 @@ VERSION="${VERSION:-1.0.0}"
 PUBLISH_BASE="${PUBLISH_BASE:-$(pwd)/src/publish}"
 OUT_BASE="$PUBLISH_BASE/updated/plugin"
 RIDS="win-x64 win-arm64 osx-x64 osx-arm64"
-PLUGINS=("im-telegram:AgentBrook.Plugin.Im.Telegram:Telegram:💬" "im-bridge:AgentBrook.Plugin.Im.Bridge:Bridge:🔗")
+PLUGINS=("im-telegram:AgentBrook.Plugin.Im.Telegram:Telegram:💬" "im-bridge:AgentBrook.Plugin.Im.Bridge:Bridge:🔗" "im-weixin:AgentBrook.Plugin.Im.Weixin:WeChat:💚")
 
 command -v dotnet >/dev/null || { echo "need dotnet SDK"; exit 1; }
 command -v python3 >/dev/null || { echo "need python3"; exit 1; }
@@ -73,7 +73,7 @@ for spec in "${PLUGINS[@]}"; do
   "version": "$VERSION",
   "entry": "$entry_dll",
   "minContractVersion": "0.1.0-preview",
-  "capabilityId": "$([ "$id" = "im-telegram" ] && echo telegram-channel || echo bridge-channel)",
+  "capabilityId": "$([ "$id" = "im-telegram" ] && echo telegram-channel || ([ "$id" = "im-weixin" ] && echo weixin-channel || echo bridge-channel))",
   "entrySha256": "$dll_sha"
 }
 MEOF
@@ -129,7 +129,7 @@ if os.path.exists(entries_file):
         pass
 
 new_entries = []
-for pid in ("im-telegram", "im-bridge"):
+for pid in ("im-telegram", "im-bridge", "im-weixin"):
     p = os.path.join(out_base, pid, "1.0.0", "index.entry.json")
     if not os.path.exists(p):
         p = os.path.join(out_base, pid, os.listdir(os.path.join(out_base, pid))[0], "index.entry.json")

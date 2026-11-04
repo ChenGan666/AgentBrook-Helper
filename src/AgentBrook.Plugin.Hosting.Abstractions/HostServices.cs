@@ -77,7 +77,8 @@ public sealed record HttpRequestSpec(
 
 public sealed record HttpHeader(string Name, string Value);
 
-public sealed record HttpResult(int StatusCode, byte[] Body, IReadOnlyList<string> RedirectChain)
+public sealed record HttpResult(int StatusCode, byte[] Body, IReadOnlyList<string> RedirectChain,
+    IReadOnlyDictionary<string, string>? Headers = null)   // 响应头（如微信 CDN 的 x-encrypted-param）
 {
     public bool IsSuccess => StatusCode is >= 200 and < 300;
 }

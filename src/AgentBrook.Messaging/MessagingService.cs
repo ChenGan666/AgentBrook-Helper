@@ -81,6 +81,42 @@ public sealed class MessagingService : IAsyncDisposable
         return sink;
     }
 
+    /// <summary>
+    /// 通道账号迁移（重新扫码后 bot 账号变化）：把这通道的配对身份与路由的 account_id 改写到新账号。
+    /// 目的：换号不应让用户"重新配对 + 丢会话映射"；不迁移则准入的 AccountChanged 会拒收全部入站。
+    /// 返回受影响行数（identities + routes）。
+    /// </summary>
+    public async Task<int> MigrateChannelAccountAsync(string channelId, string instanceId, string newAccountId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(newAccountId)) return 0;
+        await _db.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var a = _store.Db.Execute(
+                "UPDATE identities SET account_id=$new WHERE channel_id=$ch AND instance_id=$inst AND account_id<>$new",
+                ("$new", newAccountId), ("$ch", channelId), ("$inst", instanceId));
+            var b = _store.Db.Execute(
+                "UPDATE routes SET account_id=$new WHERE channel_id=$ch AND instance_id=$inst AND account_id<>$new",
+                ("$new", newAccountId), ("$ch", channelId), ("$inst", instanceId));
+            return a + b;
+        }
+        finally
+        {
+            _db.Gate.Release();
+        }
+    }
+
+    /// <summary>解除通道绑定（重新绑定/卸载前调用）：移除 Sink/通道/身份，旧句柄后续投递即拒。
+    /// 不删除路由与 inbox（历史与幂等键保留）。</summary>
+    public void UnbindChannel(string channelId, string instanceId)
+    {
+        var ns = $"{channelId}+{instanceId}";
+        _sinks.Remove(ns);
+        _channels.Remove(ns);
+        _identitiesByNs.Remove(ns);
+    }
+
     public IImInboundSink? GetSink(string channelId, string instanceId) =>
         _sinks.GetValueOrDefault($"{channelId}+{instanceId}");
 

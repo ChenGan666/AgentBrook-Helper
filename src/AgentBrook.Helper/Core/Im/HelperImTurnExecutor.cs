@@ -50,6 +50,7 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
         var userText = context.UserText ?? throw new InvalidOperationException(
             "[BadPayload] 回合上下文缺少 UserText（调度器必须从 Inbox 行传入）。");
         var hasAttachments = context.Attachments is { Count: > 0 };
+        ImDiag.Log($"[im] 回合开始：session={context.SessionId} text={TruncateLog(userText)} attachments={context.Attachments?.Count ?? 0}");
         _hooks?.OnTurnStart?.Invoke(context.SessionId);
 
         // 回合超时（模型/工具挂起时给用户确定性回执）；审批等待计入总时长（5 分钟上限）
@@ -150,6 +151,7 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
                     var answerText = streamed.Length > 0 ? streamed.ToString() : (brook.TurnAnswer ?? "");
                     var finalAnswer = StripToolCallMarkup(answerText);
                     if (string.IsNullOrWhiteSpace(finalAnswer)) finalAnswer = "（本轮没有产出文字结果）";
+                    ImDiag.Log($"[im] 回合完成：session={context.SessionId} 回答 {finalAnswer.Length} 字符");
 
                     // user 事件携带附件 artifacts（会话界面用户侧内嵌图片/文件行的唯一数据源——
                     // MAF 侧的图片消息在转写构建时被跳过，见 BuildTranscriptTextList）
@@ -206,8 +208,9 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
                     var events = new List<TurnEvent> { new(context.TurnId, 0, "assistant", timeoutAnswer, null) };
                     return new TurnOutcome(true, timeoutAnswer, events, [], null, null);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    ImDiag.Log($"[im] 回合失败：session={context.SessionId} {ex.GetType().Name}: {ex.Message}");
                     _hooks?.OnTurnEnd?.Invoke(context.SessionId, false);
                     throw;
                 }
@@ -376,5 +379,12 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
         {
             Console.Error.WriteLine($"[im] legacy 镜像写失败 {sessionId}：{ex.Message}");
         }
+    }
+
+    private static string TruncateLog(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return "(空)";
+        var t = text.Replace('\n', ' ');
+        return t.Length > 40 ? t[..40] + "…" : t;
     }
 }

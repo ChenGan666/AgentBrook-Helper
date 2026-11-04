@@ -351,7 +351,8 @@ public sealed class BridgeChannel : IImChannel, IDeliveryStatusProvider, IDelive
     internal static DeliveryResult InterpretSendResponse(HttpResult response)
     {
         // 网关级失败先于 body 解析：桥进程崩溃时 listener 合成 502/504、连接重置/空体——语义=结果未知（F15/F16）
-        if (response.StatusCode is 502 or 503 or 504 || response.Body.Length == 0)
+        // StatusCode 0 = 宿主网络层"取消/超时/断连"（不抛异常的约定）→ 同样结果未知
+        if (response.StatusCode == 0 || response.StatusCode is 502 or 503 or 504 || response.Body.Length == 0)
             return DeliveryResult.Unknown($"bridge gateway failure HTTP {response.StatusCode}");
         try
         {
