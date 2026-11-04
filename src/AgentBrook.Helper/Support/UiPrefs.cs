@@ -17,6 +17,14 @@ internal static class UiPrefs
     {
         if (_dir is null)
         {
+            // env 覆盖优先（与 Controller.LoadStartupConfig 的环境变量源一致——调试/部署统一入口）
+            var envWs = Environment.GetEnvironmentVariable("AGENTBROOK_Agent__WorkspaceRoot");
+            if (!string.IsNullOrWhiteSpace(envWs))
+            {
+                Directory.CreateDirectory(envWs);
+                _dir = envWs;
+                return _dir;
+            }
             // 用户自定义主工作空间优先（设置中配置，重启生效）
             var overridePath = WorkspacePrefs.LoadOverride();
             if (!string.IsNullOrWhiteSpace(overridePath))

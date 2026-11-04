@@ -45,7 +45,7 @@
       <Border Width="320" Height="320" HorizontalAlignment="Center" VerticalAlignment="Center" ClipToBounds="True">
         <Grid>
           <Canvas x:Name="PreviewCanvas" Width="320" Height="320" Background="Transparent">
-            <Image x:Name="SourceImage" Stretch="None" IsHitTestVisible="False"/>
+            <Image x:Name="SourceImage" Stretch="Fill" IsHitTestVisible="False"/>
           </Canvas>
           <!-- 圆外暗化遮罩：实心矩形挖去内切圆（Stretch=None 防 Grid 拉伸） -->
           <Path Fill="#B3000000" IsHitTestVisible="False" Stretch="None">

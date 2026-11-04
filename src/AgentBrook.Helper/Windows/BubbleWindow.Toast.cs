@@ -17,9 +17,16 @@ public partial class BubbleWindow
     private Rect _lastToastBounds;
 
     // ───────────────────────── F1/F2：气泡提示卡（问候语 / 审批 / 提问） ─────────────────────────
-    /// <summary>显示一张提示卡；openConversationOnClick=true 时点卡片打开对话窗。</summary>
-    public void ShowToast(string text, string accent, TimeSpan? autoClose,
-        IEnumerable<(string Label, Action OnClick)>? actions = null, bool openConversationOnClick = false)
+    /// <summary>剥离文本中的内联图片（data:image/...;base64,...）：头像走 PeerIconView 渲染，正文不留 base64 刷屏。</summary>
+    private static readonly System.Text.RegularExpressions.Regex DataUriRe =
+        new(@"data:image/[A-Za-z0-9.+-]+;base64,[A-Za-z0-9+/=\r\n]+",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>显示一张提示卡；openConversationOnClick=true 时点卡片打开对话窗；icon 非空时作为头像渲染在正文左侧。
+    /// 返回关闭委托（移除本卡）——供双通道决策同步（卡片/toast 任一侧决议，另一侧收起）。</summary>
+    public Action ShowToast(string text, string accent, TimeSpan? autoClose,
+        IEnumerable<(string Label, Action OnClick)>? actions = null, bool openConversationOnClick = false,
+        string? icon = null)
     {
         _collapseTimer?.Stop();
         SetDockExpanded(true);   // 贴边半隐时来提示卡：先滑出全部，避免卡片被屏幕边裁掉
@@ -41,12 +48,23 @@ public partial class BubbleWindow
             VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
         };
-        scroll.Content = new TextBlock
+        var body = new TextBlock
         {
-            Text = text,
+            Text = DataUriRe.Replace(text, "〔图片〕"),
             FontSize = 12.5,
             TextWrapping = TextWrapping.Wrap,
             Foreground = Brushes.White,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        scroll.Content = icon is null ? (Control)body : new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+            Children =
+            {
+                new PeerIconView { Icon = icon, Size = 18 },
+                body,
+            },
         };
         stack.Children.Add(scroll);
         if (actions is not null)
@@ -111,6 +129,7 @@ public partial class BubbleWindow
             UpdateWindowLayoutMode();
             UpdateClickThroughRegion();
         }, DispatcherPriority.Background);
+        return () => RemoveToast(card);
     }
 
     private void RemoveToast(Border card)
@@ -131,7 +150,7 @@ public partial class BubbleWindow
     public void ShowApprovalToast(string toolName, string? argsJson, TaskCompletionSource<ApprovalDecision> tcs)
     {
         var summary = _controller.Conversation.SummarizeApprovalPublic(toolName, argsJson);
-        ShowToast(summary, "#ffb340", autoClose: null,
+        var closeToast = ShowToast(summary, "#ffb340", autoClose: null,
         [
             (I18n.T("ui.approve.2"), () => tcs.TrySetResult(ApprovalDecision.Approve())),
             (I18n.T("ui.full.access"), () =>
@@ -141,12 +160,14 @@ public partial class BubbleWindow
             }),
             (I18n.T("ui.reject.2"), () => tcs.TrySetResult(ApprovalDecision.Reject())),
         ]);
+        // 双通道同步：决议可来自对话流卡片/回合超时取消——完成即收起本 toast（避免死按钮残留）
+        tcs.Task.ContinueWith(_ => Dispatcher.UIThread.Post(closeToast));
     }
 
     /// <summary>A2A 远程工具审批卡：批准 / 完全访问 / 拒绝（与本地审批同逻辑）。</summary>
     public void ShowRemoteApprovalToast(string summary, TaskCompletionSource<ApprovalDecision> tcs)
     {
-        ShowToast(summary, "#ffb340", autoClose: null,
+        var closeToast = ShowToast(summary, "#ffb340", autoClose: null,
         [
             (I18n.T("ui.approve.2"), () => tcs.TrySetResult(ApprovalDecision.Approve())),
             (I18n.T("ui.full.access"), () =>
@@ -156,6 +177,7 @@ public partial class BubbleWindow
             }),
             (I18n.T("ui.reject.2"), () => tcs.TrySetResult(ApprovalDecision.Reject("本机用户拒绝该操作"))),
         ]);
+        tcs.Task.ContinueWith(_ => Dispatcher.UIThread.Post(closeToast));
     }
 
     /// <summary>A2A 远程工具审批卡：气泡上直接批准/拒绝（远程处理不进主会话）。</summary>
@@ -171,21 +193,22 @@ public partial class BubbleWindow
     /// <summary>A2A 配对确认卡：气泡上直接同意/拒绝（展示对方名称、图标与两端一致的验证码）。</summary>
     public void ShowPairingToast(string peerDisplayName, string peerIcon, string shortCode, TaskCompletionSource<bool> tcs)
     {
-        ShowToast($"{peerIcon} {peerDisplayName} 请求配对 · 验证码 {shortCode}", "#ffb340", autoClose: null,
+        ShowToast($"{peerDisplayName} 请求配对 · 验证码 {shortCode}", "#ffb340", autoClose: null,
         [
             (I18n.T("ui.message.5"), () => tcs.TrySetResult(true)),
             (I18n.T("ui.reject.2"), () => tcs.TrySetResult(false)),
-        ]);
+        ], icon: peerIcon);
     }
 
     /// <summary>提问提醒卡：气泡上提示有问题待回答，点「去回答」打开对话窗。</summary>
     public void ShowAskToast(string question, TaskCompletionSource<string> tcs)
     {
         var preview = question.Length > 80 ? question[..80] + "…" : question;
-        ShowToast(preview, "#ffb340", autoClose: null,
+        var closeToast = ShowToast(preview, "#ffb340", autoClose: null,
         [
             (I18n.T("ui.answer.2"), () => _controller.ShowConversation()),
         ]);
+        tcs.Task.ContinueWith(_ => Dispatcher.UIThread.Post(closeToast));
     }
 
     /// <summary>有在线伙伴时把提示卡下移到收拢头像下方，互不遮挡。</summary>

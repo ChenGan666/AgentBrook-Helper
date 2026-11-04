@@ -7,6 +7,8 @@ using System.Text.Json;
 using AgentBrook.Agent.Infrastructure;
 using Avalonia.Threading;
 
+using AgentBrook.Helper.Core.Im;
+
 namespace AgentBrook.Helper.Core;
 
 /// <summary>
@@ -16,7 +18,10 @@ namespace AgentBrook.Helper.Core;
 /// </summary>
 internal static class LocalApiServer
 {
-    private const int Port = 47852;
+    private const int DefaultPort = 47852;
+    internal static int PortOverride = 0;   // 测试钩子：非 0 用作监听端口（生产恒为 47852）
+    private static int Port => PortOverride > 0 ? PortOverride : DefaultPort;
+    internal static ImGateway? Gateway { get; set; }   // S8：/im/* 路由统一挂本监听器（不新增第二个监听）
     private static readonly HttpListener _listener = new();
     private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(15) };
 
@@ -70,6 +75,19 @@ internal static class LocalApiServer
                 return;
             }
             var path = ctx.Request.Url?.AbsolutePath ?? "";
+            // S8：/im/* 段优先分流到 IM 网关（未注册路径返回 404，不透传宿主服务）
+            if (Gateway is not null && path.StartsWith("/im/", StringComparison.Ordinal))
+            {
+                var slim = new ImGatewayRequestSlim(ctx.Request.HttpMethod, path, ctx.Request.Url?.Query ?? "",
+                    ctx.Request.Headers.AllKeys.Where(k => k is not null)
+                        .Select(k => (k!, ctx.Request.Headers[k!] ?? "")).ToList(),
+                    await ReadBodyAsync(ctx), ctx);
+                if (await Gateway.TryHandleAsync(slim.ToGatewayContext(), CancellationToken.None)) return;
+                resp.StatusCode = 404;
+                resp.Close();
+                return;
+            }
+
             if (ctx.Request.HttpMethod == "GET" && path == "/ping")
             {
                 await WriteJsonAsync(resp, 200, new { code = 0, app = "AgentBrook.Helper" });
@@ -212,6 +230,13 @@ internal static class LocalApiServer
         var dir = UiPrefs.WorkspaceDir();
         Directory.CreateDirectory(dir);
         return Path.Combine(dir, "models.json");
+    }
+
+    private static async Task<byte[]> ReadBodyAsync(HttpListenerContext ctx)
+    {
+        using var ms = new MemoryStream();
+        await ctx.Request.InputStream.CopyToAsync(ms);
+        return ms.ToArray();
     }
 
     private static async Task WriteJsonAsync(HttpListenerResponse resp, int status, object payload)

@@ -45,9 +45,15 @@ public sealed partial class AvatarMakerWindow : Window
         ok.Click += (_, _) => Save();
         zoom.PropertyChanged += (_, e) =>
         {
-            if (e.Property == RangeBase.ValueProperty)
+            if (e.Property == RangeBase.ValueProperty && _bitmap is not null && _zoom > 0)
             {
-                _zoom = zoom.Value / 100.0;
+                var newZoom = zoom.Value / 100.0;
+                // 以画布中心为锚缩放：保持视口中心处的图像点不动（否则图片绕左上角缩放）。
+                var cx = (View / 2 - _offsetX) / _zoom;   // 视口中心对应的图内坐标（_zoom 尺度）
+                var cy = (View / 2 - _offsetY) / _zoom;
+                _zoom = newZoom;
+                _offsetX = View / 2 - cx * _zoom;
+                _offsetY = View / 2 - cy * _zoom;
                 ClampOffsets();
                 LayoutImage();
             }
@@ -95,6 +101,10 @@ public sealed partial class AvatarMakerWindow : Window
         try
         {
             await using var stream = await files[0].OpenReadAsync();
+            // 复位缩放（此时旧图还在或为空，滑杆事件按旧图重算无害；随后 FitImage 以 _zoom=1 居中）
+            var slider = this.FindControl<Slider>("ZoomSlider")!;
+            slider.Value = 100;
+            _zoom = 1;
             var bmp = new Bitmap(stream);
             if (bmp.PixelSize.Width < Output || bmp.PixelSize.Height < Output)
             {
@@ -166,7 +176,7 @@ public sealed partial class AvatarMakerWindow : Window
             var img = new Image
             {
                 Source = _bitmap,
-                Stretch = Stretch.None,
+                Stretch = Stretch.Fill,   // None 只按原像素渲染（裁剪而非缩放），Fill 才按 Width/Height 缩放
                 Width = _bitmap.PixelSize.Width * scale,
                 Height = _bitmap.PixelSize.Height * scale,
             };

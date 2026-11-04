@@ -417,7 +417,8 @@ public sealed class A2ARemoteMessageProcessor
         }
     }
 
-    /// <summary>把处理进度以事件形式同步到对端会话流（事件不触发对端自动处理）。</summary>
+    /// <summary>把处理进度仅落本机会话流（不推送对端）：执行过程是本机内部细节，对方只收最终结果；
+    /// 本端审计/会话流仍保留工具轨迹便于自查。</summary>
     private static async Task SendProgressAsync(A2AHost host, string sessionId, string peerNodeId, string text)
     {
         try
@@ -427,13 +428,6 @@ public sealed class A2ARemoteMessageProcessor
                 AgentBrook.A2A.Core.Sessions.SessionEventType.ProgressReported,
                 new { text }, senderName: identity.DisplayName, senderIcon: identity.Icon);
             await host.Store.AppendEventAsync(evt);
-            var peer = await host.Store.GetPeerAsync(peerNodeId);
-            var endpoint = peer?.Endpoints.FirstOrDefault();
-            if (peer is null || endpoint is null) return;
-            await host.Client.AppendEventsAsync(new Uri(endpoint), sessionId,
-            [
-                AgentBrook.A2A.Transport.Protocol.SessionEventDto.FromCore(evt)
-            ]);
         }
         catch
         {

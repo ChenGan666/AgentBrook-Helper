@@ -8,9 +8,12 @@ public sealed record SessionMeta(string Id, string Title, DateTime CreatedAt, Da
 /// <summary>
 /// 多会话存储：workspace/sessions/&lt;id&gt;/（session.json + session-summary.txt 成对）+ index.json 元数据。
 /// 首次初始化时自动把旧版单会话文件（workspace/session.json）迁移为第一个会话条目。
+/// S7 加固（implementation-plan §11.1）：内部锁串行化读改写；索引 tmp+rename 原子写且失败上抛；
+/// 新增 <see cref="Create(string, string)"/> 支持 IM 管道预分配会话 id（§11.2 创建意图）。
 /// </summary>
 public sealed class SessionStore
 {
+    private readonly object _gate = new();
     private readonly string _dir;
     private readonly string _indexFile;
     private readonly string _legacySessionFile;
@@ -48,37 +51,60 @@ public sealed class SessionStore
         _index.FirstOrDefault(m => string.Equals(m.Id, id, StringComparison.Ordinal));
 
     /// <summary>新建会话条目（含目录），返回元数据。</summary>
-    public SessionMeta Create(string title)
+    public SessionMeta Create(string title) => Create(NewId(), title);
+
+    /// <summary>
+    /// 以预分配 id 新建会话条目（IM 管道创建意图 §11.2：id 先落库再创建）。
+    /// id 已存在时返回既有条目（幂等），不抛错——创建意图重放安全。
+    /// </summary>
+    public SessionMeta Create(string id, string title)
     {
-        var meta = new SessionMeta(NewId(), title, DateTime.Now, DateTime.Now);
-        _index.Add(meta);
-        SaveIndex();
-        Directory.CreateDirectory(SessionDir(meta.Id));
-        return meta;
+        lock (_gate)
+        {
+            var existing = _index.FirstOrDefault(m => string.Equals(m.Id, id, StringComparison.Ordinal));
+            if (existing is not null)
+            {
+                return existing;
+            }
+            var meta = new SessionMeta(id, title, DateTime.Now, DateTime.Now);
+            _index.Add(meta);
+            SaveIndex();
+            Directory.CreateDirectory(SessionDir(meta.Id));
+            return meta;
+        }
     }
 
     public void Touch(string id)
     {
-        var i = _index.FindIndex(m => m.Id == id);
-        if (i < 0) return;
-        _index[i] = _index[i] with { UpdatedAt = DateTime.Now };
-        SaveIndex();
+        lock (_gate)
+        {
+            var i = _index.FindIndex(m => m.Id == id);
+            if (i < 0) return;
+            _index[i] = _index[i] with { UpdatedAt = DateTime.Now };
+            SaveIndex();
+        }
     }
 
     public void SetTitle(string id, string title)
     {
-        var i = _index.FindIndex(m => m.Id == id);
-        if (i < 0) return;
-        _index[i] = _index[i] with { Title = title, UpdatedAt = DateTime.Now };
-        SaveIndex();
+        lock (_gate)
+        {
+            var i = _index.FindIndex(m => m.Id == id);
+            if (i < 0) return;
+            _index[i] = _index[i] with { Title = title, UpdatedAt = DateTime.Now };
+            SaveIndex();
+        }
     }
 
     /// <summary>删除会话（目录 + 条目）；目标不存在时静默返回。</summary>
     public void Remove(string id)
     {
-        _index.RemoveAll(m => m.Id == id);
-        SaveIndex();
-        try { Directory.Delete(SessionDir(id), recursive: true); } catch { }
+        lock (_gate)
+        {
+            _index.RemoveAll(m => m.Id == id);
+            SaveIndex();
+            try { Directory.Delete(SessionDir(id), recursive: true); } catch { }
+        }
     }
 
     public string SessionFile(string id) => Path.Combine(SessionDir(id), "session.json");
@@ -109,14 +135,16 @@ public sealed class SessionStore
         }
     }
 
+    /// <summary>
+    /// 索引持久化：tmp + rename 原子替换；失败上抛（S7 §11.1——旧实现静默吞错会丢索引且无感知）。
+    /// rename 同目录覆盖在桌面文件系统上原子；避免"半截 index.json"幽灵态。
+    /// </summary>
     private void SaveIndex()
     {
-        try
-        {
-            File.WriteAllText(_indexFile,
-                JsonSerializer.Serialize(_index, new JsonSerializerOptions { WriteIndented = true }));
-        }
-        catch { }
+        var tmp = _indexFile + ".tmp";
+        File.WriteAllText(tmp,
+            JsonSerializer.Serialize(_index, new JsonSerializerOptions { WriteIndented = true }));
+        File.Move(tmp, _indexFile, overwrite: true);
     }
 
     /// <summary>旧版单会话文件 → 第一个会话条目（只迁移一次；索引已存在则跳过）。</summary>

@@ -197,6 +197,7 @@ internal sealed class LanPeerSource : IDisposable
             var icon = string.IsNullOrWhiteSpace(peer.Icon) ? null : peer.Icon;
             result.Add(new LanPeerInfo(peer.NodeId, name, icon, StatusText(presence)));
         }
+
         return result;
     }
 
@@ -382,7 +383,9 @@ internal sealed class LanPeerAvatar : Border
         };
         _image = new Image
         {
-            Stretch = Stretch.UniformToFill,
+            // 图片头像铺满会显大：边距≈19%，视觉直径≈62%（≈32dip），介于铺满与 emoji 之间。
+            Stretch = Stretch.Uniform,
+            Margin = new Thickness(10),
             IsVisible = false,
         };
         _person = new Avalonia.Controls.Shapes.Path
@@ -461,7 +464,7 @@ internal sealed class LanPeerAvatar : Border
             _text.IsVisible = true;
             _person.IsVisible = false;
         }
-        _tip = $"{PeerIconCodec.ForText(info.Icon ?? "👤")} {info.DisplayName}\n{info.Status}";
+        _tip = info.DisplayName;   // 仅显示名称：不带图标、不带状态行
         ApplyTip();
     }
 

@@ -49,6 +49,11 @@ public sealed class BrookAgent : IAsyncDisposable
     private string _sessionIndexFile = "";   // 历史档案索引持久化文件（summaryFile + ".index"）
     private SessionStageStore? _stages;      // 会话阶段摘要（session-stages.json）：话题边界 → 分阶段注入
     private readonly System.Text.StringBuilder _stageAccum = new();   // 当前阶段的素材积累（关闭时浓缩成摘要）
+    /// <summary>会话持久化分流钩子（S7）：null=legacy 直写（默认，行为不变）；versioned 工作区由宿主注入。</summary>
+    private Infrastructure.ISessionCommitSink? _persistence;
+
+    /// <summary>注入持久化分流钩子（versioned 工作区由 IM 宿主调用；null/不调用=legacy 直写）。</summary>
+    public void AttachSessionPersistence(Infrastructure.ISessionCommitSink? persistence) => _persistence = persistence;
     private readonly List<string> _archiveIndex = [];   // 档案索引条目：折叠的工具结果 / 被裁对话原文 → 存档路径
     private bool _titleAutoSet;   // 本会话标题是否已从首条用户消息自动生成
 
@@ -208,7 +213,8 @@ public sealed class BrookAgent : IAsyncDisposable
         IBrookInteraction? interaction = null,
         Action<string>? log = null,
         IEnumerable<Microsoft.Extensions.AI.AITool>? additionalTools = null,
-        string? additionalInstructions = null)
+        string? additionalInstructions = null,
+        Infrastructure.ISessionCommitSink? persistence = null)
     {
         ArgumentNullException.ThrowIfNull(config);
         interaction ??= new NullInteraction();
@@ -425,7 +431,18 @@ public sealed class BrookAgent : IAsyncDisposable
         var current = sessions.Listed.FirstOrDefault() ?? sessions.Create("新对话");
 
         Console.Error.WriteLine($"[init] {DateTime.Now:HH:mm:ss.fff} session loading...");
-        var session = await LoadOrCreateSessionAsync(agent, sessions.SessionFile(current.Id), log);
+        AgentSession session;
+        if (persistence is { IsVersioned: true })
+        {
+            var currentSnapshot = await persistence.LoadCurrentSnapshotAsync(current.Id);
+            session = currentSnapshot is null
+                ? await agent.CreateSessionAsync()
+                : await agent.DeserializeSessionAsync(JsonDocument.Parse(currentSnapshot).RootElement);
+        }
+        else
+        {
+            session = await LoadOrCreateSessionAsync(agent, sessions.SessionFile(current.Id), log);
+        }
         Console.Error.WriteLine($"[init] {DateTime.Now:HH:mm:ss.fff} session ok");
 
         log(CoreStrings.L(
@@ -445,6 +462,7 @@ public sealed class BrookAgent : IAsyncDisposable
         brook._sessions = sessions;
         brook._skillStore = skillStore;
         brook._sessionId = current.Id;
+        brook._persistence = persistence;   // S7：versioned 工作区分流钩子（null=legacy）
         brook._sessionFile = sessions.SessionFile(current.Id);
         brook._sessionSummaryFile = sessions.SummaryFile(current.Id);
         brook._sessionIndexFile = brook._sessionSummaryFile + ".index";
@@ -818,6 +836,14 @@ public sealed class BrookAgent : IAsyncDisposable
                     text = end >= 0 ? text[(end + noteEnd.Length)..].TrimStart() : "";
                     if (text.Length == 0) continue;
                 }
+                // IM 图片消息：内容=DataContent 图片 + host 内部指令文本——指令不得入转写（用户侧呈现由
+                // 执行器 user 事件 artifacts 负责，主窗口图片内嵌渲染）
+                if (m.Role == ChatRole.User
+                    && m.Contents.Any(c => c is Microsoft.Extensions.AI.DataContent dc
+                        && (dc.MediaType ?? "").StartsWith("image/")))
+                {
+                    continue;
+                }
                 // 插队注记只给模型看：转写/回放剥离，显示用户原始输入
                 if (m.Role == ChatRole.User && text.StartsWith(SteeringNotePrefix, StringComparison.Ordinal))
                 {
@@ -853,6 +879,30 @@ public sealed class BrookAgent : IAsyncDisposable
     };
 
     private string TranscriptFilePath => Path.Combine(Path.GetDirectoryName(_sessionFile)!, "transcript.jsonl");
+
+    /// <summary>读取 transcript.jsonl 全部行签名（role\u0001text）——对账去重用（IM 投影行已入文件时不再重复追加）。</summary>
+    private HashSet<string> ReadTranscriptFileSigs()
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        try
+        {
+            foreach (var line in File.ReadLines(TranscriptFilePath))
+            {
+                var t = line.Trim();
+                if (t.Length == 0) continue;
+                try
+                {
+                    using var doc = JsonDocument.Parse(t);
+                    var role = doc.RootElement.TryGetProperty("role", out var r) ? r.GetString() ?? "" : "";
+                    var text = doc.RootElement.TryGetProperty("text", out var tx) ? tx.GetString() ?? "" : "";
+                    set.Add(TranscriptSig(role, text));
+                }
+                catch { }
+            }
+        }
+        catch { }
+        return set;
+    }
 
     private static string TranscriptSig(string role, string text) => $"{role}\u0001{text}";
 
@@ -908,10 +958,17 @@ public sealed class BrookAgent : IAsyncDisposable
         {
             return;   // 回合进行中：助手文本尚含占位符，落盘会污染 transcript（结束后还原再写）
         }
+        if (AutoApproveExternalTurns)
+        {
+            // 外部回合（IM 同权）：转写由**提交投影独占写入**（含附件 artifacts），此处不写——
+            // 双写会产生同内容两条（界面重复），且跨格式去重会误判新行
+            return;
+        }
         var list = BuildTranscriptTextList();
         lock (_transcriptLock)
         {
             var start = 0;
+            HashSet<string>? existingFileSigs = null;
             if (_transcriptLastSig is not null)
             {
                 var found = -1;
@@ -923,7 +980,14 @@ public sealed class BrookAgent : IAsyncDisposable
                         break;
                     }
                 }
-                start = found + 1;   // found<0 → 游标记录已被压缩清除：内存里只剩未落盘的新记录，全部落盘
+                start = found + 1;
+                if (found < 0)
+                {
+                    // 游标失配（IM 同权回合的投影行与 MAF 文本存在差异/转写压缩清除）：
+                    // 按文件已有签名去重，只追加文件中缺失的条目——防止整段对话重复落盘
+                    start = 0;
+                    existingFileSigs = ReadTranscriptFileSigs();
+                }
             }
             if (start >= list.Count)
             {
@@ -939,6 +1003,11 @@ public sealed class BrookAgent : IAsyncDisposable
                 var sb = new System.Text.StringBuilder();
                 for (var i = start; i < list.Count; i++)
                 {
+                    if (existingFileSigs is not null
+                        && existingFileSigs.Contains(TranscriptSig(list[i].Role, list[i].Text)))
+                    {
+                        continue;   // 文件已有（IM 投影行/镜像行）——去重跳过
+                    }
                     // 本回合产物只挂到最后一条 assistant 记录（与 TurnCompleted 定稿时序一致）
                     var art = i == list.Count - 1 && list[i].Role == "assistant" ? _pendingArtifacts : null;
                     sb.Append(JsonSerializer.Serialize(new TranscriptLine(list[i].Role, list[i].Text, art), TranscriptJsonOptions));
@@ -947,6 +1016,11 @@ public sealed class BrookAgent : IAsyncDisposable
                 File.AppendAllText(TranscriptFilePath, sb.ToString(), new System.Text.UTF8Encoding(false));
                 for (var i = start; i < list.Count; i++)
                 {
+                    if (existingFileSigs is not null
+                        && existingFileSigs.Contains(TranscriptSig(list[i].Role, list[i].Text)))
+                    {
+                        continue;   // 文件已有——内存镜像不重复加入
+                    }
                     var art = i == list.Count - 1 && list[i].Role == "assistant" ? _pendingArtifacts : null;
                     _transcript.Add(new TranscriptEntry(list[i].Role, list[i].Text, art));
                 }
@@ -965,6 +1039,29 @@ public sealed class BrookAgent : IAsyncDisposable
     public string CurrentSessionId => _sessionId;
     public string CurrentSessionTitle => _sessions.Get(_sessionId)?.Title ?? "新对话";
     public IReadOnlyList<SessionMeta> Sessions => _sessions.Listed;
+
+    /// <summary>legacy 会话库（IM 会话注册/时间戳触碰用；S7 加固后的同一实例，勿另建——index.json 单写者）。</summary>
+    public Infrastructure.SessionStore LegacySessions => _sessions;
+
+    /// <summary>IM 会话删除钩子（App 组合根注入 → IM 领域墓碑+路由解绑；null=非 IM 场景）。</summary>
+    public static Func<string, Task>? DeleteImSessionHook { get; set; }
+
+    /// <summary>
+    /// 已装配的 MAF Agent 实例（全工具/全指令/记忆/权限——与主界面回合同权）。
+    /// IM 回合执行器复用此实例（会话状态按 session 隔离，互不干扰）；未就绪为 null。
+    /// </summary>
+    public Microsoft.Agents.AI.AIAgent? InnerAgent => _agent;
+
+    private volatile bool _turnInProgress;
+    /// <summary>回合执行中（IM 执行器互斥等待：与主回合共享 TurnAnswer/_turnCts 等回合态字段）。</summary>
+    public bool TurnInProgress => _turnInProgress;
+
+    /// <summary>外部回合（IM 同权）工具审批自动通过：消息来自用户本人配对通道=用户意图即授权；
+    /// 每次自动批准均留日志。仅外部回合置位（互斥保证不污染主回合），UI 弹窗审批仅主回合使用。</summary>
+    public bool AutoApproveExternalTurns { get; set; }
+
+    /// <summary>当前已载入的 MAF 会话（IM 执行器同权执行后据此编码快照提交）。</summary>
+    public Microsoft.Agents.AI.AgentSession? InnerSession => _session;
 
     /// <summary>切换会话：当前会话落盘后载入目标会话（含各自的前情摘要），上下文完整跟随。</summary>
     public async Task<bool> SwitchSessionAsync(string id)
@@ -991,7 +1088,15 @@ public sealed class BrookAgent : IAsyncDisposable
         LoadArchiveIndex();
         try
         {
-            if (File.Exists(_sessionFile))
+            if (_persistence is { IsVersioned: true })
+            {
+                // versioned：从 CURRENT 版本载入（载入前由调用方持租约并读最新 revision）
+                var current = await _persistence.LoadCurrentSnapshotAsync(meta.Id);
+                _session = current is null
+                    ? await _agent.CreateSessionAsync()
+                    : await _agent.DeserializeSessionAsync(JsonDocument.Parse(current).RootElement);
+            }
+            else if (File.Exists(_sessionFile))
             {
                 var json = JsonDocument.Parse(File.ReadAllText(_sessionFile)).RootElement;
                 _session = await _agent.DeserializeSessionAsync(json);
@@ -1018,9 +1123,47 @@ public sealed class BrookAgent : IAsyncDisposable
         if (id == _sessionId) SessionTitleChanged?.Invoke(t);
     }
 
+    /// <summary>
+    /// 重载当前会话（IM 后台回合落盘后 UI 同步用）：从持久化 CURRENT 重新载入内存态并重建转写镜像。
+    /// 与 SwitchSessionAsync 同一载入路径，但不落盘当前内存态（磁盘已是权威且更新）。
+    /// 非版本化持久化（null）时 no-op——IM 场景专属。
+    /// </summary>
+    public async Task<bool> ReloadCurrentSessionAsync()
+    {
+        if (_agent is null || _persistence is not { IsVersioned: true }) return false;
+        var meta = _sessions.Get(_sessionId);
+        if (meta is null) return false;
+        try
+        {
+            var current = await _persistence.LoadCurrentSnapshotAsync(meta.Id);
+            if (current is not null)
+            {
+                _session = await _agent.DeserializeSessionAsync(JsonDocument.Parse(current).RootElement);
+            }
+            ResetTranscriptForCurrentSession();
+            int transcriptCount;
+            lock (_transcriptLock) { transcriptCount = _transcript.Count; }
+            Console.Error.WriteLine($"[session] 已重载 IM 会话 {meta.Id}：转写 {transcriptCount} 条");
+            SessionTitleChanged?.Invoke(meta.Title);   // UI 借此事件重放 transcript
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[session] 重载当前会话失败：{ex.Message}");
+            return false;
+        }
+    }
+
     /// <summary>删除会话；删的是当前会话时自动切到最近的会话（无则新建）。</summary>
     public async Task DeleteSessionAsync(string id)
     {
+        // IM 会话删除须同步 IM 领域（墓碑+路由解绑）——只删 legacy 目录会让路由悬空：
+        // 同 chat 新消息按"路由丢失"复活旧 id 且无种子（无回复）。经静态钩子解耦（Agent.Core 不引用 Helper）。
+        if (id.StartsWith("im-", StringComparison.Ordinal) && DeleteImSessionHook is not null)
+        {
+            try { await DeleteImSessionHook(id).ConfigureAwait(false); }
+            catch (Exception ex) { Console.Error.WriteLine($"[session] IM 领域删除失败（继续 legacy 清理）：{ex.Message}"); }
+        }
         _sessions.Remove(id);
         try
         {
@@ -1122,6 +1265,9 @@ public sealed class BrookAgent : IAsyncDisposable
         Infrastructure.WorkspaceTempCleaner.SweepAsync(_workspace.Root);   // 节流复查（15min）：回收新增临时 profile 目录
         _turnCts?.Cancel();
         _turnCts = new CancellationTokenSource();
+        _turnInProgress = true;
+        try
+        {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _turnCts.Token);
         var ct = linked.Token;
 
@@ -1268,6 +1414,7 @@ public sealed class BrookAgent : IAsyncDisposable
                 }
             }
 
+            Console.Error.WriteLine($"[turn] 轮次完成：审批 {approvals.Count} 项，回答累计 {TurnAnswer.Length} 字符");
             // 插队消息：无待审批且无可插队时回合结束；有插队则并入下轮调用（Agent 自行判断关联）
             var steering = DrainSteering();
             if (approvals.Count == 0 && steering is null)
@@ -1287,8 +1434,17 @@ public sealed class BrookAgent : IAsyncDisposable
                     ? JsonSerializer.Serialize(args)
                     : null;
 
-                yield return new BrookEvent.Status(BrookRunState.AwaitingApproval, call?.Name);
-                var decision = await _interaction.GetApprovalAsync(call?.Name ?? request.ToolCall.CallId, argsJson, ct);
+                ApprovalDecision decision;
+                if (AutoApproveExternalTurns)
+                {
+                    decision = ApprovalDecision.Approve();
+                    Console.Error.WriteLine($"[approval] 外部回合自动批准：{call?.Name}（IM 同权——用户通道即授权）");
+                }
+                else
+                {
+                    yield return new BrookEvent.Status(BrookRunState.AwaitingApproval, call?.Name);
+                    decision = await _interaction.GetApprovalAsync(call?.Name ?? request.ToolCall.CallId, argsJson, ct);
+                }
 
                 followUp.Add(new ChatMessage(ChatRole.User,
                     [request.CreateResponse(decision.Approved, decision.Reason)]));
@@ -1328,6 +1484,11 @@ public sealed class BrookAgent : IAsyncDisposable
         }
         yield return new BrookEvent.TurnCompleted();
         yield return new BrookEvent.Status(BrookRunState.Idle);
+        }
+        finally
+        {
+            _turnInProgress = false;   // 异常/取消路径也复位（此前ask_user崩溃曾卡死标志→后续IM回合全部降级）
+        }
     }
 
     private static string? TruncateForPreview(string? text)
@@ -2018,6 +2179,13 @@ public sealed class BrookAgent : IAsyncDisposable
             PersistArchiveIndex();   // 本次裁剪/折叠若产生新索引条目，随会话一并落盘
             _stages?.Save();         // 阶段清单随会话落盘
             var serialized = await _agent.SerializeSessionAsync(_session);
+            if (_persistence is { IsVersioned: true })
+            {
+                // versioned 工作区（IM 试点）：快照经 CURRENT 提交单元推进（CAS），不再直写 session.json
+                await _persistence.CommitSnapshotAsync(_sessionId, serialized.GetRawText());
+                _sessions.Touch(_sessionId);
+                return;
+            }
             var dir = Path.GetDirectoryName(_sessionFile);
             if (!string.IsNullOrEmpty(dir))
             {

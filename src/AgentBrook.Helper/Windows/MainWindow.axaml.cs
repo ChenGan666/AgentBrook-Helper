@@ -378,6 +378,13 @@ public partial class MainWindow : Window
             _bubbleAttachments = new List<SentAttachment>();
             Dispatcher.UIThread.Post(() => AddUserBubble(text, atts));
         };
+        // IM 后台回合落盘后同步：正被查看的 IM 会话重放 transcript（手机新消息 + IM 回复全部可见）。
+        // 审批待决时跳过——清屏会抹掉待决审批卡（用户无法批准 → 回合挂到超时）；决议后由回合提交的重放统一补齐。
+        _controller.SessionReloaded += () =>
+        {
+            if (_controller.HasPendingApproval) return;
+            Dispatcher.UIThread.Post(() => ClearChatForSessionSwitch(_controller.CurrentSessionTitle));
+        };
         _controller.ToolFeedback += text => Dispatcher.UIThread.Post(() =>
         {
             // todo_* 由计划卡展示，终端卡不重复刷完成行
@@ -755,16 +762,6 @@ public partial class MainWindow : Window
         _visibleFromEnd = transcript.Count;
         _historyExhausted = false;
         RebuildStageRail();   // 阶段清单随会话切换重建（锚点由 BuildTranscriptItem 的 StartHint 匹配补登）
-        var replayed = transcript.Count;
-
-        if (replayed > 0)
-        {
-            AddAssistantBubble(I18n.T("ui.value.6", title));
-        }
-        else
-        {
-            AddAssistantBubble(I18n.T("ui.switched.to.session.value.its.context.and.summary.are.loaded.just.continue", title));
-        }
         ScrollToEnd();
     }
 
@@ -2510,12 +2507,76 @@ public partial class MainWindow : Window
 
     /// <summary>按角色构造对话记录条目（回放/滚动加载共用）：user 气泡、assistant 走 Markdown 渲染。
     /// 统一标记 Tag="history"：不计入直播裁剪上限（总量受会话记录窗口约束，有界）。</summary>
+    private static bool IsImageFileType(string? fileType) =>
+        fileType is not null && (fileType == "png" || fileType == "jpg" || fileType == "jpeg"
+            || fileType == "gif" || fileType == "webp" || fileType == "bmp");
+
+    /// <summary>附件文件行（图标 + 文件名；点击用系统默认程序打开）。</summary>
+    private Control BuildAttachmentFileRow(string fileName, string filePath)
+    {
+        var row = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 6 };
+        row.Children.Add(new TextBlock { Text = "📄", FontSize = 14 });
+        var link = new Button
+        {
+            Content = fileName.Length > 40 ? fileName[..40] + "…" : fileName,
+            FontSize = 12.5,
+            Padding = new Thickness(4, 2),
+            Background = Brushes.Transparent,
+            Foreground = new SolidColorBrush(Color.Parse("#9cc4ff")),
+        };
+        link.Click += (_, _) =>
+        {
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(filePath) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[ui] 打开附件失败：{ex.Message}");
+            }
+        };
+        row.Children.Add(link);
+        return row;
+    }
+
     private Control BuildTranscriptItem(string role, string text, AgentBrook.Agent.Infrastructure.TaskArtifacts? artifacts = null)
     {
         if (role == "user")
         {
             var stack = new StackPanel { Spacing = 6 };
-            stack.Children.Add(MarkdownView.Selectable(new SelectableTextBlock { Text = text, TextWrapping = TextWrapping.Wrap }));
+            // IM 附件（随 user 事件 artifacts 落 transcript）：图片自适应宽高内嵌，文件显示图标行
+            if (artifacts is { Files.Count: > 0 } userFiles)
+            {
+                foreach (var f in userFiles.Files)
+                {
+                    if (IsImageFileType(f.FileType) && File.Exists(f.FilePath))
+                    {
+                        try
+                        {
+                            // 圆角用 Border 包裹（Image 无 CornerRadius 属性）
+                            var image = new Border
+                            {
+                                Child = new Image
+                                {
+                                    Source = new Bitmap(f.FilePath),
+                                    MaxWidth = 360, MaxHeight = 420,   // 自适应：等比缩放，不撑破气泡
+                                    Stretch = Stretch.Uniform,
+                                    HorizontalAlignment = HorizontalAlignment.Right,
+                                },
+                                CornerRadius = new CornerRadius(8),
+                                ClipToBounds = true,
+                                HorizontalAlignment = HorizontalAlignment.Right,
+                            };
+                            stack.Children.Add(image);
+                            continue;
+                        }
+                        catch { /* 图片加载失败降级为文件行 */ }
+                    }
+                    stack.Children.Add(BuildAttachmentFileRow(f.FileName, f.FilePath));
+                }
+            }
+            if (!string.IsNullOrWhiteSpace(text))
+                stack.Children.Add(MarkdownView.Selectable(new SelectableTextBlock { Text = text, TextWrapping = TextWrapping.Wrap }));
             var item = new Border { Classes = { "userBubble" }, Child = stack, Tag = "history" };
             // 阶段锚点匹配：StartHint（开启该阶段的用户消息开头）对得上就登记定位锚点
             if (text.Trim() is { } t && t.Length > 0)

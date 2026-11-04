@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- 通用插件宿主（implementation-plan §3）：工厂与实例生命周期、活动租约、受控资源
+         （状态存储/凭据/网络/Webhook/后台任务/审计）。不依赖 Helper/Agent.Core。 -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AgentBrook.Runtime.Abstractions\AgentBrook.Runtime.Abstractions.csproj" />
+    <ProjectReference Include="..\AgentBrook.Plugin.Hosting.Abstractions\AgentBrook.Plugin.Hosting.Abstractions.csproj" />
+    <ProjectReference Include="..\AgentBrook.Plugin.Abstractions\AgentBrook.Plugin.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -215,6 +215,15 @@ public sealed class AssistantController : IBrookInteraction
     /// <summary>会话列表/标题变化（切换、新建、删除、自动命名）后触发，UI 刷新会话下拉。</summary>
     public event Action? SessionsChanged;
 
+    /// <summary>当前会话已从持久化重载（IM 后台回合落盘后同步 UI——重放 transcript）。</summary>
+    public event Action? SessionReloaded;
+
+    /// <summary>通知会话列表刷新（IM 回合提交后列表时间戳已变——订阅方按需重建列表）。</summary>
+    public void RefreshSessionList() => SessionsChanged?.Invoke();
+
+    /// <summary>有审批卡待决（UI 重放/清屏会抹掉待决卡片 → 用户无法批准 → 回合挂到超时；守卫用）。</summary>
+    public bool HasPendingApproval => _approvalTcs is not null;
+
     public string CurrentSessionTitle => Ready ? Agent!.CurrentSessionTitle : "新对话";
     public IReadOnlyList<(string Role, string Text, AgentBrook.Agent.Infrastructure.TaskArtifacts? Artifacts)> GetTranscript() =>
         Ready ? Agent!.GetTranscript() : [];
@@ -398,10 +407,11 @@ public sealed class AssistantController : IBrookInteraction
                 < 23 => "晚上",
                 _ => "深夜",
             };
-            var prompt = $"现在是 {now:yyyy年M月d日 dddd HH:mm}（{period}）。" +
-                "请以助手的口吻用不超过 60 字的中文向用户打一句问候：结合时间段与（如有）临近或当天的重要节假日；" +
-                "再自然地带一句你能帮什么忙（如查行情、写报告、跑脚本、整理文件）。直接输出问候语本身，不要引号、不要解释。";
-            text = await Agent.QuickCompleteAsync("你是桌面智能体 Brook 的问候语生成器。输出一条简短、自然、温暖、不油腻的中文问候。", prompt);
+            var prompt = "请以助手的口吻用不超过 60 字的文字向用户打一句问候：结合时间段与（如有）临近或当天的重要节假日；" +
+                "再自然地带一句你能帮什么忙。直接输出问候语本身，不要引号、不要解释。";
+            prompt = prompt+$"现在是 {now:yyyy年M月d日 dddd HH:mm}（{period}）。";
+
+            text = await Agent.QuickCompleteAsync("输出一条简短、自然、温暖、不油腻的问候，或一句诗。", prompt);
         }
         catch
         {
@@ -420,7 +430,7 @@ public sealed class AssistantController : IBrookInteraction
                 < 23 => "晚上",
                 _ => "深夜",
             };
-            text = $"{period}好！我是 {AssistantIdentity.Current}，可以帮你查行情、写报告、跑脚本或整理文件。";
+            text = $"{period}好！我是 {AssistantIdentity.Current}。";
         }
 
         Dispatcher.UIThread.Post(() =>
@@ -530,6 +540,16 @@ public sealed class AssistantController : IBrookInteraction
                 && AssistantIdentity.NotifySoundOn)
             {
                 NotifySound.Play(AssistantIdentity.NotifySoundId);
+            }
+
+            // IM 会话双向闭环：用户在主界面 IM 会话中输入的回合，结果同样送达该 IM
+            // （IM 请求的结果、用户在该 IM 会话中请求的结果——设计要求）。非 IM 会话 no-op。
+            if (sawTurnCompleted && !turnCancelled && !_turnHadError
+                && Agent?.CurrentSessionId.StartsWith("im-", StringComparison.Ordinal) == true)
+            {
+                var imAnswer = Agent.TurnAnswer;
+                if (!string.IsNullOrWhiteSpace(imAnswer))
+                    Core.Im.ImComposition.TryDeliverToIm(Agent.CurrentSessionId, imAnswer);
             }
         }
         DequeueAndSend();
@@ -660,6 +680,33 @@ public sealed class AssistantController : IBrookInteraction
     public void PublishRemoteTurnCompleted() =>
         Dispatcher.UIThread.Post(() => RemoteEventRaised?.Invoke(new AgentBrook.Agent.BrookEvent.TurnCompleted()));
 
+    // ── IM 回合 UI 桥（HelperImTurnExecutor → 气泡/主窗口；过程可见，IM 侧只收最终结果）──
+
+    /// <summary>IM 回合开始：气泡状态显示活动（detail=会话标题形态的会话标识）。</summary>
+    public void PublishImTurnStarted(string sessionId, string detail) =>
+        Dispatcher.UIThread.Post(() =>
+        {
+            RemoteStateChanged?.Invoke(BrookRunState.Thinking, detail);
+        });
+
+    /// <summary>
+    /// 重载当前会话并通知 UI 重放 transcript（IM 后台回合落盘后，正被查看的会话同步新往来消息）。
+    /// Busy 时跳过（主回合进行中换内存态会破坏运行中的回合——等主回合结束由后续重载/切换补看）。
+    /// </summary>
+    public async Task ReloadCurrentSessionAsync()
+    {
+        if (Busy || Agent is null) return;
+        if (await Agent.ReloadCurrentSessionAsync())
+            SessionReloaded?.Invoke();
+    }
+
+    /// <summary>IM 回合文本增量：已弃用（与提交后重载重复渲染）；保留空实现兼容旧调用。</summary>
+    public void PublishImDelta(string sessionId, string text) { }
+
+    /// <summary>IM 回合结束：气泡状态回 Idle（内容更新由提交后重载负责，不再注入 UI 回合事件）。</summary>
+    public void PublishImTurnEnded() =>
+        Dispatcher.UIThread.Post(() => RemoteStateChanged?.Invoke(BrookRunState.Idle, null));
+
     /// <summary>
     /// 远程处理的工具审批：与本地审批同策略（FullAccess/RequireApprovalTools），
     /// 但呈现走气泡 toast + 远程状态（不进主会话卡片）。
@@ -766,8 +813,7 @@ public sealed class AssistantController : IBrookInteraction
             Dispatcher.UIThread.Post(() => ModelsChanged?.Invoke());
             var line = "🔄 模型列表已自动更新——" + string.Join("；", changes);
             Console.Error.WriteLine($"[models-refresh] {line}");
-            // 气泡/对话窗可见提示（与初始化日志同通道）
-            EventRaised?.Invoke(new BrookEvent.ToolStarted("log:" + line, null));
+            // 不走 EventRaised（回合外 log: 事件会渲染成永不结束的终端卡）——气泡 toast（15s 自动关）已足够
             // 气泡弹出提示卡：新增/下架摘要，自动关闭；点击不弹对话窗
             var summary = I18n.T("models.refreshed", string.Join("；", changes));
             Dispatcher.UIThread.Post(() =>
@@ -848,6 +894,7 @@ public sealed class AssistantController : IBrookInteraction
 
     public Task<ApprovalDecision> GetApprovalAsync(string toolName, string? argumentsJson, CancellationToken cancellationToken = default)
     {
+        Console.Error.WriteLine($"[approval] 审批请求：{toolName}（FullAccess={FullAccess}）");
         // 完全访问模式：自动通过，仅在对话流中留痕
         if (FullAccess)
         {
@@ -858,23 +905,26 @@ public sealed class AssistantController : IBrookInteraction
         _approvalTcs = tcs;
         LinkCancel(tcs, cancellationToken, () => { if (_approvalTcs == tcs) _approvalTcs = null; });
         RaiseState(BrookRunState.AwaitingApproval, toolName);
-        // 对话窗正在前台：卡片就地交互；否则不拉窗抢焦点，改在气泡上给快捷批准/拒绝（卡片仍入对话流留档）
-        var convActive = _conversation is { IsVisible: true, IsActive: true };
+        // 双通道审批（IM 同权回合的关键可用性保障——任一通道可用即可批准）：
+        // ①对话流卡片（装配失败降级日志，不静默吞卡）②气泡 toast 无条件弹出（自带批准/拒绝按钮）。
+        // IsVisible 属 UI 线程属性——读取必须在 UI 投递内（IM 回合后台线程调用会 VerifyAccess 崩）。
         Dispatcher.UIThread.Post(() =>
         {
-            Conversation.AddApprovalCard(toolName, argumentsJson, tcs);
-            if (!convActive)
+            var convActive = _conversation is { IsVisible: true, IsActive: true };
+            try
             {
-                Bubble?.ShowApprovalToast(toolName, argumentsJson, tcs);
-                if (AssistantIdentity.NotifySoundOn)
-                {
-                    NotifySound.Play(AssistantIdentity.NotifySoundId);   // 需要用户批准：响铃提醒
-                }
+                Conversation.AddApprovalCard(toolName, argumentsJson, tcs);
             }
-            else
+            catch (Exception ex)
             {
-                ShowConversation();
+                Console.Error.WriteLine($"[approval] 卡片装配失败（已降级，气泡通道仍可用）：{ex.Message}");
             }
+            Bubble?.ShowApprovalToast(toolName, argumentsJson, tcs);
+            if (AssistantIdentity.NotifySoundOn)
+            {
+                NotifySound.Play(AssistantIdentity.NotifySoundId);   // 需要用户批准：响铃提醒
+            }
+            if (convActive) ShowConversation();
         });
         return tcs.Task;
     }
@@ -885,9 +935,10 @@ public sealed class AssistantController : IBrookInteraction
         _askTcs = tcs;
         LinkCancel(tcs, cancellationToken, () => { if (_askTcs == tcs) _askTcs = null; });
         RaiseState(BrookRunState.AwaitingUserAnswer, null);
-        var convActive = _conversation is { IsVisible: true, IsActive: true };
+        // IsVisible 属 UI 线程属性——IM 同权回合在后台线程调用本方法，读取必须挪进 UI 投递内（跨线程 VerifyAccess 崩）
         Dispatcher.UIThread.Post(() =>
         {
+            var convActive = _conversation is { IsVisible: true, IsActive: true };
             Conversation.AddAskCard(question, choices, tcs);
             if (!convActive)
             {

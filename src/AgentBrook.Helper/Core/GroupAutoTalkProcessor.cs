@@ -101,7 +101,8 @@ public sealed class GroupAutoTalkProcessor
                 continue;
             }
             var mention = DetectMention(text, c);
-            var gates = mention != MentionKind.None && PassesGates(session.SessionId, e.SenderNodeId);
+            var gateReason = "";
+            var gates = mention != MentionKind.None && PassesGates(session.SessionId, e.SenderNodeId, out gateReason);
             var scope = mention switch
             {
                 MentionKind.Self => $"@本机（{c.Config.DisplayName}）",
@@ -110,10 +111,10 @@ public sealed class GroupAutoTalkProcessor
             };
             if (mention != MentionKind.None)
             {
-                Trace($"收到 {e.SenderName ?? e.SenderNodeId[..Math.Min(8, e.SenderNodeId.Length)]} 消息：{scope}；闸门={(gates ? "通过" : "拦截")}");
+                Trace($"收到 {e.SenderName ?? e.SenderNodeId[..Math.Min(8, e.SenderNodeId.Length)]} 消息：{scope}；闸门={(gates ? "通过" : $"拦截（{gateReason}）")}");
                 if (!gates)
                 {
-                    Trace("防循环闸门未通过，保持沉默");
+                    Trace($"保持沉默：{gateReason}");
                 }
             }
             if (mention == MentionKind.None || !gates)
@@ -129,14 +130,14 @@ public sealed class GroupAutoTalkProcessor
     /// 群消息气泡提醒（设置 → 协作 → 群消息提醒：off/mention/all）。
     /// 每群 10 秒节流防轰炸；点击「查看」打开 A2A 会话中心。仅提醒他人消息，自己的不提醒。
     /// </summary>
-    private void NotifyGroupMessage(A2AExtensionController c, A2ASession session, SessionEvent e, string text)
+    private void NotifyGroupMessage(A2AExtensionController c, A2ASession session, SessionEvent e, string? text)
     {
         var mode = c.Config.GroupNotifyMode;
         if (string.Equals(mode, "off", StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
-        var mentioned = DetectMention(text, c) != MentionKind.None;
+        var mentioned = !string.IsNullOrEmpty(text) && DetectMention(text, c) != MentionKind.None;
         if (string.Equals(mode, "mention", StringComparison.OrdinalIgnoreCase) && !mentioned)
         {
             return;
@@ -198,8 +199,9 @@ public sealed class GroupAutoTalkProcessor
             {
                 return;
             }
-            if (!PassesGates(session.SessionId, incoming.SenderNodeId))
+            if (!PassesGates(session.SessionId, incoming.SenderNodeId, out var gateReason))
             {
+                Trace($"出队复检拦截，保持沉默：{gateReason}");
                 return;   // 排队期间态势变化：重新过闸
             }
 
@@ -387,17 +389,20 @@ public sealed class GroupAutoTalkProcessor
         }
     }
 
-    /// <summary>六道闸（④⑤③②① 按序判定，⑥ 已在入队前判定）。返回 true 表示允许自动应答。</summary>
-    private bool PassesGates(string groupId, string senderNodeId)
+    /// <summary>六道闸（④⑤③②① 按序判定，⑥ 已在入队前判定）。返回 true 表示允许自动应答；reason 给出具体拦截的闸门。</summary>
+    private bool PassesGates(string groupId, string senderNodeId, out string reason)
     {
+        reason = "";
         var c = _controller();
         if (c is null)
         {
+            reason = "controller 未就绪";
             return false;
         }
         // ④ 忙碌让位：正在服务本机用户时不参与群聊
         if (c.CurrentPresence.WorkState is WorkState.Busy or WorkState.AwaitingUser)
         {
+            reason = $"④本机{ c.CurrentPresence.WorkState}让位";
             return false;
         }
         lock (_lock)
@@ -408,6 +413,7 @@ public sealed class GroupAutoTalkProcessor
                 // ① 连续自动发言上限：最近 4 条全是 Agent 自动发言（无人类消息）→ 静默
                 if (snapshot.Count >= MaxConsecutiveAuto && snapshot.TakeLast(MaxConsecutiveAuto).All(m => m.Auto))
                 {
+                    reason = $"①连续{MaxConsecutiveAuto}条自动发言";
                     return false;
                 }
                 // ② 二人乒乓：最近 3 条仅由"对方+自己"两人交替 → 该对之间静默
@@ -417,6 +423,7 @@ public sealed class GroupAutoTalkProcessor
                     var senders = last3.Select(m => m.Sender).Distinct().ToList();
                     if (senders.Count == 2 && senders.All(s => s == senderNodeId || s == c.NodeId))
                     {
+                        reason = "②二人乒乓3轮";
                         return false;
                     }
                 }
@@ -428,11 +435,13 @@ public sealed class GroupAutoTalkProcessor
                 // ③ 自身频率配额
                 if (window.Count >= MaxSelfRepliesPerWindow)
                 {
+                    reason = $"③10分钟自答≥{MaxSelfRepliesPerWindow}条";
                     return false;
                 }
                 // ⑤ 冷却间隔
                 if (window.Count > 0 && now - window.Max() < Cooldown)
                 {
+                    reason = $"⑤冷却{Cooldown.TotalSeconds:0}s内";
                     return false;
                 }
             }

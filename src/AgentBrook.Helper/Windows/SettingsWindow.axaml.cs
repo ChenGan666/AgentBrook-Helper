@@ -196,6 +196,10 @@ public partial class SettingsWindow : WindowBase
         {
             if (NavPlugins.IsChecked == true) ShowPage(PagePlugins);
         };
+        NavIm.IsCheckedChanged += (_, _) =>
+        {
+            if (NavIm.IsChecked == true) ShowPage(PageIm);
+        };
         this.FindControl<Button>("PluginRefreshBtn")!.Click += async (_, _) =>
         {
             this.FindControl<Button>("PluginRefreshBtn")!.IsEnabled = false;
@@ -502,7 +506,10 @@ public partial class SettingsWindow : WindowBase
         PageSkills.IsVisible = page == PageSkills;
         PageEnvironment.IsVisible = page == PageEnvironment;
         PagePlugins.IsVisible = page == PagePlugins;
+        PageIm.IsVisible = page == PageIm;
+        WireImNav();
         if (page == PagePlugins) _ = RefreshPluginLists();
+        if (page == PageIm) _ = RefreshImSectionAsync();
         if (page == PageEnvironment && _environmentResults.Count == 0)
         {
             _ = CheckEnvironmentAsync();
@@ -579,7 +586,8 @@ public partial class SettingsWindow : WindowBase
             // 单行布局（DockPanel）：图标 | 名称(填充) | 开关 | 设置 | 卸载（左→右）。
             // Right 停靠"先加在最右"——所以按卸载→设置→开关的顺序添加，视觉恰为从左到右。
             var contributor = plugins.GetSettingsContributor(id);
-            var iconPath = plugins.GetIconPath(id);   // 插件包内 icon.png（约定）；无则不显示图标
+            var iconPath = plugins.GetIconPath(id);       // 插件包内 icon.png（约定）
+            var iconEmoji = plugins.GetPluginIcon(id);    // index/安装态声明的 emoji（无 icon.png 时回退）
             var row = new DockPanel { LastChildFill = false };
 
             if (iconPath is not null)
@@ -592,6 +600,20 @@ public partial class SettingsWindow : WindowBase
                 };
                 DockPanel.SetDock(iconImage, Dock.Left);
                 row.Children.Add(iconImage);
+            }
+            else if (!string.IsNullOrEmpty(iconEmoji))
+            {
+                var iconText = new TextBlock
+                {
+                    Text = iconEmoji,
+                    FontSize = 15,
+                    Width = 20,
+                    TextAlignment = Avalonia.Media.TextAlignment.Center,
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                    Margin = new Thickness(0, 0, 2, 0),
+                };
+                DockPanel.SetDock(iconText, Dock.Left);
+                row.Children.Add(iconText);
             }
 
             var nameText = new TextBlock
@@ -691,6 +713,10 @@ public partial class SettingsWindow : WindowBase
             }
             foreach (var available_entry in available)
             {
+                if (available_entry.IsImChannel)
+                {
+                    continue;   // IM 通道插件显示在「IM 连接」板块
+                }
                 if (plugins.ListInstalled().ContainsKey(available_entry.Id))
                 {
                     continue;   // 已装
@@ -1284,6 +1310,14 @@ public partial class SettingsWindow : WindowBase
         if (ngs is not null) ngs.Text = I18n.T("ui.system");
         var nenv = this.FindControl<TextBlock>("NavEnvironmentText");
         if (nenv is not null) nenv.Text = I18n.T("ui.environment");
+        var ngim = this.FindControl<TextBlock>("NavImText");
+        if (ngim is not null) ngim.Text = I18n.T("ui.im.connection");
+        var ngimGroup = this.FindControl<TextBlock>("NavGroupIm");
+        if (ngimGroup is not null) ngimGroup.Text = I18n.T("ui.im.connection");
+        var imTitle = this.FindControl<TextBlock>("ImTitle");
+        if (imTitle is not null) imTitle.Text = I18n.T("ui.im.connection");
+        var imDesc = this.FindControl<TextBlock>("ImDesc");
+        if (imDesc is not null) imDesc.Text = I18n.T("ui.im.connection.desc");
         var saveBtn = this.FindControl<Button>("SavePersonalBtn");
         if (saveBtn is not null) saveBtn.Content = I18n.T("ui.save.general");
         var promptBox2 = this.FindControl<TextBox>("CustomPromptBox");

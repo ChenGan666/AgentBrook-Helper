@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- 内核运行时（implementation-plan §3）：版本目录/CURRENT、提交日志与事件、恢复、Blob、
+         持久化授权基础设施。im.db 是内部存储实例名，不入契约。SQLite 固定 10.0.14（S0 D-S0-3）。 -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AgentBrook.Runtime.Abstractions\AgentBrook.Runtime.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

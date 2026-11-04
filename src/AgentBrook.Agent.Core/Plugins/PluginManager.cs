@@ -53,13 +53,55 @@ public sealed class PluginManager
 
     // ── 安装 / 卸载 / 启停 ───────────────────────────────────────────────
 
+    /// <summary>
+    /// 类别加载器（S8）：index/State 的 Category 命中已注册类别时，安装与恢复改由外部宿主加载
+    /// （如 IM 通道插件经 PluginPackageLoader 进新宿主），不再走旧 IHelperPlugin 生命周期。
+    /// 由 Helper 组合根注册；Agent.Core 不感知具体宿主。
+    /// </summary>
+    private readonly Dictionary<string, Func<string, Task>> _categoryLoaders = [];
+    /// <summary>调用方对特定插件 id 的类别覆盖（服务器 index 缺 category 字段时的兜底）。</summary>
+    private readonly Dictionary<string, string> _categoryOverrides = [];
+
+    /// <summary>注册类别加载器（每类别一个；重复注册覆盖）。loader 接收安装目录。</summary>
+    public void RegisterCategoryLoader(string category, Func<string, Task> loader) =>
+        _categoryLoaders[category] = loader;
+
+    /// <summary>声明指定插件 id 的类别覆盖（调用方已知它是 IM 插件——服务器 index 可能缺字段）。</summary>
+    public void SetCategoryOverride(string pluginId, string category) =>
+        _categoryOverrides[pluginId] = category;
+
+    private bool TryGetCategoryLoader(string category, out Func<string, Task> loader)
+    {
+        return _categoryLoaders.TryGetValue(category ?? "", out loader!);
+    }
+
+    /// <summary>获取条目的有效类别：优先调用方覆盖，回退 index 声明。</summary>
+    internal string GetEffectiveCategory(PluginIndexEntry entry)
+    {
+        if (_categoryOverrides.TryGetValue(entry.Id, out var overrideCat))
+            return overrideCat;
+        return entry.Category;
+    }
+
     /// <summary>安装（下载+校验+入位）并加载启用；progress 回报下载/校验/解压进度。</summary>
     public async Task InstallAsync(PluginIndexEntry entry, CancellationToken ct = default,
         IProgress<PluginInstallProgress>? progress = null)
     {
         var dir = await _catalog.InstallAsync(entry, ct, progress);
-        progress?.Report(new PluginInstallProgress(PluginInstallProgress.Done, 0, null));
         var entryDll = FindEntryDll(dir);
+        // S8：类别分流——IM 通道等类别由注册的外部宿主加载（旧生命周期不适用）
+        var effectiveCategory = GetEffectiveCategory(entry);
+        if (TryGetCategoryLoader(effectiveCategory, out var categoryLoader))
+        {
+            _state.SetInstalled(entry.Id, entry.Latest, enabled: true,
+                Path.GetFileName(dir.TrimEnd(Path.DirectorySeparatorChar)),
+                string.IsNullOrEmpty(entry.Icon) ? null : entry.Icon,
+                effectiveCategory);
+            await categoryLoader(dir).ConfigureAwait(false);
+            progress?.Report(new PluginInstallProgress(PluginInstallProgress.Done, 0, null));
+            return;
+        }
+        progress?.Report(new PluginInstallProgress(PluginInstallProgress.Done, 0, null));
         await LoadFromDirectoryAsync(entry.Id, entry.Latest, dir, entryDll, enabled: true);
         // 实际入位目录名（热插拔下可能带 -r{n} 后缀），恢复加载时按此定位
         _state.SetInstalled(entry.Id, entry.Latest, enabled: true,
@@ -193,6 +235,13 @@ public sealed class PluginManager
             try
             {
                 var dir = ResolveDir(id, entry.Version);
+                // S8：类别分流恢复（im 类别由外部宿主加载）
+                if (TryGetCategoryLoader(entry.Category, out var categoryLoader))
+                {
+                    await categoryLoader(dir).ConfigureAwait(false);
+                    _log?.Invoke($"[plugins] {id} {entry.Version} 已由类别宿主恢复加载（{entry.Category}）");
+                    continue;
+                }
                 var entryDll = FindEntryDll(dir);
                 await LoadFromDirectoryAsync(id, entry.Version, dir, entryDll, enabled: true);
                 _log?.Invoke($"[plugins] {id} {entry.Version} 已恢复加载");

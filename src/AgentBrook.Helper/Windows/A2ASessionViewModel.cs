@@ -81,19 +81,26 @@ public sealed class A2ASessionItem : INotifyPropertyChanged
 {
     private A2ASession _session;
 
-    public A2ASessionItem(A2ASession session, string localNodeId, Func<string, string>? resolveMember)
+    public A2ASessionItem(A2ASession session, string localNodeId,
+        Func<string, string>? resolveMember, Func<string, string>? resolveMemberIcon = null)
     {
         _session = session;
         LocalNodeId = localNodeId;
         ResolveMember = resolveMember;
+        ResolveMemberIcon = resolveMemberIcon;
     }
 
-    /// <summary>周期刷新时就地更新会话数据并通知 UI（标题/摘要随之刷新，不重建集合）。</summary>
-    public void Update(A2ASession session)
+    /// <summary>周期刷新时就地更新会话数据并通知 UI（标题/摘要/图标随之刷新，不重建集合）。
+    /// 解析器每次刷新都以新 peers 快照重建，必须一并替换，否则头像停在创建时的旧值。</summary>
+    public void Update(A2ASession session,
+        Func<string, string>? resolveMember = null, Func<string, string>? resolveMemberIcon = null)
     {
         _session = session;
+        if (resolveMember is not null) ResolveMember = resolveMember;
+        if (resolveMemberIcon is not null) ResolveMemberIcon = resolveMemberIcon;
         OnPropertyChanged(nameof(Title));
         OnPropertyChanged(nameof(Summary));
+        OnPropertyChanged(nameof(Icon));
     }
 
     public A2ASession Session => _session;
@@ -101,8 +108,11 @@ public sealed class A2ASessionItem : INotifyPropertyChanged
     /// <summary>本机 nodeId：用于在成员里识别"对方"（会话由任意一方创建，peer 角色可能指向本机）。</summary>
     public string LocalNodeId { get; }
 
-    /// <summary>nodeId → "图标 名称" 解析器（由 ViewModel 按已配对 Peer 资料填充）。</summary>
-    public Func<string, string>? ResolveMember { get; }
+    /// <summary>nodeId → 纯名称解析器（由 ViewModel 按已配对 Peer 资料填充）。</summary>
+    public Func<string, string>? ResolveMember { get; private set; }
+
+    /// <summary>nodeId → 原始图标形态解析器（emoji / data: / img:），供 PeerIconView 渲染。</summary>
+    public Func<string, string>? ResolveMemberIcon { get; private set; }
 
     /// <summary>本机是否为该群协调者（群主）：控制群组行内「改名 / 关闭」图标按钮的可见性。</summary>
     public bool IsCoordinator => string.Equals(_session.CoordinatorNodeId, LocalNodeId, StringComparison.Ordinal);
@@ -119,14 +129,22 @@ public sealed class A2ASessionItem : INotifyPropertyChanged
                     ? $"群组 {_session.SessionId[..Math.Min(8, _session.SessionId.Length)]}"
                     : _session.Name;
             }
-            var other = _session.Members.FirstOrDefault(x => x.NodeId != LocalNodeId)?.NodeId
-                ?? _session.Members.FirstOrDefault(x => x.Role == "peer")?.NodeId
-                ?? "未知";
+            var other = OtherNodeId ?? "未知";
             var label = ResolveMember?.Invoke(other) ?? other;
             return label.Length > 24 ? label[..24] + "…" : label;
         }
     }
     public string Summary => Unread > 0 ? $"{Title}  ·  {Unread} 未读" : Title;
+
+    /// <summary>peer 会话的对方 nodeId；群会话不适用（列表用群图标）。</summary>
+    private string? OtherNodeId =>
+        _session.Members.FirstOrDefault(x => x.NodeId != LocalNodeId)?.NodeId
+        ?? _session.Members.FirstOrDefault(x => x.Role == "peer")?.NodeId;
+
+    /// <summary>列表行图标：群会话固定 👥；peer 会话取对方原始图标形态。</summary>
+    public string Icon => _session.Kind == SessionKind.Group
+        ? "👥"
+        : OtherNodeId is { } nid ? ResolveMemberIcon?.Invoke(nid) ?? "🤖" : "🤖";
 
     /// <summary>群名等元数据变更后调用：刷新标题/摘要绑定。</summary>
     public void RefreshTitle()
@@ -759,10 +777,10 @@ public sealed class A2ASessionViewModel : INotifyPropertyChanged, IDisposable
             {
                 var peer = peers.FirstOrDefault(x => x.NodeId == nodeId);
                 if (peer is null) return nodeId.Length > 12 ? nodeId[..12] + "…" : nodeId;
-                var icon = Views.PeerIconCodec.ForText(peer.Icon);
-                var name = string.IsNullOrWhiteSpace(peer.DisplayName) ? nodeId[..Math.Min(10, nodeId.Length)] : peer.DisplayName!;
-                return $"{icon} {name}";
+                return string.IsNullOrWhiteSpace(peer.DisplayName) ? nodeId[..Math.Min(10, nodeId.Length)] : peer.DisplayName!;
             }
+            string ResolveMemberIcon(string nodeId) =>
+                peers.FirstOrDefault(x => x.NodeId == nodeId)?.Icon ?? "🤖";   // 原始形态供 PeerIconView
             var sessions = await host.Store.GetSessionsAsync(_cts.Token);
             var peerDesired = sessions.Where(x => x.Kind == SessionKind.Peer).OrderByDescending(x => x.UpdatedAt).ToList();
             var groupDesired = sessions.Where(x => x.Kind == SessionKind.Group).OrderByDescending(x => x.UpdatedAt).ToList();
@@ -777,8 +795,8 @@ public sealed class A2ASessionViewModel : INotifyPropertyChanged, IDisposable
             foreach (var session in peerDesired)
             {
                 var existing = PeerSessions.FirstOrDefault(x => x.Session.SessionId == session.SessionId);
-                if (existing is not null) { existing.Update(session); continue; }
-                var item = new A2ASessionItem(session, selfId, ResolveMember);
+                if (existing is not null) { existing.Update(session, ResolveMember, ResolveMemberIcon); continue; }
+                var item = new A2ASessionItem(session, selfId, ResolveMember, ResolveMemberIcon);
                 PeerSessions.Add(item);
                 if (!_knownSessionIds.Contains(session.SessionId))
                 {
@@ -789,8 +807,8 @@ public sealed class A2ASessionViewModel : INotifyPropertyChanged, IDisposable
             foreach (var session in groupDesired)
             {
                 var existing = GroupSessions.FirstOrDefault(x => x.Session.SessionId == session.SessionId);
-                if (existing is not null) { existing.Update(session); continue; }
-                var item = new A2ASessionItem(session, selfId, ResolveMember);
+                if (existing is not null) { existing.Update(session, ResolveMember, ResolveMemberIcon); continue; }
+                var item = new A2ASessionItem(session, selfId, ResolveMember, ResolveMemberIcon);
                 GroupSessions.Add(item);
                 if (!_knownSessionIds.Contains(session.SessionId))
                 {

@@ -12,6 +12,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="AgentBrook.Helper.Im.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <AvaloniaXaml Remove="publish\**" />
     <Compile Remove="publish\**" />
     <EmbeddedResource Remove="publish\**" />
@@ -32,6 +36,13 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.12" />
     <ProjectReference Include="..\AgentBrook.Agent.Core\AgentBrook.Agent.Core.csproj" />
+    <ProjectReference Include="..\AgentBrook.Runtime.Abstractions\AgentBrook.Runtime.Abstractions.csproj" />
+    <ProjectReference Include="..\AgentBrook.Runtime\AgentBrook.Runtime.csproj" />
+    <ProjectReference Include="..\AgentBrook.Messaging.Abstractions\AgentBrook.Messaging.Abstractions.csproj" />
+    <ProjectReference Include="..\AgentBrook.Messaging\AgentBrook.Messaging.csproj" />
+    <ProjectReference Include="..\AgentBrook.Agent.IM\AgentBrook.Agent.IM.csproj" />
+    <ProjectReference Include="..\AgentBrook.Plugin.Hosting.Abstractions\AgentBrook.Plugin.Hosting.Abstractions.csproj" />
+    <ProjectReference Include="..\AgentBrook.Plugin.Hosting\AgentBrook.Plugin.Hosting.csproj" />
     <ProjectReference Include="..\AgentBrook.Plugin.Abstractions\AgentBrook.Plugin.Abstractions.csproj" />
   </ItemGroup>
 

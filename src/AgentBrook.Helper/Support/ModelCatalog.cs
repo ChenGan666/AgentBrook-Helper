@@ -9,7 +9,7 @@ namespace AgentBrook.Helper.Support;
 
 internal static class ModelCatalog
 {
-    internal sealed record Entry(string Id, string? Name, long? ContextWindow, int? MaxOutput, int ModelType, string Endpoints, string Params);
+    internal sealed record Entry(string Id, string? Name, long? ContextWindow, int? MaxOutput, int ModelType, string Endpoints, string Params, string? InputTypes);
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
 
     internal static string EffectiveApiBase(ProviderConfig p)
@@ -53,7 +53,8 @@ internal static class ModelCatalog
                 m.TryGetProperty("context_window", out var cw) && cw.ValueKind == JsonValueKind.Number ? cw.GetInt64() : null,
                 m.TryGetProperty("max_output_tokens", out var mo) && mo.ValueKind == JsonValueKind.Number ? mo.GetInt32() : null,
                 m.TryGetProperty("model_type", out var mt) && mt.ValueKind == JsonValueKind.Number ? mt.GetInt32() : 1,
-                endpoints, m.TryGetProperty("parameters", out var pp) && pp.ValueKind == JsonValueKind.Object ? CanonicalJson(pp) : ""));
+                endpoints, m.TryGetProperty("parameters", out var pp) && pp.ValueKind == JsonValueKind.Object ? CanonicalJson(pp) : "",
+                m.TryGetProperty("input_types", out var it) && it.ValueKind == JsonValueKind.String ? it.GetString() : null));
         }
         return list.DistinctBy(m => m.Id).ToList();
     }
@@ -86,6 +87,7 @@ internal static class ModelCatalog
         p.ModelNames = entries.Where(m => !string.IsNullOrWhiteSpace(m.Name)).ToDictionary(m => m.Id, m => m.Name!);
         p.ModelEndpoints = entries.Where(m => !string.IsNullOrWhiteSpace(m.Endpoints)).ToDictionary(m => m.Id, m => m.Endpoints);
         p.ModelParams = entries.Where(m => !string.IsNullOrWhiteSpace(m.Params)).ToDictionary(m => m.Id, m => m.Params);
+        p.ModelInputTypes = entries.Where(m => !string.IsNullOrWhiteSpace(m.InputTypes)).ToDictionary(m => m.Id, m => m.InputTypes);
         if (!p.Models.Contains(p.ActiveModel) || !p.IsChatModel(p.ActiveModel))
             p.ActiveModel = p.Models.FirstOrDefault(p.IsChatModel) ?? "";
         if (!p.Models.Contains(p.ActiveMediaModel) || p.IsChatModel(p.ActiveMediaModel)) p.ActiveMediaModel = "";

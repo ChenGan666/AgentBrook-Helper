@@ -196,6 +196,13 @@
                             <TextBlock x:Name="NavPluginsText" Text="插件管理"/>
                         </StackPanel>
                     </RadioButton>
+                    <TextBlock x:Name="NavGroupIm" Text="IM 连接" Classes="navGroup"/>
+                    <RadioButton x:Name="NavIm" Classes="navItem" GroupName="nav" Margin="0,2,0,0">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <PathIcon Data="{StaticResource Icon.ChatBubble}" Width="15" Height="15"/>
+                            <TextBlock x:Name="NavImText" Text="IM 连接"/>
+                        </StackPanel>
+                    </RadioButton>
                     <TextBlock x:Name="NavGroupSystem" Text="系统" Classes="navGroup"/>
                     <RadioButton x:Name="NavEnvironment" Classes="navItem" GroupName="nav">
                         <StackPanel Orientation="Horizontal" Spacing="8">
@@ -494,7 +501,15 @@
                 <TextBlock x:Name="EnvironmentHint" Text="" FontSize="12" Foreground="#8a8a8a"
                            TextWrapping="Wrap" Margin="0,6,0,0"/>
             </StackPanel>
-        </Panel>
+    
+            <!-- IM 连接（S8）：通道插件卡片 + Telegram 引导设置（动态填充于 code-behind） -->
+            <StackPanel x:Name="PageIm" IsVisible="False" Spacing="6">
+                <TextBlock x:Name="ImTitle" Text="IM 连接" Classes="pageTitle"/>
+                <TextBlock x:Name="ImDesc" Text="连接 Telegram 等即时通讯渠道，随时随地指挥助手。安装插件后按引导完成连接设置。" Classes="pageDesc" Margin="0,2,0,14" TextWrapping="Wrap"/>
+                <StackPanel x:Name="ImChannelList" Spacing="10"/>
+                <TextBlock x:Name="ImStatus" FontSize="12" Foreground="#9a9a9a" TextWrapping="Wrap"/>
+            </StackPanel>
+    </Panel>
         </ScrollViewer>
     </Grid>
 </Window>

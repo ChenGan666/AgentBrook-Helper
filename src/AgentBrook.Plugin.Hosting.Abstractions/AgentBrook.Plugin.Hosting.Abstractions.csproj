@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- 新宿主扩展契约（implementation-plan §3）：新能力工厂、服务访问器、注册/活动租约。
+         对旧 Plugin.Abstractions 只读引用（S0 D-S0-2：独立构建图唯一允许的旧生产工程引用，
+         其源码与项目文件冻结）。 -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AgentBrook.Runtime.Abstractions\AgentBrook.Runtime.Abstractions.csproj" />
+    <ProjectReference Include="..\AgentBrook.Plugin.Abstractions\AgentBrook.Plugin.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

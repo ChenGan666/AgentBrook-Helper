@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- 消息领域契约（设计 §4，替代 v3 的 Im.Abstractions 命名；为邮件/Webhook 通知/Slack/Matrix 留范围）。
+         通道插件只引用本包与 Runtime/Hosting 抽象，禁止引用 Runtime/Hosting/Messaging 实现（A01/A02）。 -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AgentBrook.Runtime.Abstractions\AgentBrook.Runtime.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

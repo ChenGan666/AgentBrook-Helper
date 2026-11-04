@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- IM Pipeline 预览契约：通用内核契约（implementation-plan §3）。
+         只依赖 BCL；禁止引用 Agent.Core/Helper/Avalonia（架构测试 A02 强制）。 -->
+  </PropertyGroup>
+
+</Project>

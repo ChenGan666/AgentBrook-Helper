@@ -212,10 +212,13 @@ public sealed class A2AExtensionController : IAsyncDisposable
             // 持久身份里的名称/图标可能落后于当前配置（如改名后）：以本机配置为准同步，配对与 Card 对外一致。
             var effectiveName = string.IsNullOrWhiteSpace(Config.DisplayName) ? AssistantIdentity.Current : Config.DisplayName.Trim();
             var identity = host.Identity.Identity;
+            // identity.Icon 持久的是出站形（img: 已转 data-URL）：比较与更新都必须用 ToWire 形，
+            // 否则 img: 本地路径会经 senderIcon 泄漏给对端（对端无此文件，显示原始路径文本）。
+            var wireIcon = Views.PeerIconCodec.ToWire(Config.Icon);
             if (!string.Equals(identity.DisplayName, effectiveName, StringComparison.Ordinal) ||
-                !string.Equals(identity.Icon, Config.Icon, StringComparison.Ordinal))
+                !string.Equals(identity.Icon, wireIcon, StringComparison.Ordinal))
             {
-                await host.Identity.UpdateProfileAsync(effectiveName, Config.Icon, cancellationToken);
+                await host.Identity.UpdateProfileAsync(effectiveName, wireIcon, cancellationToken);
             }
             ApplyAgentCard();
             LastError = null;

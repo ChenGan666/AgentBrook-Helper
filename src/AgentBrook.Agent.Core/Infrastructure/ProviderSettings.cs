@@ -25,6 +25,8 @@ public sealed class ProviderConfig
     public Dictionary<string, string> ModelEndpoints { get; set; } = new();
     /// <summary>模型名 → 调用参数说明（API /v1/models 的 parameters 字段 JSON，含 endpoint/required/optional）；注入上下文供 Agent 组装请求。</summary>
     public Dictionary<string, string> ModelParams { get; set; } = new();
+    /// <summary>模型名 → 支持的输入类型（API /v1/models 的 input_types，逗号分隔，如 "text,image"）；附件能力检查用。</summary>
+    public Dictionary<string, string> ModelInputTypes { get; set; } = new();
 
     /// <summary>Key 是否为占位符（示例值/未替换的默认文案）；空 Key 由调用方另行判定。</summary>
     public static bool IsPlaceholderApiKey(string? key)

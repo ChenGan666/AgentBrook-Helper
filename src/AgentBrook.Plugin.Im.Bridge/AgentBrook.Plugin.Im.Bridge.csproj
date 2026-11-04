@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- 同机桥通道插件（implementation-plan §5-S5-B）：桥契约 v1.5 的宿主侧映射——
+         入站（宿主 Webhook 路由+凭据验签）、/send（含附件下载 URL 签发）、
+         /delivery-status、/delivery-cancel。只引用公共契约（A01/A02）。
+         不实现微信/WhatsApp 个人号协议（那是对端桥进程的职责）。 -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AgentBrook.Runtime.Abstractions\AgentBrook.Runtime.Abstractions.csproj" />
+    <ProjectReference Include="..\AgentBrook.Plugin.Hosting.Abstractions\AgentBrook.Plugin.Hosting.Abstractions.csproj" />
+    <ProjectReference Include="..\AgentBrook.Messaging.Abstractions\AgentBrook.Messaging.Abstractions.csproj" />
+    <InternalsVisibleTo Include="AgentBrook.Plugin.Im.Bridge.Tests" />
+  </ItemGroup>
+
+</Project>

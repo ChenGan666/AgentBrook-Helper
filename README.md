@@ -83,6 +83,16 @@ While a turn is running, the send button turns into a stop button (Esc works too
 
 The fixed token cost is deliberately kept low: MCP tool JSON Schemas are not loaded wholesale — the master index lists one line per tool, and the model calls them via `mcp_call` / inspects them via `mcp_tool_help` on demand. Heavy subtasks (research, long reports, bulk filing) can be delegated to a sub-agent with its own isolated context via `delegate_task`; only the conclusion returns to the main conversation. Sub-agents and session summarization run on the lightest model in your model list (tiered routing, configurable in appsettings). When history exceeds budget, older turns are condensed into a rolling summary injected at the head — long sessions and restarts stay lean.
 
+### IM connections: Telegram in your pocket
+
+Install the Telegram channel plugin from Settings → IM Connections, create a bot with @BotFather, paste the token, run the connection test and hit save — your phone now talks to the same Helper. Receiving uses long polling, so no public IP or tunnel is required.
+
+IM messages run the **exact same agent turn as typing in the main window**: multi-round tool calls, terminal commands, file access, research, media generation — with the run visible live in the desktop conversation. Only the final answer goes back to the phone, and multi-round turns deliver the full text rather than just the last fragment.
+
+Each IM chat gets its own session in the session list (reused if it exists, created otherwise, titled like `Your Name [telegram]`). Type in that session on the desktop and the result is delivered to the phone too; when a phone message arrives the open session refreshes automatically — no switching, no restart.
+
+**Files travel both ways.** Photos sent from the phone land in the conversation and render inline; the model reads them only if the selected model declares image input (served from the model catalog's `input_types`), otherwise you get an explicit "switch to a multimodal model" hint instead of a nonsense answer. Deliverables produced by the Helper — screenshots, charts, reports — are uploaded back to the phone as photos or documents. Attachments and instructions can be sent separately: each attachment is acknowledged with "received, waiting for instructions", and your next instruction (e.g. "merge those images") runs with all pending attachments in context. Deleting an IM session archives it; the next message starts a fresh one.
+
 ### An A2A network: many machines, one team
 
 Every Helper is also a network node. **Discovery**: LAN nodes find each other via UDP multicast, with node identity derived from an Ed25519 key — an IP change never turns a neighbor into a "new node". **Pairing**: both sides confirm, then verify a 6-digit code shown identically on both screens, guarding against spoofing and man-in-the-middle. Once paired, Helpers sync presence — online state, busy or idle, work state, even mood. **Peer sessions**: private one-to-one conversations with automatic offline retry, and delivery states you can see (written / delivered / processed).
@@ -116,6 +126,11 @@ Anything requiring a human is routed through the `IBrookInteraction` interface: 
 | `AgentBrook.Helper` | Desktop host (Avalonia) — packaged on macOS, runs as-is on Windows |
 | `AgentBrook.A2A.Core` | A2A protocol core: Peer/Group sessions, event ledger, node identity |
 | `AgentBrook.A2A.Transport` | A2A transport: signed auth, pairing, discovery, message & group sync |
+| `AgentBrook.Runtime` / `.Runtime.Abstractions` | Versioned session commits (CURRENT + revision CAS), blob store, recovery |
+| `AgentBrook.Messaging` / `.Messaging.Abstractions` | IM domain: inbox/outbox with idempotency, routes, delivery state machine |
+| `AgentBrook.Plugin.Hosting` / `.Hosting.Abstractions` | Isolated plugin host: credentials, network allow-list, blob/webhook services |
+| `AgentBrook.Agent.IM` | MAF session codec + versioned session store adapter |
+| `AgentBrook.Plugin.Im.Telegram` / `.Im.Bridge` | Channel plugins (loaded from the plugin directory at runtime) |
 
 ## Quick start
 
@@ -241,6 +256,7 @@ AgentBrook-Helper/
 ├── AgentBrook.slnx                  ← solution
 ├── assets/                          ← README visuals
 ├── tools/GroupSyncRepro/            ← headless regression harness for the group pipeline
+├── tools/im/                        ← isolated build (validate.sh) + channel plugin release (publish-im-plugins.sh)
 └── src/
     ├── AgentBrook.Agent.Core/       ← the agent (shared by every host)
     │   ├── BrookAgent.cs            ← event-driven agent; RunAsync yields BrookEvent
@@ -251,8 +267,19 @@ AgentBrook-Helper/
     ├── AgentBrook.Agent/            ← console host (REPL)
     ├── AgentBrook.A2A.Core/         ← A2A protocol core (Peer/Group sessions, events, identity)
     ├── AgentBrook.A2A.Transport/    ← A2A transport (signing, pairing, discovery, group sync)
+    ├── AgentBrook.Runtime/          ← versioned session commits (CURRENT/revision CAS), blob store, recovery
+    ├── AgentBrook.Runtime.Abstractions/ ← commit/recovery/blob/execution contracts
+    ├── AgentBrook.Messaging/        ← IM domain: inbox/outbox (idempotent), routes, delivery state machine
+    ├── AgentBrook.Messaging.Abstractions/ ← channel/sink/delivery contracts
+    ├── AgentBrook.Agent.IM/         ← MAF session codec + versioned session store adapter
+    ├── AgentBrook.Plugin.Hosting/   ← plugin host: ALC isolation, credentials, network allow-list, blob/webhook
+    ├── AgentBrook.Plugin.Hosting.Abstractions/ ← host extension contracts
+    ├── AgentBrook.Plugin.Im.Telegram/ ← Telegram channel plugin (long polling, attachments, files)
+    ├── AgentBrook.Plugin.Im.Bridge/ ← bridge channel plugin (same-machine third-party bridge)
     └── AgentBrook.Helper/           ← desktop host (Avalonia); macOS + Windows
         ├── App.axaml(.cs) / Program.cs ← app entry & lifecycle (quit protection, single instance)
+        ├── Core/Im/                 ← IM composition root: settings, gateway, composition, turn executor,
+        │                              session factory, blob/approval hosts
         ├── Core/                    ← controllers & A2A glue: AssistantController (shared by bubble
         │                              and window), A2AExtensionController (groups/discovery/compression/
         │                              update), GroupAutoTalkProcessor (anti-loop gates), A2AAgentTools,

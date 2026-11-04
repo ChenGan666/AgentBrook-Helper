@@ -88,6 +88,52 @@ public partial class App : Application
             // 本机回环 API（127.0.0.1）：收银台「自动回填」写入模型配置并打开设置窗
             LocalApiServer.Start();
 
+            // IM 管道组合（S8）：受 workspace/im/config.json → ImEnabled 开关控制，默认关闭零副作用；
+            // 启用时网关路由挂本监听器（不新增第二个监听）、通道插件包加载、版本化持久化附加 BrookAgent
+            var imGateway = new Core.Im.ImGateway();
+            LocalApiServer.Gateway = imGateway;
+            // 工作区与 Controller 完全一致（env 覆盖优先——否则 IM 与主会话分处两个工作区）
+            var imWorkspace = Environment.GetEnvironmentVariable("AGENTBROOK_Agent__WorkspaceRoot")
+                ?? Support.UiPrefs.WorkspaceDir();
+            // IM 回合 UI 桥：气泡显示 IM 执行活动；选中该 IM 会话时主窗口实时流式（IM 侧只收最终结果）
+            Core.Im.ImComposition.TurnUiHook = (sessionId, kind, payload) =>
+            {
+                var ctl = Controller;
+                if (ctl?.Agent is null) return;
+                var detail = Core.Im.ImComposition.Instance?.BoundInternal is { Count: > 0 } bound
+                    ? $"IM·{bound[0].ChannelId}" : "IM";
+                switch (kind)
+                {
+                    case Core.Im.ImTurnUiKind.Started:
+                        ctl.PublishImTurnStarted(sessionId, $"IM·{detail}");
+                        break;
+                    // Delta 不再注入 UI：流式增量会与"提交后重载"重复渲染（无回合开头的增量各起一条气泡）。
+                    // 内容显示只走 TurnCommittedHook → 重载重放一条路（完整消息一次性出现）。
+                    case Core.Im.ImTurnUiKind.Delta:
+                        break;
+                    case Core.Im.ImTurnUiKind.Completed:
+                        ctl.PublishImTurnEnded();
+                        break;
+                    case Core.Im.ImTurnUiKind.Failed:
+                        ctl.PublishImTurnEnded();
+                        break;
+                }
+            };
+            // 提交完成后重载（CURRENT 已切换；TurnUiHook 的 Completed 在提交前——重载挂这里才拿得到新内容）
+            Core.Im.ImComposition.TurnCommittedHook = (sessionId, completed, error) =>
+            {
+                var ctl = Controller;
+                if (ctl?.Agent is null) return;
+                ctl.RefreshSessionList();   // 列表时间戳已变（排序/相对时间刷新）
+                if (ctl.HasPendingApproval) return;   // 审批待决：不清屏重放（抹卡片），决议后回合提交再重放
+                if (ctl.Agent.CurrentSessionId != sessionId) return;
+                _ = ctl.ReloadCurrentSessionAsync();
+            };
+            // IM 会话删除 → IM 领域（墓碑+路由解绑）：之后同 chat 新消息开全新会话
+            AgentBrook.Agent.BrookAgent.DeleteImSessionHook = id =>
+                Core.Im.ImComposition.DeleteImSessionDataAsync(id);
+            _ = Core.Im.ImComposition.StartAsync(imWorkspace, () => Controller.Agent, imGateway);
+
             // 系统关机/注销/Cmd+Q：空闲则置 IsQuitting 放行窗口真正关闭、正常退出；
             // 正在处理请求则取消退出，让 macOS 弹「中断了关机」提示，回合不被打断
             desktop.ShutdownRequested += (_, e) =>

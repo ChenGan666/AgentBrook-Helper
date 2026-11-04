@@ -4,4 +4,14 @@
   <Project Path="AgentBrook.Helper/AgentBrook.Helper.csproj" />
   <Project Path="AgentBrook.Plugin.Abstractions/AgentBrook.Plugin.Abstractions.csproj" />
   <Project Path="AgentBrook.Plugin.PrivacyMasking/AgentBrook.Plugin.PrivacyMasking.csproj" />
+  <!-- IM Pipeline（P0：Telegram + 同机桥通道） -->
+  <Project Path="AgentBrook.Runtime.Abstractions/AgentBrook.Runtime.Abstractions.csproj" />
+  <Project Path="AgentBrook.Runtime/AgentBrook.Runtime.csproj" />
+  <Project Path="AgentBrook.Messaging.Abstractions/AgentBrook.Messaging.Abstractions.csproj" />
+  <Project Path="AgentBrook.Messaging/AgentBrook.Messaging.csproj" />
+  <Project Path="AgentBrook.Agent.IM/AgentBrook.Agent.IM.csproj" />
+  <Project Path="AgentBrook.Plugin.Hosting.Abstractions/AgentBrook.Plugin.Hosting.Abstractions.csproj" />
+  <Project Path="AgentBrook.Plugin.Hosting/AgentBrook.Plugin.Hosting.csproj" />
+  <Project Path="AgentBrook.Plugin.Im.Telegram/AgentBrook.Plugin.Im.Telegram.csproj" />
+  <Project Path="AgentBrook.Plugin.Im.Bridge/AgentBrook.Plugin.Im.Bridge.csproj" />
 </Solution>

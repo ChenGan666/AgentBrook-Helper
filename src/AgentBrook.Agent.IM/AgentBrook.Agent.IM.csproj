@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- S7 薄适配层（implementation-plan §5-S7）：连接真实 MAF（Agent.Core 的 AIAgent/AgentSession）
+         与 IM Runtime 的提交单元/恢复协议。versioned 工作区专用；legacy 工作区不经此层。 -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Agents.AI" Version="1.22.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AgentBrook.Agent.Core\AgentBrook.Agent.Core.csproj" />
+    <ProjectReference Include="..\AgentBrook.Runtime.Abstractions\AgentBrook.Runtime.Abstractions.csproj" />
+    <ProjectReference Include="..\AgentBrook.Runtime\AgentBrook.Runtime.csproj" />
+  </ItemGroup>
+
+</Project>

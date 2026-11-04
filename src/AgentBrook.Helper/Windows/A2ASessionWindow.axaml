@@ -84,7 +84,10 @@ xmlns:views="using:AgentBrook.Helper.Views"
             <ListBox Grid.Row="1" x:Name="PeerSessionList" ItemsSource="{Binding PeerSessions}">
               <ListBox.ItemTemplate><DataTemplate x:DataType="local:A2ASessionItem">
                 <Grid ColumnDefinitions="*,Auto">
-                  <TextBlock Text="{Binding Summary}" Foreground="#dedede" VerticalAlignment="Center"/>
+                  <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+                    <views:PeerIconView Icon="{Binding Icon}" Size="16" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding Summary}" Foreground="#dedede" VerticalAlignment="Center"/>
+                  </StackPanel>
                   <Button Classes="icon-btn row-action-btn" Grid.Column="1" Tag="session-delete" ToolTip.Tip="删除会话" DataContext="{Binding}">
                     <Path Data="M19 6h-2c0-1.1-.9-2-2-2H8c-1.1 0-2 .9-2 2H4c-1.1 0-2 .9-2 2v1h18V8c0-1.1-.9-2-2-2zM3 8v12c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V8H3zm5 10H6v-7h2v7zm4 0h-2v-7h2v7zm4 0h-2v-7h2v7z" Fill="#aaaaaa" Width="14" Height="14" Stretch="Uniform"/>
                   </Button>
@@ -98,7 +101,10 @@ xmlns:views="using:AgentBrook.Helper.Views"
             <ListBox Grid.Row="1" x:Name="GroupSessionList" ItemsSource="{Binding GroupSessions}">
               <ListBox.ItemTemplate><DataTemplate x:DataType="local:A2ASessionItem">
                 <Grid ColumnDefinitions="*,Auto">
-                  <TextBlock Text="{Binding Summary}" Foreground="#dedede" VerticalAlignment="Center"/>
+                  <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+                    <views:PeerIconView Icon="{Binding Icon}" Size="16" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding Summary}" Foreground="#dedede" VerticalAlignment="Center"/>
+                  </StackPanel>
                   <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2">
                     <!-- 群主视角的行内管理操作：改名 / 关闭（悬停显示），删除对所有会话可用 -->
                     <Button Classes="icon-btn row-action-btn" Tag="group-rename" ToolTip.Tip="群组改名" IsVisible="{Binding IsCoordinator}">

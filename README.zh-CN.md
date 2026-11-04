@@ -83,6 +83,16 @@ AgentBrook Helper 是一个真正跑在你机器上的 AI 智能体的桌面客�
 
 固定 token 成本被刻意压低：MCP 工具的 JSON Schema 不整体常驻上下文，主索引只列「工具名 + 一句话用途」，模型按需 `mcp_call` 调用、`mcp_tool_help` 查参数；复杂子任务（调研、长报告、批量整理）可委派给拥有独立上下文的子智能体 `delegate_task`，只有最终结论回到主对话；子智能体与会话摘要走模型清单中的轻量模型（分级用模，可在 appsettings 配置）；历史超预算时自动把早期对话浓缩为滚动摘要注入头部，长会话与重启恢复都保持精干。
 
+### IM 连接：把 Telegram 装进兜里
+
+设置 → IM 连接里安装 Telegram 通道插件，用 @BotFather 建一个 Bot、粘贴 Token、跑一次连接测试再保存——手机就能和同一个 Helper 对话。接收走长轮询，不需要公网 IP，也不需要隧道。
+
+IM 来的消息执行**与主界面输入完全相同的 Agent 回合**：多轮工具调用、终端命令、文件读写、查资料、生成媒体，执行过程在主窗口实时可见。只有最终结果回到手机；多轮工具回合会把完整正文送达，而不是只剩最后一段。
+
+每个 IM 聊天在会话列表里有自己的会话（有则复用、无则新建，标题形如 `你的名字［telegram］`）。在桌面这个会话里输入，结果同样发到手机；手机来信时，正在查看的会话会自动刷新——不用切换、不用重启。
+
+**附件双向互通**：手机发来的图片进入会话并内嵌显示；只有当前所选模型声明了图片输入（取模型目录的 `input_types`）才会解析，否则给出"请切换到多模态模型"的明确提示，而不是答非所问。Helper 产出的交付物——截图、图表、报告——以照片或文件形式传回手机。附件与指令可以分条发送：每个附件先回「已收到附件，等待具体指令」，随后的指令（如"把这几张图合成一张"）带着待处理附件一起执行。删除 IM 会话即归档，下一条消息会开启全新会话。
+
 ### A2A 网络：多台机器，一支团队
 
 每个 Helper 都是一个网络节点。**发现**：局域网内 UDP 组播自动找到彼此，节点身份由 Ed25519 密钥派生——IP 变了也不会变成「新节点」。**配对**：双端确认 + 两端一致的 6 位验证码，防欺骗与中间人；配对后同步在线状态、忙闲、工作状态乃至心情。**点对点**：与单个 Helper 的私密会话，离线消息自动重试补投，界面区分「已写入 / 已送达 / 已处理」。
@@ -116,6 +126,11 @@ AgentBrook Helper 是一个真正跑在你机器上的 AI 智能体的桌面客�
 | `AgentBrook.Helper` | 桌面宿主（Avalonia）—— macOS 有打包脚本，Windows 可直接运行 |
 | `AgentBrook.A2A.Core` | A2A 协议内核：Peer/Group 会话、事件账本、节点身份 |
 | `AgentBrook.A2A.Transport` | A2A 传输：签名鉴权、配对、发现、消息与群组同步 |
+| `AgentBrook.Runtime` / `.Runtime.Abstractions` | 版本化会话提交（CURRENT + revision CAS）、Blob 存储、恢复对账 |
+| `AgentBrook.Messaging` / `.Messaging.Abstractions` | IM 领域：幂等 inbox/outbox、路由、投递状态机 |
+| `AgentBrook.Plugin.Hosting` / `.Hosting.Abstractions` | 隔离插件宿主：凭据、出站白名单、Blob/Webhook 服务 |
+| `AgentBrook.Agent.IM` | MAF 会话编解码 + 版本化会话存储适配 |
+| `AgentBrook.Plugin.Im.Telegram` / `.Im.Bridge` | 通道插件（运行时从插件目录加载） |
 
 ## 快速开始
 
@@ -241,6 +256,7 @@ AgentBrook-Helper/
 ├── AgentBrook.slnx                  ← 解决方案
 ├── assets/                          ← README 视觉资产
 ├── tools/GroupSyncRepro/            ← 群组链路无头回归工具
+├── tools/im/                        ← 隔离构建（validate.sh）与通道插件发布（publish-im-plugins.sh）
 └── src/
     ├── AgentBrook.Agent.Core/       ← 智能体内核（所有宿主共用）
     │   ├── BrookAgent.cs            ← 事件驱动智能体，RunAsync 产出 BrookEvent 流
@@ -251,8 +267,18 @@ AgentBrook-Helper/
     ├── AgentBrook.Agent/            ← 控制台宿主（REPL）
     ├── AgentBrook.A2A.Core/         ← A2A 协议内核：Peer/Group 会话、事件账本、节点身份
     ├── AgentBrook.A2A.Transport/    ← A2A 传输：签名鉴权、配对、发现、群组同步、文件推送
+    ├── AgentBrook.Runtime/          ← 版本化会话提交（CURRENT/revision CAS）、Blob、恢复
+    ├── AgentBrook.Runtime.Abstractions/ ← 提交/恢复/Blob/执行契约
+    ├── AgentBrook.Messaging/        ← IM 领域：幂等 inbox/outbox、路由、投递状态机
+    ├── AgentBrook.Messaging.Abstractions/ ← 通道/Sink/投递契约
+    ├── AgentBrook.Agent.IM/         ← MAF 会话编解码 + 版本化存储适配
+    ├── AgentBrook.Plugin.Hosting/   ← 插件宿主：ALC 隔离、凭据、出站白名单、Blob/Webhook
+    ├── AgentBrook.Plugin.Hosting.Abstractions/ ← 宿主扩展契约
+    ├── AgentBrook.Plugin.Im.Telegram/ ← Telegram 通道插件（长轮询、附件、文件）
+    ├── AgentBrook.Plugin.Im.Bridge/ ← 桥通道插件（同机第三方桥）
     └── AgentBrook.Helper/           ← 桌面宿主（Avalonia）；macOS + Windows
         ├── App.axaml(.cs) / Program.cs ← 应用入口与生命周期（退出保护、单实例）
+        ├── Core/Im/                 ← IM 组合根：设置、网关、组合、回合执行器、会话工厂、Blob/审批宿主
         ├── Core/                    ← 控制器与 A2A 联动：AssistantController（气泡/对话窗共享）、
         │                              A2AExtensionController（群组/发现/压缩/更新）、
         │                              GroupAutoTalkProcessor（防循环六道闸）、

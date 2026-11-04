@@ -73,7 +73,7 @@ public sealed class PluginStateStore
         }
     }
 
-    public void SetInstalled(string id, string version, bool enabled, string? dirName = null, string? icon = null)
+    public void SetInstalled(string id, string version, bool enabled, string? dirName = null, string? icon = null, string? category = null)
     {
         lock (_gate)
         {
@@ -81,6 +81,10 @@ public sealed class PluginStateStore
             e.Version = version;
             e.Enabled = enabled;
             e.Dir = dirName;
+            if (!string.IsNullOrEmpty(category))
+            {
+                e.Category = category;
+            }
             if (!string.IsNullOrEmpty(icon))
             {
                 e.Icon = icon;

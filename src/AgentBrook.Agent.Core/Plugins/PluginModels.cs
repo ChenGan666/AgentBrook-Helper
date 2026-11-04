@@ -33,8 +33,14 @@ public sealed class PluginIndexEntry
     /// <summary>模型清单地址（相对 index.json；doc/17 §5.1 下载+自检用）。</summary>
     [JsonPropertyName("modelsUrl")] public string? ModelsUrl { get; set; }
 
+    /// <summary>插件类别（S8）：plugin=常规插件（默认，显示在插件管理）｜im=IM 连接插件（显示在 IM 连接板块）。</summary>
+    [JsonPropertyName("category")] public string Category { get; set; } = "plugin";
+
     /// <summary>按 RID 分包：win-x64 / win-arm64 / osx-x64 / osx-arm64。</summary>
     [JsonPropertyName("packages")] public Dictionary<string, PluginPackageInfo> Packages { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>IM 连接插件判定（空/未知值按常规插件处理）。</summary>
+    public bool IsImChannel => string.Equals(Category, "im", StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>按 RID 的插件包信息。</summary>
@@ -79,6 +85,9 @@ public sealed class PluginStateEntry
 
     /// <summary>插件图标（安装时自 index/manifest 记录，展示在名称前）。</summary>
     [JsonPropertyName("icon")] public string Icon { get; set; } = "";
+
+    /// <summary>插件类别（S8）：随 index 记录；恢复时据此分流加载方式（im → IM 宿主）。</summary>
+    [JsonPropertyName("category")] public string Category { get; set; } = "plugin";
 
     /// <summary>
     /// 实际安装目录名（plugins/{id}/ 下的叶子目录）。缺省 = {version}。

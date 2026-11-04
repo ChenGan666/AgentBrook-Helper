@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <!-- 共享消息领域服务（设计 §15.1 宿主侧模块）：准入/Inbox/Outbox/路由/披露/投递状态。
+         与 Runtime 共享同一 ImDatabase 单物理库（§3.3 跨层事务约束）。 -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AgentBrook.Runtime.Abstractions\AgentBrook.Runtime.Abstractions.csproj" />
+    <ProjectReference Include="..\AgentBrook.Messaging.Abstractions\AgentBrook.Messaging.Abstractions.csproj" />
+    <ProjectReference Include="..\AgentBrook.Runtime\AgentBrook.Runtime.csproj" />
+  </ItemGroup>
+
+</Project>
