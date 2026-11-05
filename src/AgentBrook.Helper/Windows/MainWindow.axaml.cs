@@ -101,6 +101,10 @@ public partial class MainWindow : Window
     private StackPanel? _execContent;
     private string? _execLastLine;
 
+    // 回合外诊断日志（启动期 MCP 连接失败等）：静态失败卡，不启动流光/计时器
+    private InteractionCard? _startupLogCard;
+    private StackPanel? _startupLogContent;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -750,6 +754,14 @@ public partial class MainWindow : Window
         _stageAnchors.Clear();
         _lastRenderedAnswer = null;
         _streamViewer = null;
+        // 面板已清空：执行卡/启动日志卡的引用一并失效（计时器必须停，避免后台空转）
+        _execTimer?.Stop();
+        _execTimer = null;
+        _execCard = null;
+        _execContent = null;
+        _execLastLine = null;
+        _startupLogCard = null;
+        _startupLogContent = null;
         UpdateSessionTitle();
 
         // 回放历史消息（最近 40 条，assistant 走 Markdown 渲染）；光标对账供后续滚动加载
@@ -991,6 +1003,8 @@ public partial class MainWindow : Window
                     _execCard = null;
                     _execContent = null;
                     _execLastLine = null;
+                    _startupLogCard = null;
+                    _startupLogContent = null;
                     _lastKnownTotal = 0;   // 新会话：历史光标归零
                     _visibleFromEnd = 0;
                     _historyExhausted = false;
@@ -999,7 +1013,7 @@ public partial class MainWindow : Window
                 }
                 if (tool.Name.StartsWith("log:", StringComparison.Ordinal))
                 {
-                    AppendToolLine(tool.Name["log:".Length..]);
+                    AppendLogLine(tool.Name["log:".Length..]);
                     return;
                 }
                 if (tool.Name is "ask_user" or "todo_write" or "todo_list")
@@ -2114,6 +2128,43 @@ public partial class MainWindow : Window
         {
             Console.Error.WriteLine($"[recharge] ✖ 打开充值页失败：{ex.Message}");
         }
+    }
+
+    /// <summary>诊断日志行（log: 伪事件）。
+    /// 回合内/已有执行卡：收进终端执行卡（与工具行同形态）；
+    /// 回合外（启动期 MCP 连接失败、初始化失败）：独立静态卡——**不启动流光动画与计时器**，
+    /// 失败直接定格「失败」，避免卡片一直显示「执行中 · N 秒」。</summary>
+    private void AppendLogLine(string text)
+    {
+        if (_controller.Busy || _execCard is not null)
+        {
+            AppendToolLine(text);
+            return;
+        }
+
+        var failed = text.Contains('✖') || text.Contains("失败")
+                     || text.Contains("failed", StringComparison.OrdinalIgnoreCase);
+        if (_startupLogCard is null)
+        {
+            _startupLogContent = new StackPanel { Spacing = 3 };
+            _startupLogCard = new InteractionCard(I18n.T("ui.terminal"), _startupLogContent,
+                failed ? InteractionState.Failed : InteractionState.Done,
+                iconData: IconTerminal, collapsed: true, collapsible: true);
+            _chatPanel!.Children.Add(_startupLogCard);
+        }
+        _startupLogCard.SetState(failed ? InteractionState.Failed : InteractionState.Done);
+
+        var line = new TextBlock
+        {
+            Text = text.Length > 160 ? text[..160] + "…" : text,
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 12.5,
+            Foreground = new SolidColorBrush(Color.Parse("#9a9a9a")),
+            Opacity = 0.85,
+        };
+        _startupLogContent!.Children.Add(line);
+        _startupLogCard.SetSummary(Cut(line.Text, 60));
+        ScrollToEnd();
     }
 
     /// <summary>执行过程行：收进当前回合的终端交互卡（无卡则先创建）。</summary>
