@@ -190,13 +190,13 @@ public partial class SettingsWindow
             try
             {
                 var ws = UiPrefs.WorkspaceDir();
-                var diag = Path.Combine(ws, "im", "host-log.txt");
-                var audit = Path.Combine(ws, "im", "audit.jsonl");
-                var target = File.Exists(diag) ? diag : audit;
-                if (File.Exists(target))
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(target) { UseShellExecute = true });
-                else
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Path.Combine(ws, "im")) { UseShellExecute = true });
+                var imDir = Path.Combine(ws, "im");
+                // 显式点击才建目录（U01：IM 未启用时启动不产生任何文件副作用）
+                Directory.CreateDirectory(imDir);
+                var diag = Path.Combine(imDir, "host-log.txt");
+                var audit = Path.Combine(imDir, "audit.jsonl");
+                var target = File.Exists(diag) ? diag : File.Exists(audit) ? audit : imDir;
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(target) { UseShellExecute = true });
             }
             catch (Exception ex) { Console.Error.WriteLine($"[im] 打开日志失败：{ex.Message}"); }
         };
@@ -577,16 +577,33 @@ public partial class SettingsWindow
             Background = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#252525")),
         };
         var stack = new StackPanel { Spacing = 8 };
-        // 标题行：微信图标（Icon.Weixin，与导航/插件体系同一矢量源）+ 名称
+        // 标题行：微信图标（插件安装目录 icon.png——与"已安装插件"列表同源；缺失时回退矢量 Icon.Weixin）
         var titleRow = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 8 };
-        titleRow.Children.Add(new Avalonia.Controls.Shapes.Path
+        var iconPath = App.Controller.Agent?.PluginManager?.GetIconPath("im-weixin");
+        if (!string.IsNullOrEmpty(iconPath) && File.Exists(iconPath))
         {
-            Data = App.Current!.FindResource("Icon.Weixin") as Avalonia.Media.StreamGeometry,
-            Fill = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#2dc100")),   // 微信绿
-            Width = 20, Height = 20,
-            Stretch = Avalonia.Media.Stretch.Uniform,
-            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
-        });
+            try
+            {
+                titleRow.Children.Add(new Avalonia.Controls.Image
+                {
+                    Source = new Avalonia.Media.Imaging.Bitmap(iconPath),
+                    Width = 20, Height = 20,
+                    VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                });
+            }
+            catch { /* 图片损坏降级矢量 */ }
+        }
+        if (titleRow.Children.Count == 0)
+        {
+            titleRow.Children.Add(new Avalonia.Controls.Shapes.Path
+            {
+                Data = App.Current!.FindResource("Icon.Weixin") as Avalonia.Media.StreamGeometry,
+                Fill = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#2dc100")),
+                Width = 20, Height = 20,
+                Stretch = Avalonia.Media.Stretch.Uniform,
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+            });
+        }
         titleRow.Children.Add(new TextBlock
         {
             Text = "微信（iLink 官方通道）",

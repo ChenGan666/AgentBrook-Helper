@@ -154,7 +154,7 @@ public sealed class WeixinChannel : IImChannel, ICapabilityInstance
         }, CancellationToken.None);
 
         SetState(ImChannelRunState.Running);
-        Log($"[wx] 插件版本：1.0.0-media（含入站媒体解析；未见此标记=旧 DLL）");
+        Log($"[wx] 插件版本：1.0.1-media（含入站媒体解析；未见此标记=旧 DLL）");
         Log($"[wx] 通道启动：baseUrl={_config.BaseUrl} account={_config.AccountId} " +
                                 $"cursor={(string.IsNullOrEmpty(_cursor) ? "(空)" : _cursor[..Math.Min(8, _cursor.Length)])}");
         _pollTask = Task.Run(() => PollLoopAsync(_cts.Token));

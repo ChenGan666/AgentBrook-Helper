@@ -199,12 +199,6 @@ public sealed class ImComposition
     public static async Task<IInteractiveLoginProvider?> StartLoginProviderAsync(string channelType,
         string instanceId, IEnumerable<string> outboundHosts, CancellationToken ct = default)
     {
-        var composition = Instance;
-        if (composition?._pluginHost is null)
-        {
-            ImDiag.Log($"[im] 登录失败：IM 组合未启动（channelType={channelType}）——请先启用任一 IM 通道或重启 Helper");
-            return null;
-        }
         var capabilityId = channelType switch
         {
             "weixin" => "weixin-login",
@@ -215,16 +209,98 @@ public sealed class ImComposition
             ImDiag.Log($"[im] 登录失败：通道类型 {channelType} 无登录能力");
             return null;
         }
-        ImDiag.Log($"[im] 正在启动登录能力：{capabilityId}（instance={instanceId}）");
-        var record = await composition._pluginHost.StartInstanceAsync(capabilityId, instanceId,
-            outboundHosts.ToList(), ct).ConfigureAwait(false);
-        if (record.Capability is not IInteractiveLoginProvider provider)
+
+        // 首选：组合已启动 → 宿主里注册的工厂
+        var composition = Instance;
+        if (composition?._pluginHost is not null)
         {
-            ImDiag.Log($"[im] 登录失败：能力 {capabilityId} 未实现 IInteractiveLoginProvider（插件 DLL 版本不对？）");
+            ImDiag.Log($"[im] 正在启动登录能力：{capabilityId}（instance={instanceId}）；已注册能力=[{string.Join(",", composition._pluginHost.ListCapabilityIds())}]");
+            try
+            {
+                var record = await composition._pluginHost.StartInstanceAsync(capabilityId, instanceId,
+                    outboundHosts.ToList(), ct).ConfigureAwait(false);
+                if (record.Capability is not IInteractiveLoginProvider provider)
+                {
+                    ImDiag.Log($"[im] 登录失败：能力 {capabilityId} 未实现 IInteractiveLoginProvider（插件 DLL 版本不对？）");
+                    return null;
+                }
+                ImDiag.Log("[im] 登录能力已就绪，开始扫码流程");
+                return provider;
+            }
+            catch (Exception ex)
+            {
+                ImDiag.Log($"[im] 组合内登录能力启动失败（将尝试独立登录宿主）：{ex.Message}");
+            }
+        }
+
+        // 兜底：组合未启动（安装版全新工作区，ImEnabled=false 零副作用关闭）或组合内启动失败——
+        // 用独立轻宿主加载 weixin-login 能力：用户扫码登录不需要全组合，只要协议登录 + 凭据落库
+        var ws = s_workspaceRoot ?? UiPrefs.WorkspaceDir();
+        var imDir = Path.Combine(ws, "im");
+        Directory.CreateDirectory(imDir);
+        var pluginDir = FindInstalledPluginDir(ws, "im-weixin");
+        if (pluginDir is null)
+        {
+            ImDiag.Log($"[im] 登录失败：插件 im-weixin 未安装（plugins 目录无该插件）");
             return null;
         }
-        ImDiag.Log("[im] 登录能力已就绪，开始扫码流程");
-        return provider;
+        ImDiag.Log($"[im] 独立登录宿主加载：{pluginDir}");
+        try
+        {
+            var (factories, _) = PluginPackageLoader.LoadFactories(pluginDir);
+            var loginFactory = factories.FirstOrDefault(f => f.CapabilityId == capabilityId)
+                ?? throw new InvalidOperationException($"插件包内无 {capabilityId} 能力（DLL 版本不对？）");
+            var hostDb = new HostDatabase(imDir);   // ⚠ 生命周期：登记进 s_standaloneHostDbs，登录提供者存活期间不可释放
+            var activations = new ActivationRegistry();
+            var activation = activations.Issue();
+            var instance = new InstanceRef(loginFactory.PluginId, capabilityId, instanceId);
+            var audit = new AuditLog(Path.Combine(imDir, "audit.jsonl"));
+            var services = InstanceServices.ForChannelPlugin(hostDb, activations, instance, activation,
+                imDir, outboundHosts.ToList(), audit);
+            var context = new ExtensionContextImpl(instance, activation, services, HostingContract.Version,
+                () => activations.IsAlive(activation), audit);
+            var creationContext = new InstanceCreationContext(instance, activation, context);
+            var capability = await loginFactory.CreateAsync(creationContext, ct).ConfigureAwait(false);
+            if (capability is not IInteractiveLoginProvider provider)
+            {
+                await hostDb.DisposeAsync().ConfigureAwait(false);   // 形态不对：无人引用，立即释放
+                ImDiag.Log($"[im] 登录失败：能力 {capabilityId} 未实现 IInteractiveLoginProvider");
+                return null;
+            }
+            lock (s_standaloneDbGate)
+            {
+                var key = $"{capabilityId}+{instanceId}";
+                if (s_standaloneHostDbs.Remove(key, out var previous))
+                {
+                    try { previous.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { }
+                }
+                s_standaloneHostDbs[key] = hostDb;
+            }
+            ImDiag.Log("[im] 独立登录宿主就绪（HostDatabase 保持存活至组合启动/进程退出）");
+            return provider;
+        }
+        catch (Exception ex)
+        {
+            ImDiag.Log($"[im] 独立登录宿主失败：{ex.GetType().Name}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>已安装插件目录定位：plugins/{id}/ 下最新含 manifest 的叶子（与 IM 组合包加载同规则）。</summary>
+    internal static string? FindInstalledPluginDir(string workspaceRoot, string packageId)
+    {
+        var root = Path.Combine(workspaceRoot, "plugins", packageId);
+        if (!Directory.Exists(root)) return null;
+        string? best = null;
+        var bestUtc = DateTime.MinValue;
+        foreach (var dir in Directory.EnumerateDirectories(root))
+        {
+            if (!File.Exists(Path.Combine(dir, "manifest.json"))
+                && !Directory.EnumerateFiles(dir, "AgentBrook.Plugin.*.dll").Any()) continue;
+            var utc = Directory.GetLastWriteTimeUtc(dir);
+            if (utc > bestUtc) { bestUtc = utc; best = dir; }
+        }
+        return best;
     }
 
     /// <summary>
@@ -484,6 +560,7 @@ public sealed class ImComposition
             {
                 // 一个包可含多个能力工厂（如微信：weixin-channel + weixin-login）
                 var factories = await LoadFactoriesWithRetryAsync(dir).ConfigureAwait(false);
+                ImDiag.Log($"[im] 包加载：{dir} → 能力 [{string.Join(",", factories.Select(f => f.CapabilityId))}]");
                 var host = Instance?._pluginHost;
                 if (host is null)
                 {
@@ -604,6 +681,24 @@ public sealed class ImComposition
         get { lock (s_channelStatus) return [.. s_channelStatus.Select(kv => (kv.Key, kv.Value.State, kv.Value.Reason))]; }
     }
 
+    /// <summary>独立登录宿主的 HostDatabase 注册表：登录提供者长生命周期引用它，
+    /// 在组合启动前**不可释放**（释放即 ExecuteNonQuery on closed connection 崩溃）。</summary>
+    private static readonly object s_standaloneDbGate = new();
+    private static readonly Dictionary<string, HostDatabase> s_standaloneHostDbs = new();
+
+    /// <summary>关闭全部独立登录宿主库（仅测试重置/进程收尾调用；正常运行保持存活供登录提供者落凭据）。</summary>
+    private static void CloseStandaloneHostDbs()
+    {
+        lock (s_standaloneDbGate)
+        {
+            foreach (var db in s_standaloneHostDbs.Values)
+            {
+                try { db.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { }
+            }
+            s_standaloneHostDbs.Clear();
+        }
+    }
+
     /// <summary>插件宿主（静态类别加载器用；未启动为 null）。</summary>
     internal PluginHost? PluginHostInternal => _pluginHost;
     internal MessagingService? MessagingInternal => _messaging;
@@ -649,6 +744,7 @@ public sealed class ImComposition
         TurnCommittedHook = null;
         lock (s_pendingPackages) s_pendingPackages.Clear();
         lock (s_channelStatus) s_channelStatus.Clear();
+        CloseStandaloneHostDbs();
         s_categoryLoaderRegistered = false;
     }
 
@@ -740,6 +836,7 @@ public sealed class ImComposition
             {
                 // 一个包可含多个能力工厂（如微信：weixin-channel + weixin-login）——全部注册
                 var factories = await LoadFactoriesWithRetryAsync(dir).ConfigureAwait(false);
+                ImDiag.Log($"[im] 包加载：{dir} → 能力 [{string.Join(",", factories.Select(f => f.CapabilityId))}]");
                 foreach (var factory in factories) _pluginHost.RegisterFactory(factory);
             }
             catch (Exception ex)
@@ -761,6 +858,7 @@ public sealed class ImComposition
             try
             {
                 var factories = await LoadFactoriesWithRetryAsync(dir).ConfigureAwait(false);
+                ImDiag.Log($"[im] 包加载：{dir} → 能力 [{string.Join(",", factories.Select(f => f.CapabilityId))}]");
                 foreach (var factory in factories) _pluginHost.RegisterFactory(factory);
                 ImDiag.Log($"[im] 待加载包已补注册（{factories.Count} 个能力）：{dir}");
             }
@@ -835,6 +933,10 @@ public sealed class ImComposition
             channels = _bound.Select(b => new { b.ChannelId, b.InstanceId }).ToList(),
             recoveryRequired = report.RecoveryRequiredReasons.Count,
         });
+        // 独立登录宿主的库**不在此关闭**：登录提供者（插件内）可能仍在轮询/落凭据，
+        // 提前释放会造成 ExecuteNonQuery on closed connection。同一 能力+实例 下次登录时替换并释放旧连接，
+        // 进程退出统一回收；SQLite 多连接访问同一文件本身安全（BusyTimeout 15s）。
+
         return new ImCompositionResult(true, state, _gateway, _messaging,
             [.. _bound.Select(b => (b.ChannelId, b.InstanceId))]);
     }

@@ -11,6 +11,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Include="icon.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\AgentBrook.Runtime.Abstractions\AgentBrook.Runtime.Abstractions.csproj" />
     <ProjectReference Include="..\AgentBrook.Plugin.Hosting.Abstractions\AgentBrook.Plugin.Hosting.Abstractions.csproj" />
     <ProjectReference Include="..\AgentBrook.Messaging.Abstractions\AgentBrook.Messaging.Abstractions.csproj" />

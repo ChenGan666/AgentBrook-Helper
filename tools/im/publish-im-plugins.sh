@@ -79,6 +79,10 @@ for spec in "${PLUGINS[@]}"; do
 MEOF
 
     zip_name="$id-$VERSION-$rid.zip"
+    # 插件图标（工程根 icon.png 约定）：随包发布 + 版本目录留一份
+    icon_src="src/$proj_name/icon.png"
+    [ -f "$icon_src" ] && cp "$icon_src" "$out/icon.png"
+
     (cd "$out" && zip -qr "$plugin_out/$zip_name" .)
     zip_sha=$(shasum -a 256 "$plugin_out/$zip_name" | awk '{print $1}')
     zip_size=$(stat -f%z "$plugin_out/$zip_name")
@@ -117,9 +121,9 @@ NEOF
 done
 
 # 顶层 index.json 合并（upsert by id；保留既有条目如 privacy-masking）
-python3 - "$OUT_BASE" "$ENTRIES_FILE" << 'PY'
+python3 - "$OUT_BASE" "$VERSION" << 'PY'
 import json, os, sys
-out_base, entries_file = sys.argv[1], None
+out_base, version = sys.argv[1], sys.argv[2]
 entries_file = os.path.join(out_base, "index.json")
 existing = {"schemaVersion": 1, "plugins": []}
 if os.path.exists(entries_file):
@@ -130,9 +134,9 @@ if os.path.exists(entries_file):
 
 new_entries = []
 for pid in ("im-telegram", "im-bridge", "im-weixin"):
-    p = os.path.join(out_base, pid, "1.0.0", "index.entry.json")
+    p = os.path.join(out_base, pid, version, "index.entry.json")
     if not os.path.exists(p):
-        p = os.path.join(out_base, pid, os.listdir(os.path.join(out_base, pid))[0], "index.entry.json")
+        raise SystemExit(f"缺少本次发布条目：{p}")
     new_entries.append(json.load(open(p, encoding="utf-8")))
 
 plugins = [dict(e, category=e.get("category", "plugin")) for e in existing.get("plugins", [])
