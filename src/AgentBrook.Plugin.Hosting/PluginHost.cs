@@ -119,6 +119,12 @@ public sealed class PluginHost(HostDatabase db, string rootPath) : IPluginHostEx
         return removed;
     }
 
+    /// <summary>当前已注册能力 id（诊断：登录失败时核对 weixin-login 是否在列）。</summary>
+    public IReadOnlyList<string> ListCapabilityIds()
+    {
+        lock (_gate) return [.. _factories.Keys];
+    }
+
     // ── 实例生命周期 ──
 
     /// <summary>创建并启动实例：签发活动租约 → 授予服务 → 工厂创建 → Starting/Active。</summary>
