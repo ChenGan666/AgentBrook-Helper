@@ -141,17 +141,35 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
 
                     // 累积全程增量（多轮工具调用的每轮正文）——IM 收到的与主窗口显示的一致；
                     // brook.TurnAnswer 只保留末轮，单用它会让 Telegram 缺失中间轮次正文（用户感知"回复没收到"）
+                    // 同时按"轮"切分：每轮模型输出=MAF 历史里的一条 assistant 消息。投影行与 MAF 一一对应后，
+                    // 提交后重载的对账（turnId 直配或 role+text 去重）才能命中——此前单条合并行对不上每轮多条，
+                    // 重载时会把整轮正文再追加一遍（主窗口重复回复，微信侧只有一份）。
                     var streamed = new StringBuilder();
+                    var roundTexts = new List<string>();
+                    var currentRound = new StringBuilder();
                     await foreach (var ev in brook.RunAsync(turnInput).WithCancellation(timeoutCts.Token).ConfigureAwait(false))
                     {
                         if (ev is AgentBrook.Agent.BrookEvent.TextDelta delta && !string.IsNullOrEmpty(delta.Text))
+                        {
                             streamed.Append(delta.Text);
+                            currentRound.Append(delta.Text);
+                        }
+                        else if (ev is AgentBrook.Agent.BrookEvent.ToolStarted)
+                        {
+                            // 工具调用意味着本轮模型输出已完整：收口本轮正文，后续增量属于下一轮
+                            if (currentRound.Length > 0)
+                            {
+                                roundTexts.Add(currentRound.ToString());
+                                currentRound.Clear();
+                            }
+                        }
                     }
+                    if (currentRound.Length > 0) roundTexts.Add(currentRound.ToString());
 
                     var answerText = streamed.Length > 0 ? streamed.ToString() : (brook.TurnAnswer ?? "");
                     var finalAnswer = StripToolCallMarkup(answerText);
                     if (string.IsNullOrWhiteSpace(finalAnswer)) finalAnswer = "（本轮没有产出文字结果）";
-                    ImDiag.Log($"[im] 回合完成：session={context.SessionId} 回答 {finalAnswer.Length} 字符");
+                    ImDiag.Log($"[im] 回合完成：session={context.SessionId} 回答 {finalAnswer.Length} 字符（{roundTexts.Count} 轮正文）");
 
                     // user 事件携带附件 artifacts（会话界面用户侧内嵌图片/文件行的唯一数据源——
                     // MAF 侧的图片消息在转写构建时被跳过，见 BuildTranscriptTextList）
@@ -168,11 +186,21 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
                                 b.LocalPath ?? "", (string?)"附件", ext);
                         }))
                         : null;
+                    // 投影事件：user 一条 + assistant **按轮一条**（与 MAF 历史一一对应，供重载对账命中）；
+                    // IM 回复本身仍是全部轮次拼接（answerText/finalAnswer 不变）
                     var commitEvents = new List<TurnEvent>
                     {
                         new(context.TurnId, 0, "user", userEventText, userArtifactsJson),
-                        new(context.TurnId, 1, "assistant", finalAnswer, null),
                     };
+                    var roundIndex = 1;
+                    foreach (var round in roundTexts)
+                    {
+                        var text = round.Trim();   // 与 BuildTranscriptTextList 的 trim 对齐（签名可比）
+                        if (text.Length == 0) continue;
+                        commitEvents.Add(new(context.TurnId, roundIndex++, "assistant", text, null));
+                    }
+                    if (roundIndex == 1)   // 无任何轮次正文（空回/仅工具标记）：回退整条最终回答
+                        commitEvents.Add(new(context.TurnId, 1, "assistant", finalAnswer, null));
                     var snapshot = brook.InnerSession is null || brook.InnerAgent is null
                         ? null
                         : MafSnapshotCodec.Encode(brook.InnerAgent, brook.InnerSession);

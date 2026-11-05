@@ -880,10 +880,12 @@ public sealed class BrookAgent : IAsyncDisposable
 
     private string TranscriptFilePath => Path.Combine(Path.GetDirectoryName(_sessionFile)!, "transcript.jsonl");
 
-    /// <summary>读取 transcript.jsonl 全部行签名（role\u0001text）——对账去重用（IM 投影行已入文件时不再重复追加）。</summary>
-    private HashSet<string> ReadTranscriptFileSigs()
+    /// <summary>读取 transcript.jsonl 索引：全部行签名（role\u0001text，assistant 侧按显示还原）
+    /// 与全部 assistant 文本（旧版 IM 合并投影行的拼接匹配用）。</summary>
+    private (HashSet<string> Sigs, HashSet<string> AssistantTexts) ReadTranscriptFileIndex()
     {
-        var set = new HashSet<string>(StringComparer.Ordinal);
+        var sigs = new HashSet<string>(StringComparer.Ordinal);
+        var assistants = new HashSet<string>(StringComparer.Ordinal);
         try
         {
             foreach (var line in File.ReadLines(TranscriptFilePath))
@@ -895,16 +897,54 @@ public sealed class BrookAgent : IAsyncDisposable
                     using var doc = JsonDocument.Parse(t);
                     var role = doc.RootElement.TryGetProperty("role", out var r) ? r.GetString() ?? "" : "";
                     var text = doc.RootElement.TryGetProperty("text", out var tx) ? tx.GetString() ?? "" : "";
-                    set.Add(TranscriptSig(role, text));
+                    if (role == "assistant") text = PluginManager?.RestoreDisplayText(text) ?? text;
+                    sigs.Add(TranscriptSig(role, text));
+                    if (role == "assistant") assistants.Add(text);
                 }
                 catch { }
             }
         }
         catch { }
-        return set;
+        return (sigs, assistants);
     }
 
     private static string TranscriptSig(string role, string text) => $"{role}\u0001{text}";
+
+    /// <summary>旧版 IM 投影行=同回合多轮正文**合并成一行**（MAF 每轮一条）：
+    /// 最后落盘行若等于"最后一条 user 之后所有 assistant 文本拼接"，视为该回合已完整落盘。</summary>
+    internal static bool TailMatchesMergedProjection(IReadOnlyList<(string Role, string Text)> list, string lastSig)
+    {
+        var sep = lastSig.IndexOf('\u0001');
+        if (sep <= 0 || lastSig[..sep] != "assistant") return false;
+        var merged = lastSig[(sep + 1)..];
+        if (merged.Length == 0) return false;
+
+        var lastUser = -1;
+        for (var i = list.Count - 1; i >= 0; i--)
+        {
+            if (list[i].Role == "user") { lastUser = i; break; }
+        }
+        if (lastUser < 0 || lastUser >= list.Count - 1) return false;
+
+        var sb = new System.Text.StringBuilder();
+        for (var i = lastUser + 1; i < list.Count; i++) sb.Append(list[i].Text);
+        return sb.Length > 0 && sb.ToString() == merged;
+    }
+
+    /// <summary>该 assistant 行是否已被文件中的**合并投影行**覆盖：取所在连续 assistant 段拼接，
+    /// 与文件里的 assistant 文本比对（兼容旧版 IM 合并行，防止升级后整段重复追加）。</summary>
+    internal static bool IsCoveredByMergedRun(IReadOnlyList<(string Role, string Text)> list, int index,
+        HashSet<string>? mergedAssistantTexts)
+    {
+        if (mergedAssistantTexts is null || mergedAssistantTexts.Count == 0) return false;
+        if (list[index].Role != "assistant") return false;
+
+        var start = index;
+        while (start > 0 && list[start - 1].Role == "assistant") start--;
+        var sb = new System.Text.StringBuilder();
+        for (var i = start; i < list.Count && list[i].Role == "assistant"; i++) sb.Append(list[i].Text);
+        return sb.Length > 0 && mergedAssistantTexts.Contains(sb.ToString());
+    }
 
     /// <summary>按当前 _sessionFile 重建转写镜像（会话新建/切换/启动时调用），随后对账回填存量记录。</summary>
     private void ResetTranscriptForCurrentSession()
@@ -913,6 +953,8 @@ public sealed class BrookAgent : IAsyncDisposable
         {
             _transcript.Clear();
             _transcriptLastSig = null;
+            // 保留原始行（含 turnId/ei 等键）用于可能的原地修复重写
+            var loaded = new List<(bool Keyed, string RawLine, TranscriptEntry Entry)>();
             try
             {
                 foreach (var line in File.ReadLines(TranscriptFilePath))
@@ -935,10 +977,27 @@ public sealed class BrookAgent : IAsyncDisposable
                             try { artifacts = aj.Deserialize<Infrastructure.TaskArtifacts>(TranscriptJsonOptions); }
                             catch { artifacts = null; }   // 产物反序列化失败不丢正文
                         }
-                        _transcript.Add(new TranscriptEntry(role, text, artifacts));
+                        var keyed = doc.RootElement.TryGetProperty("turnId", out _);
+                        loaded.Add((keyed, t, new TranscriptEntry(role, text, artifacts)));
                     }
                     catch { }   // 单行损坏跳过，不影响其余
                 }
+                // 一次性修复旧版 IM 重复写：投影合并行（keyed）后紧跟的无键 assistant 行，
+                // 若拼接正文等于该合并行 → 是重载对账误追加的重复，原地删除（只删完全等价的相邻行）
+                var duplicates = FindLegacyMergedDuplicates(
+                    loaded.Select(x => (x.Keyed, x.Entry.Role, x.Entry.Text)).ToList());
+                if (duplicates.Count > 0)
+                {
+                    for (var k = duplicates.Count - 1; k >= 0; k--) loaded.RemoveAt(duplicates[k]);
+                    try
+                    {
+                        var temp = TranscriptFilePath + ".dedupe";
+                        File.WriteAllLines(temp, loaded.Select(x => x.RawLine), new System.Text.UTF8Encoding(false));
+                        File.Move(temp, TranscriptFilePath, overwrite: true);
+                    }
+                    catch { }   // 重写失败：内存仍按去重后加载（下次切换会话再试）
+                }
+                foreach (var item in loaded) _transcript.Add(item.Entry);
                 if (_transcript.Count > 0)
                 {
                     _transcriptLastSig = TranscriptSig(_transcript[^1].Role, _transcript[^1].Text);
@@ -947,6 +1006,31 @@ public sealed class BrookAgent : IAsyncDisposable
             catch { }   // 转写加载失败（文件缺失/权限/损坏等）一律静默降级为空镜像：显示增强绝不阻断初始化
         }
         ReconcileTranscript();
+    }
+
+    /// <summary>找出旧版 IM 合并投影行后误追加的重复行索引（相邻、无键、拼接正文完全相等）。
+    /// 返回需删除的下标（升序）；供加载修复与单测共用。</summary>
+    internal static IReadOnlyList<int> FindLegacyMergedDuplicates(
+        IReadOnlyList<(bool Keyed, string Role, string Text)> rows)
+    {
+        var remove = new List<int>();
+        for (var i = 0; i < rows.Count; i++)
+        {
+            if (!rows[i].Keyed || rows[i].Role != "assistant") continue;
+            var concat = new System.Text.StringBuilder();
+            var j = i + 1;
+            while (j < rows.Count && !rows[j].Keyed && rows[j].Role == "assistant")
+            {
+                concat.Append(rows[j].Text);
+                j++;
+            }
+            if (j > i + 1 && concat.Length > 0 && concat.ToString() == rows[i].Text)
+            {
+                for (var k = i + 1; k < j; k++) remove.Add(k);
+            }
+            i = j - 1;
+        }
+        return remove;
     }
 
     /// <summary>对账：把内存历史中"最后落盘记录之后"的新增可读记录追加进转写文件与镜像。
@@ -969,6 +1053,7 @@ public sealed class BrookAgent : IAsyncDisposable
         {
             var start = 0;
             HashSet<string>? existingFileSigs = null;
+            HashSet<string>? mergedAssistantTexts = null;
             if (_transcriptLastSig is not null)
             {
                 var found = -1;
@@ -983,16 +1068,30 @@ public sealed class BrookAgent : IAsyncDisposable
                 start = found + 1;
                 if (found < 0)
                 {
-                    // 游标失配（IM 同权回合的投影行与 MAF 文本存在差异/转写压缩清除）：
-                    // 按文件已有签名去重，只追加文件中缺失的条目——防止整段对话重复落盘
-                    start = 0;
-                    existingFileSigs = ReadTranscriptFileSigs();
+                    if (TailMatchesMergedProjection(list, _transcriptLastSig))
+                    {
+                        // 旧版 IM 投影行=同回合多轮正文**合并成一行**（MAF 每轮一条）：
+                        // 拼接与最后落盘行一致 → 该回合已完整落盘，不重复追加
+                        start = list.Count;
+                    }
+                    else
+                    {
+                        // 游标失配（IM 同权回合的投影行与 MAF 文本存在差异/转写压缩清除/旧版合并行）：
+                        // 按文件已有签名去重，只追加文件中缺失的条目——防止整段对话重复落盘
+                        start = 0;
+                        (existingFileSigs, mergedAssistantTexts) = ReadTranscriptFileIndex();
+                    }
                 }
             }
             if (start >= list.Count)
             {
                 return;
             }
+            // 同一行在"落盘"与"内存镜像"两段循环里的跳过判定（文件已有 / 属于文件中的合并投影行）
+            bool ShouldSkip(int i) =>
+                existingFileSigs is not null
+                && (existingFileSigs.Contains(TranscriptSig(list[i].Role, list[i].Text))
+                    || IsCoveredByMergedRun(list, i, mergedAssistantTexts));
             try
             {
                 var dir = Path.GetDirectoryName(_sessionFile);
@@ -1003,10 +1102,9 @@ public sealed class BrookAgent : IAsyncDisposable
                 var sb = new System.Text.StringBuilder();
                 for (var i = start; i < list.Count; i++)
                 {
-                    if (existingFileSigs is not null
-                        && existingFileSigs.Contains(TranscriptSig(list[i].Role, list[i].Text)))
+                    if (ShouldSkip(i))
                     {
-                        continue;   // 文件已有（IM 投影行/镜像行）——去重跳过
+                        continue;   // 文件已有（IM 投影行/镜像行/合并行）——去重跳过
                     }
                     // 本回合产物只挂到最后一条 assistant 记录（与 TurnCompleted 定稿时序一致）
                     var art = i == list.Count - 1 && list[i].Role == "assistant" ? _pendingArtifacts : null;
@@ -1016,8 +1114,7 @@ public sealed class BrookAgent : IAsyncDisposable
                 File.AppendAllText(TranscriptFilePath, sb.ToString(), new System.Text.UTF8Encoding(false));
                 for (var i = start; i < list.Count; i++)
                 {
-                    if (existingFileSigs is not null
-                        && existingFileSigs.Contains(TranscriptSig(list[i].Role, list[i].Text)))
+                    if (ShouldSkip(i))
                     {
                         continue;   // 文件已有——内存镜像不重复加入
                     }
