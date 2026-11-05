@@ -631,6 +631,7 @@ internal static partial class I18n
         ["ui.im.weixin.login"] = "Scan QR to sign in",
         ["ui.im.weixin.relogin"] = "Scan QR again",
         ["ui.im.weixin.requesting"] = "Requesting QR code…",
+        ["ui.im.weixin.starting"] = "Starting IM composition…",
         ["ui.im.weixin.scan"] = "Scan the QR code above with WeChat on your phone, then confirm.",
         ["ui.im.weixin.scanned"] = "Scanned — please confirm on your phone.",
         ["ui.im.weixin.need.code"] = "Your phone asks for a pairing code: enter the number shown on the phone below.",

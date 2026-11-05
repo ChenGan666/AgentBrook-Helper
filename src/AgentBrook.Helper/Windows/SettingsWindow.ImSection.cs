@@ -577,12 +577,24 @@ public partial class SettingsWindow
             Background = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#252525")),
         };
         var stack = new StackPanel { Spacing = 8 };
-        stack.Children.Add(new TextBlock
+        // 标题行：微信图标（Icon.Weixin，与导航/插件体系同一矢量源）+ 名称
+        var titleRow = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 8 };
+        titleRow.Children.Add(new Avalonia.Controls.Shapes.Path
         {
-            Text = "💚 微信（iLink 官方通道）",
+            Data = App.Current!.FindResource("Icon.Weixin") as Avalonia.Media.StreamGeometry,
+            Fill = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#2dc100")),   // 微信绿
+            Width = 20, Height = 20,
+            Stretch = Avalonia.Media.Stretch.Uniform,
+            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+        });
+        titleRow.Children.Add(new TextBlock
+        {
+            Text = "微信（iLink 官方通道）",
             FontSize = 15,
+            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
             Foreground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#e8e8e8")),
         });
+        stack.Children.Add(titleRow);
         stack.Children.Add(new TextBlock
         {
             Text = I18n.T("ui.im.weixin.desc"),
@@ -710,7 +722,16 @@ public partial class SettingsWindow
                 }
 
                 var challenge = await provider.BeginAsync(ct);
-                qrImage.Source = RenderQr(challenge.QrContent);
+                Console.Error.WriteLine($"[im-ui] 扫码挑战已获取：id={challenge.Id[..Math.Min(8, challenge.Id.Length)]}… qr={challenge.QrContent[..Math.Min(60, challenge.QrContent.Length)]}");
+                var qrBitmap = RenderQr(challenge.QrContent);
+                if (qrBitmap is null)
+                {
+                    feedback.Foreground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#e08080"));
+                    feedback.Text = "二维码渲染失败（QRCoder）——请把此提示截图反馈";
+                    loginBtn.IsEnabled = true;
+                    return;
+                }
+                qrImage.Source = qrBitmap;
                 qrImage.IsVisible = true;
                 feedback.Text = string.IsNullOrWhiteSpace(challenge.Instructions)
                     ? I18n.T("ui.im.weixin.scan") : challenge.Instructions;
@@ -719,6 +740,7 @@ public partial class SettingsWindow
                 while (!ct.IsCancellationRequested && !finished)
                 {
                     var poll = await provider.PollAsync(challenge.Id, verifyCode, ct);
+                    Console.Error.WriteLine($"[im-ui] 扫码轮询：{poll.Stage}" + (poll.Detail is null ? "" : $" · {poll.Detail}"));
                     switch (poll.Stage)
                     {
                         case LoginStage.Waiting:

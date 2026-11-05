@@ -631,6 +631,7 @@ internal static partial class I18n
         ["ui.im.weixin.login"] = "扫码登录微信",
         ["ui.im.weixin.relogin"] = "重新扫码登录",
         ["ui.im.weixin.requesting"] = "正在获取二维码…",
+        ["ui.im.weixin.starting"] = "正在启动 IM 组合…",
         ["ui.im.weixin.scan"] = "请用手机微信扫描上方二维码，并在手机上确认登录。",
         ["ui.im.weixin.scanned"] = "已扫码，请在手机上确认。",
         ["ui.im.weixin.need.code"] = "手机提示需要数字配对码：请在下方输入手机上显示的数字。",

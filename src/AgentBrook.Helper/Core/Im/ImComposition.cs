@@ -200,16 +200,31 @@ public sealed class ImComposition
         string instanceId, IEnumerable<string> outboundHosts, CancellationToken ct = default)
     {
         var composition = Instance;
-        if (composition?._pluginHost is null) return null;
+        if (composition?._pluginHost is null)
+        {
+            ImDiag.Log($"[im] 登录失败：IM 组合未启动（channelType={channelType}）——请先启用任一 IM 通道或重启 Helper");
+            return null;
+        }
         var capabilityId = channelType switch
         {
             "weixin" => "weixin-login",
             _ => null,
         };
-        if (capabilityId is null) return null;
+        if (capabilityId is null)
+        {
+            ImDiag.Log($"[im] 登录失败：通道类型 {channelType} 无登录能力");
+            return null;
+        }
+        ImDiag.Log($"[im] 正在启动登录能力：{capabilityId}（instance={instanceId}）");
         var record = await composition._pluginHost.StartInstanceAsync(capabilityId, instanceId,
             outboundHosts.ToList(), ct).ConfigureAwait(false);
-        return record.Capability as IInteractiveLoginProvider;
+        if (record.Capability is not IInteractiveLoginProvider provider)
+        {
+            ImDiag.Log($"[im] 登录失败：能力 {capabilityId} 未实现 IInteractiveLoginProvider（插件 DLL 版本不对？）");
+            return null;
+        }
+        ImDiag.Log("[im] 登录能力已就绪，开始扫码流程");
+        return provider;
     }
 
     /// <summary>

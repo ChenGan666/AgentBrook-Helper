@@ -199,7 +199,7 @@
                     <TextBlock x:Name="NavGroupIm" Text="IM 连接" Classes="navGroup"/>
                     <RadioButton x:Name="NavIm" Classes="navItem" GroupName="nav" Margin="0,2,0,0">
                         <StackPanel Orientation="Horizontal" Spacing="8">
-                            <PathIcon Data="{StaticResource Icon.ChatBubble}" Width="15" Height="15"/>
+                            <PathIcon Data="{StaticResource Icon.Weixin}" Width="15" Height="15"/>
                             <TextBlock x:Name="NavImText" Text="IM 连接"/>
                         </StackPanel>
                     </RadioButton>

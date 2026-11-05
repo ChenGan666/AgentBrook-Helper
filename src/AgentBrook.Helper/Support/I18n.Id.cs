@@ -631,6 +631,7 @@ internal static partial class I18n
         ["ui.im.weixin.login"] = "Pindai QR untuk masuk",
         ["ui.im.weixin.relogin"] = "Pindai QR lagi",
         ["ui.im.weixin.requesting"] = "Meminta kode QR…",
+        ["ui.im.weixin.starting"] = "Memulai komposisi IM…",
         ["ui.im.weixin.scan"] = "Pindai kode QR di atas dengan WeChat di ponsel, lalu konfirmasi.",
         ["ui.im.weixin.scanned"] = "Sudah dipindai — konfirmasi di ponsel.",
         ["ui.im.weixin.need.code"] = "Ponsel meminta kode pairing: masukkan angka yang tampil di ponsel.",
