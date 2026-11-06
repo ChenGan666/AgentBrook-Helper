@@ -175,10 +175,11 @@ internal sealed class ImTurnInteractionRouter : IBrookInteraction
     private readonly Action<string> _log;
     private readonly TimeSpan _timeout;
     private readonly Func<bool>? _fullAccess;
+    private readonly Func<string, string>? _restoreDisplay;
 
     internal ImTurnInteractionRouter(string sessionId, ReplyTarget target, string senderId,
         Func<string, bool> send, Action<string>? log = null, TimeSpan? timeout = null,
-        Func<bool>? fullAccess = null)
+        Func<bool>? fullAccess = null, Func<string, string>? restoreDisplay = null)
     {
         _sessionId = sessionId;
         _target = target;
@@ -187,6 +188,7 @@ internal sealed class ImTurnInteractionRouter : IBrookInteraction
         _log = log ?? ImDiag.Log;
         _timeout = timeout ?? TimeSpan.FromMinutes(5);
         _fullAccess = fullAccess;
+        _restoreDisplay = restoreDisplay;
     }
 
     public async Task<ApprovalDecision> GetApprovalAsync(string toolName, string? argumentsJson,
@@ -198,7 +200,8 @@ internal sealed class ImTurnInteractionRouter : IBrookInteraction
             _log($"[im] 完全访问：自动批准 {toolName}（IM 同权）");
             return ApprovalDecision.Approve();
         }
-        var args = SummarizeArgs(argumentsJson);
+        // 隐私插件的占位符先还原：提示会发到聊天平台，用户看到的应是真实内容
+        var args = Restore(SummarizeArgs(argumentsJson));
         var prompt = I18n.T("im.interaction.approval", toolName, args.Length == 0 ? "" : args + "\n");
         var entry = ImInteractionRegistry.Begin(_target.ChannelId, _target.InstanceId, _target.AccountId,
             _target.ChatId, _senderId, ImInteractionRegistry.Kind.Approval, _sessionId);
@@ -238,7 +241,8 @@ internal sealed class ImTurnInteractionRouter : IBrookInteraction
     public async Task<string> AskUserAsync(string question, string? choices,
         CancellationToken cancellationToken = default)
     {
-        var prompt = I18n.T("im.interaction.ask", question, ImInteractionReply.FormatChoices(choices));
+        var prompt = I18n.T("im.interaction.ask", Restore(question),
+            ImInteractionReply.FormatChoices(Restore(choices ?? "")));
         var entry = ImInteractionRegistry.Begin(_target.ChannelId, _target.InstanceId, _target.AccountId,
             _target.ChatId, _senderId, ImInteractionRegistry.Kind.Ask, _sessionId);
         try
@@ -281,6 +285,8 @@ internal sealed class ImTurnInteractionRouter : IBrookInteraction
         if (finished == cancel) ct.ThrowIfCancellationRequested();
         return null;   // 超时
     }
+
+    private string Restore(string text) => _restoreDisplay?.Invoke(text) ?? text;
 
     /// <summary>参数摘要：压成单行、截断 220 字；常见敏感字段打码（提示会发到聊天平台）。</summary>
     internal static string SummarizeArgs(string? json)

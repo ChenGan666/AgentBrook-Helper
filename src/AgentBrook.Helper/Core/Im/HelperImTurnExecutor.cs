@@ -69,6 +69,9 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
 
         // ── 同权执行：走主 Agent 完整回合循环（RunAsync：多轮工具执行 + 审批弹窗与主界面同流程）──
         var brook = _brookAccessor?.Invoke();
+        // 脱敏插件的显示还原：流式增量含占位符（如 [人名1]），回 IM / 落投影前必须还原成真实内容
+        // （主窗口回合在 BrookAgent 回合末统一 RestoreDisplayText；IM 执行器自建文本，需在这里还原）
+        string RestoreDisplay(string text) => brook?.PluginManager?.RestoreDisplayText(text) ?? text;
         Console.Error.WriteLine($"[im] 同权执行：{(brook is { InnerAgent: not null } ? "主 Agent 循环（全工具）" : "回退 host（无工具纯对话）")}，主回合进行中={brook?.TurnInProgress}");
         if (brook is { InnerAgent: not null })
         {
@@ -90,7 +93,7 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
                                  && context.ReplyTarget is { } replyTarget
                                  && context.Principal is { } principal
                         ? new ImTurnInteractionRouter(context.SessionId, replyTarget, principal.PrincipalId,
-                            _sendImmediate, fullAccess: _fullAccessAccessor)
+                            _sendImmediate, fullAccess: _fullAccessAccessor, restoreDisplay: RestoreDisplay)
                         : null;
                     using var interactionScope = router is null ? null : brook.BeginExternalInteraction(router);
                     brook.ExternalTurnActive = true;              // 转写门控（必须先于 SwitchSession 的 Reconcile）
@@ -199,6 +202,8 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
                     if (currentRound.Length > 0) roundTexts.Add(currentRound.ToString());
 
                     var answerText = streamed.Length > 0 ? streamed.ToString() : (brook.TurnAnswer ?? "");
+                    // 隐私插件开启时模型输出含占位符：**先还原再回 IM**（与主窗口显示一致）
+                    answerText = RestoreDisplay(answerText);
                     var finalAnswer = StripToolCallMarkup(answerText);
                     if (string.IsNullOrWhiteSpace(finalAnswer)) finalAnswer = "（本轮没有产出文字结果）";
                     ImDiag.Log($"[im] 回合完成：session={context.SessionId} 回答 {finalAnswer.Length} 字符（{roundTexts.Count} 轮正文）");
@@ -227,7 +232,8 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
                     var roundIndex = 1;
                     foreach (var round in roundTexts)
                     {
-                        var text = round.Trim();   // 与 BuildTranscriptTextList 的 trim 对齐（签名可比）
+                        // 还原脱敏占位符再落投影（与主路径一致）；加载侧同样还原，签名仍可比
+                        var text = RestoreDisplay(round).Trim();
                         if (text.Length == 0) continue;
                         commitEvents.Add(new(context.TurnId, roundIndex++, "assistant", text, null));
                     }
@@ -351,7 +357,8 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
                 if (delta.Length == 0) continue;
                 fallbackAnswer.Append(delta);
             }
-            var finalAnswer = StripToolCallMarkup(fallbackAnswer.ToString());
+            // 回退路径同样还原脱敏占位符（与主路径一致）
+            var finalAnswer = StripToolCallMarkup(RestoreDisplay(fallbackAnswer.ToString()));
             var events = new List<TurnEvent>
             {
                 new(context.TurnId, 0, "user", fallbackUserEventText, fallbackArtifactsJson),
