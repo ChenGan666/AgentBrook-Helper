@@ -69,12 +69,19 @@ public sealed class MessagingService : IAsyncDisposable
 
     // ── 通道注册（实例绑定 Sink：宿主按实例创建句柄，§4.1）──
 
+    /// <summary>
+    /// 绑定通道实例。interactionInterceptor（可选）：IM 对话确认的回复截获钩子——
+    /// 身份准入通过后、入 inbox 前调用；返回 true 表示该消息已被交互消费（不产生新回合）。
+    /// 钩子必须是同步、非阻塞的（准入持有 DB 门）。
+    /// </summary>
     public IImInboundSink BindChannel(string channelId, string instanceId, long accountEpoch, IImChannel channel,
-        bool autoPairPrivateChats = false)
+        bool autoPairPrivateChats = false,
+        Func<PairedIdentity, ImInboundMessage, bool>? interactionInterceptor = null)
     {
         var identity = new ImEndpointIdentity(channelId, instanceId, accountEpoch);
         var sink = new InboundPipeline(_store, _identities, identity, new InboundQuotas(MaxPerMinute: 100000),
-            onAccepted: _ => Dispatcher.Wake(), autoPairPrivateChats: autoPairPrivateChats);
+            onAccepted: _ => Dispatcher.Wake(), autoPairPrivateChats: autoPairPrivateChats,
+            interactionInterceptor: interactionInterceptor);
         _channels[$"{channelId}+{instanceId}"] = channel;
         _identitiesByNs[$"{channelId}+{instanceId}"] = identity;
         _sinks[$"{channelId}+{instanceId}"] = sink;
@@ -138,25 +145,35 @@ public sealed class MessagingService : IAsyncDisposable
     /// <summary>
     /// 主窗口 IM 会话发起的回复入队（双向闭环：用户在主界面 IM 会话中输入 → 结果送达该 IM）。
     /// 路由缺失（非 IM 会话）或通道未绑定（避免永久 Pending）返回 false；文本走同一披露分片策略。
+    /// 回合内即时提示（授权/提问）也走这里——必须持 DB 门（共享 SqliteConnection 非线程安全，
+    /// 出站泵在另一线程并发读写）。
     /// </summary>
     public bool EnqueueOutbound(string sessionId, string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return false;
-        var route = _store.GetRoute(sessionId);
-        if (route is null) return false;
-        var ns = $"{route.ChannelId}+{route.InstanceId}";
-        if (!_sinks.ContainsKey(ns)) return false;
-        var fragments = Disclosure.PlanOutbound(route.PrincipalId, text, Capabilities);
-        var now = DateTimeOffset.UtcNow.ToString("O");
-        foreach (var fragment in fragments)
+        _db.Gate.Wait();
+        try
         {
-            var deliveryId = $"ob-{Guid.NewGuid():N}"[0..16];
-            _store.InsertOutbox(new OutboxRow(
-                deliveryId, ns, sessionId, $"local-{Guid.NewGuid():N}"[0..14],
-                1, route.AccountId, route.ChatId, fragment, null, $"idem-{deliveryId}", null,
-                "Pending", 0, null, false, null, null, now, now, now));
+            var route = _store.GetRoute(sessionId);
+            if (route is null) return false;
+            var ns = $"{route.ChannelId}+{route.InstanceId}";
+            if (!_sinks.ContainsKey(ns)) return false;
+            var fragments = Disclosure.PlanOutbound(route.PrincipalId, text, Capabilities);
+            var now = DateTimeOffset.UtcNow.ToString("O");
+            foreach (var fragment in fragments)
+            {
+                var deliveryId = $"ob-{Guid.NewGuid():N}"[0..16];
+                _store.InsertOutbox(new OutboxRow(
+                    deliveryId, ns, sessionId, $"local-{Guid.NewGuid():N}"[0..14],
+                    1, route.AccountId, route.ChatId, fragment, null, $"idem-{deliveryId}", null,
+                    "Pending", 0, null, false, null, null, now, now, now));
+            }
+            return fragments.Count > 0;
         }
-        return fragments.Count > 0;
+        finally
+        {
+            _db.Gate.Release();
+        }
     }
 
     private IImChannel? ResolveChannel(string ns) => _channels.GetValueOrDefault(ns);

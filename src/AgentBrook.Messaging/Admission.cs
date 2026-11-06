@@ -78,7 +78,8 @@ public sealed class InboundPipeline(
     ImEndpointIdentity boundIdentity,
     InboundQuotas quotas,
     Action<InboxRow>? onAccepted = null,
-    bool autoPairPrivateChats = false) : IImInboundSink
+    bool autoPairPrivateChats = false,
+    Func<PairedIdentity, ImInboundMessage, bool>? interactionInterceptor = null) : IImInboundSink
 {
     private readonly ConcurrentDictionary<string, Deque> _recentTimestamps = new();
 
@@ -130,6 +131,12 @@ public sealed class InboundPipeline(
             if (identity is null)
                 return ImAcceptResult.Rejected(ImErrorCodes.NotPaired);   // 触发本机配对流程（UI 侧）
         }
+
+        // 2.5 交互回复截获（IM 对话确认：授权/提问回复）：
+        // 命中 → 直接消费（唤醒等待中的回合），**不入 inbox、不产生新回合**——调度器是单循环，
+        // 回合等待期间它被占住，走 inbox 会死锁到超时。钩子只做 TCS.TrySetResult（异步续体），不阻塞。
+        if (identity is not null && interactionInterceptor?.Invoke(identity, message) == true)
+            return ImAcceptResult.Accepted();
 
         // 3 配额：每主体接收速率（10/min → Busy+RetryAfter；§10.2）
         var bucketKey = $"{message.SenderId}@{message.ChatId}";

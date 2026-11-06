@@ -27,6 +27,10 @@ public sealed class ImSettings
     [JsonPropertyName("StorageMode")]
     public string StorageMode { get; set; } = "versioned";   // versioned | legacy
 
+    /// <summary>IM 授权方式：chat=对话确认（工具授权/提问经 IM 消息回复，默认）；auto=自动放行（旧行为，兼容开关）。</summary>
+    [JsonPropertyName("InteractionMode")]
+    public string InteractionMode { get; set; } = "chat";
+
     [JsonPropertyName("channels")]
     public List<ImChannelConfig> Channels { get; set; } = [];
 

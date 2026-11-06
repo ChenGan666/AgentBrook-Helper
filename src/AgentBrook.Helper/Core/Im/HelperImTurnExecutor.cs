@@ -29,12 +29,18 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
     private readonly Func<AgentBrook.Agent.BrookAgent?>? _brookAccessor;   // 主 Agent 包装（同权执行：完整回合循环）
     private readonly HelperBlobService? _blobs;                             // 产物回传写 Blob（附件互传出站）
     private readonly Func<TurnExecutionAttachment, CancellationToken, Task<TurnExecutionAttachmentBlob?>>? _materialize;  // 统一管道物化（通道插件下载）
+    private readonly Func<string, bool>? _sendImmediate;                    // 回合中即时出站（授权/提问提示）
+    private readonly bool _interactiveApprovals;                            // true=对话确认；false=自动放行（auto 模式）
+    private readonly Func<bool>? _fullAccessAccessor;                       // 完全访问：IM 审批同样自动通过
 
     public HelperImTurnExecutor(VersionedSessionStore store, HelperImAgentHost agentHost,
         ImTurnHooks? hooks = null, string? legacySessionsDir = null,
         Func<AgentBrook.Agent.BrookAgent?>? brookAccessor = null,
         HelperBlobService? blobs = null,
-        Func<TurnExecutionAttachment, CancellationToken, Task<TurnExecutionAttachmentBlob?>>? materializeAttachment = null)
+        Func<TurnExecutionAttachment, CancellationToken, Task<TurnExecutionAttachmentBlob?>>? materializeAttachment = null,
+        Func<string, bool>? sendImmediate = null,
+        bool interactiveApprovals = false,
+        Func<bool>? fullAccessAccessor = null)
     {
         _store = store;
         _agentHost = agentHost;
@@ -43,6 +49,9 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
         _brookAccessor = brookAccessor;
         _blobs = blobs;
         _materialize = materializeAttachment;
+        _sendImmediate = sendImmediate;
+        _interactiveApprovals = interactiveApprovals;
+        _fullAccessAccessor = fullAccessAccessor;
     }
 
     public async Task<TurnOutcome> ExecuteAsync(TurnExecutionContext context, CancellationToken cancellationToken)
@@ -53,9 +62,10 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
         ImDiag.Log($"[im] 回合开始：session={context.SessionId} text={TruncateLog(userText)} attachments={context.Attachments?.Count ?? 0}");
         _hooks?.OnTurnStart?.Invoke(context.SessionId);
 
-        // 回合超时（模型/工具挂起时给用户确定性回执）；审批等待计入总时长（5 分钟上限）
+        // 回合超时（模型/工具挂起时给用户确定性回执）。
+        // 对话确认模式会把 5 分钟审批等待计入回合 → 总上限提到 10 分钟；auto 模式保持 5 分钟。
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(TimeSpan.FromMinutes(5));
+        timeoutCts.CancelAfter(TimeSpan.FromMinutes(_interactiveApprovals ? 10 : 5));
 
         // ── 同权执行：走主 Agent 完整回合循环（RunAsync：多轮工具执行 + 审批弹窗与主界面同流程）──
         var brook = _brookAccessor?.Invoke();
@@ -73,7 +83,18 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
             {
                 try
                 {
-                    brook.AutoApproveExternalTurns = true;   // IM 同权：用户通道即授权（UI 弹窗审批仅主回合使用）
+                    // 交互路由（chat 模式 + 可即时出站）：授权/提问经 IM 对话完成（手机回复），
+                    // 不弹本地卡片。AsyncLocal 作用域只覆盖本回合异步流——本地回合读不到，互不影响。
+                    // auto 模式/无出站通道：保持原行为（全自动放行）。
+                    var router = _interactiveApprovals && _sendImmediate is not null
+                                 && context.ReplyTarget is { } replyTarget
+                                 && context.Principal is { } principal
+                        ? new ImTurnInteractionRouter(context.SessionId, replyTarget, principal.PrincipalId,
+                            _sendImmediate, fullAccess: _fullAccessAccessor)
+                        : null;
+                    using var interactionScope = router is null ? null : brook.BeginExternalInteraction(router);
+                    brook.ExternalTurnActive = true;              // 转写门控（必须先于 SwitchSession 的 Reconcile）
+                    brook.AutoApproveExternalTurns = router is null;   // 无交互能力时的兜底策略
                     await brook.SwitchSessionAsync(context.SessionId).ConfigureAwait(false);   // IM 会话就位（载入最新 CURRENT）
                     var (modelName, imageInput, videoInput) = _agentHost.GetModelCapabilities(brook.CurrentModel);   // 解析模型=主界面当前选中
 
@@ -245,6 +266,7 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
                 finally
                 {
                     brook.AutoApproveExternalTurns = false;
+                    brook.ExternalTurnActive = false;
                 }
             }
             // 主回合长时间未结束：降级走回退路径（不丢消息）

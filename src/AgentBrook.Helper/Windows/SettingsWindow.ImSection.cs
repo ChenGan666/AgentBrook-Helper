@@ -100,6 +100,49 @@ public partial class SettingsWindow
             TextWrapping = Avalonia.Media.TextWrapping.Wrap,
         });
 
+        // IM 授权方式：对话确认（默认，授权/提问经手机回复完成）/ 自动放行（旧行为，兼容开关）
+        var modeRow = new StackPanel
+        {
+            Orientation = Avalonia.Layout.Orientation.Horizontal,
+            Spacing = 8,
+            Margin = new Thickness(2, 2, 0, 2),
+        };
+        modeRow.Children.Add(new TextBlock
+        {
+            Text = I18n.T("ui.im.interaction.mode"),
+            FontSize = 12,
+            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+            Foreground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#c8c8c8")),
+        });
+        var modeCombo = new ComboBox { FontSize = 12, MinWidth = 190 };
+        modeCombo.Items.Add(I18n.T("ui.im.interaction.chat"));
+        modeCombo.Items.Add(I18n.T("ui.im.interaction.auto"));
+        modeCombo.SelectedIndex = string.Equals(settings.InteractionMode, "auto", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        modeCombo.SelectionChanged += (_, _) =>
+        {
+            var mode = modeCombo.SelectedIndex == 1 ? "auto" : "chat";
+            try
+            {
+                // 重新读取后写入，避免与其它卡片的保存相互覆盖
+                var fresh = ImSettings.Load(UiPrefs.WorkspaceDir());
+                if (string.Equals(fresh.InteractionMode, mode, StringComparison.OrdinalIgnoreCase)) return;
+                fresh.InteractionMode = mode;
+                fresh.Save(UiPrefs.WorkspaceDir());
+                Console.Error.WriteLine($"[im-settings] 授权方式 → {mode}");
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"[im-settings] 授权方式保存失败：{ex.Message}"); }
+        };
+        modeRow.Children.Add(modeCombo);
+        list.Children.Add(modeRow);
+        list.Children.Add(new TextBlock
+        {
+            Text = I18n.T("ui.im.interaction.desc"),
+            FontSize = 11,
+            Margin = new Thickness(2, 0, 0, 6),
+            Foreground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#8a8a8a")),
+            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+        });
+
         // 最近回合失败原因（无回复/抖动类问题的第一现场）
         if (!string.IsNullOrEmpty(ImComposition.LastTurnError))
         {

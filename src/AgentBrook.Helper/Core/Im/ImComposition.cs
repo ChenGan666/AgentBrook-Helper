@@ -877,13 +877,19 @@ public sealed class ImComposition
             legacyRegister: (id, title) => LegacyStore()?.Create(id, title),
             legacyMirrorDir: Path.Combine(_workspaceRoot, "sessions"));
         var messaging = new MessagingService(db, sessions,
-            _ => new HelperImTurnExecutor(_store, agentHost,
+            ctx => new HelperImTurnExecutor(_store, agentHost,
                 hooks: UiHooks(),
                 legacySessionsDir: Path.Combine(_workspaceRoot, "sessions"),
                 brookAccessor: () => _agentAccessor(),   // 同权执行：走主 Agent 完整回合循环（审批弹窗与主界面同流程）
                 blobs: new HelperBlobService(_workspaceRoot),   // 产物回传写 Blob（附件互传出站）
                 materializeAttachment: (att, token) =>
-                    MaterializeImAttachmentAsync(_messaging, new HelperBlobService(_workspaceRoot), att, token)),
+                    MaterializeImAttachmentAsync(_messaging, new HelperBlobService(_workspaceRoot), att, token),
+                // 对话确认：回合中即时出站提示（授权/提问），读回复在准入层完成
+                sendImmediate: text => _messaging?.EnqueueOutbound(ctx.SessionId, text) == true,
+                // auto 模式：保持旧的"全自动放行"；每回合读配置——设置页切换后下一回合即生效
+                interactiveApprovals: !string.Equals(
+                    ImSettings.Load(_workspaceRoot).InteractionMode, "auto", StringComparison.OrdinalIgnoreCase),
+                fullAccessAccessor: () => App.Controller?.FullAccess == true),
             new HelperApprovalPort(), Caps(), workspaceRootOverride: _workspaceRoot);
         await messaging.StartAsync().ConfigureAwait(false);
         _messaging = messaging;
@@ -1037,7 +1043,9 @@ public sealed class ImComposition
                 s_channelStatus[ch.ChannelId] = (status.State.ToString(), status.Reason);
         };
         var sink = _messaging.BindChannel(ch.ChannelId, ch.InstanceId, accountEpoch: 1, channel,
-            autoPairPrivateChats: true);   // Helper 形态：私聊首条即配对（防无配对 UI 死局）
+            autoPairPrivateChats: true,   // Helper 形态：私聊首条即配对（防无配对 UI 死局）
+            // IM 对话确认：授权/提问的回复在准入层（身份校验后、入 inbox 前）截获并唤醒回合
+            interactionInterceptor: ImInteractionRegistry.TryConsume);
         await channel.StartAsync(new ImChannelStartContext(sink, JsonSerializer.Serialize(new
         {
             channelId = ch.ChannelId,

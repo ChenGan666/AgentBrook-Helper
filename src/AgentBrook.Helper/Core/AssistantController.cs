@@ -903,6 +903,13 @@ public sealed class AssistantController : IBrookInteraction
             EventRaised?.Invoke(new BrookEvent.ToolStarted("log:已自动批准（完全访问）：" + toolName, argumentsJson));
             return Task.FromResult(ApprovalDecision.Approve());
         }
+        // 外部回合（IM 同权）：审批经 IM 对话完成（手机回复），绝不弹本地卡片。
+        // CurrentExternalInteraction 是 AsyncLocal——只有 IM 回合的异步流读得到，本地回合恒为 null。
+        if (Agent?.CurrentExternalInteraction is { } externalInteraction)
+        {
+            Console.Error.WriteLine($"[approval] 外部回合（IM）：{toolName} → 对话确认");
+            return externalInteraction.GetApprovalAsync(toolName, argumentsJson, cancellationToken);
+        }
         var tcs = new TaskCompletionSource<ApprovalDecision>(TaskCreationOptions.RunContinuationsAsynchronously);
         _approvalTcs = tcs;
         LinkCancel(tcs, cancellationToken, () => { if (_approvalTcs == tcs) _approvalTcs = null; });
@@ -933,6 +940,12 @@ public sealed class AssistantController : IBrookInteraction
 
     public Task<string> AskUserAsync(string question, string? choices, CancellationToken cancellationToken = default)
     {
+        // 外部回合（IM 同权）：提问经 IM 对话完成（ask_user 的手机侧选项/自由回答）
+        if (Agent?.CurrentExternalInteraction is { } externalInteraction)
+        {
+            Console.Error.WriteLine("[approval] 外部回合（IM）：ask_user → 对话提问");
+            return externalInteraction.AskUserAsync(question, choices, cancellationToken);
+        }
         var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         _askTcs = tcs;
         LinkCancel(tcs, cancellationToken, () => { if (_askTcs == tcs) _askTcs = null; });

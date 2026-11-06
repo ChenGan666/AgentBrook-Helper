@@ -1042,7 +1042,7 @@ public sealed class BrookAgent : IAsyncDisposable
         {
             return;   // 回合进行中：助手文本尚含占位符，落盘会污染 transcript（结束后还原再写）
         }
-        if (AutoApproveExternalTurns)
+        if (ExternalTurnActive || AutoApproveExternalTurns)
         {
             // 外部回合（IM 同权）：转写由**提交投影独占写入**（含附件 artifacts），此处不写——
             // 双写会产生同内容两条（界面重复），且跨格式去重会误判新行
@@ -1154,8 +1154,34 @@ public sealed class BrookAgent : IAsyncDisposable
     public bool TurnInProgress => _turnInProgress;
 
     /// <summary>外部回合（IM 同权）工具审批自动通过：消息来自用户本人配对通道=用户意图即授权；
-    /// 每次自动批准均留日志。仅外部回合置位（互斥保证不污染主回合），UI 弹窗审批仅主回合使用。</summary>
+    /// 每次自动批准均留日志。仅外部回合置位（互斥保证不污染主回合），UI 弹窗审批仅主回合使用。
+    /// 有交互句柄（IM 对话确认）时此开关不生效——审批走句柄。</summary>
     public bool AutoApproveExternalTurns { get; set; }
+
+    /// <summary>外部回合进行中（IM 同权）：转写对账由提交投影独占写入，此标志门控 Reconcile。
+    /// 与 AutoApproveExternalTurns 解耦（后者只是审批兜底策略）。</summary>
+    public bool ExternalTurnActive { get; set; }
+
+    /// <summary>当前异步流的外部交互句柄（IM 对话确认）。AsyncLocal：只对本回合的异步流可见，
+    /// 本地回合/并发回合读到 null，互不影响。</summary>
+    private static readonly AsyncLocal<IBrookInteraction?> _externalInteraction = new();
+
+    /// <summary>本回合的外部交互句柄（无外部回合为 null）。</summary>
+    public IBrookInteraction? CurrentExternalInteraction => _externalInteraction.Value;
+
+    /// <summary>为当前异步流设置外部交互句柄（IM 回合：授权/提问经 IM 对话完成）。
+    /// Dispose 恢复上一级（支持嵌套/并发隔离）。</summary>
+    public IDisposable BeginExternalInteraction(IBrookInteraction interaction)
+    {
+        var previous = _externalInteraction.Value;
+        _externalInteraction.Value = interaction;
+        return new ExternalInteractionScope(previous);
+    }
+
+    private sealed class ExternalInteractionScope(IBrookInteraction? previous) : IDisposable
+    {
+        public void Dispose() => _externalInteraction.Value = previous;
+    }
 
     /// <summary>当前已载入的 MAF 会话（IM 执行器同权执行后据此编码快照提交）。</summary>
     public Microsoft.Agents.AI.AgentSession? InnerSession => _session;
@@ -1532,7 +1558,17 @@ public sealed class BrookAgent : IAsyncDisposable
                     : null;
 
                 ApprovalDecision decision;
-                if (AutoApproveExternalTurns)
+                var externalInteraction = CurrentExternalInteraction;
+                if (externalInteraction is not null)
+                {
+                    // 外部回合（IM）：审批经对话确认（手机回复），不弹本地卡片
+                    yield return new BrookEvent.Status(BrookRunState.AwaitingApproval, call?.Name);
+                    decision = await externalInteraction.GetApprovalAsync(
+                        call?.Name ?? request.ToolCall.CallId, argsJson, ct);
+                    Console.Error.WriteLine($"[approval] 外部回合对话确认：{call?.Name} → " +
+                        (decision.Approved ? "允许" : $"拒绝（{decision.Reason}）"));
+                }
+                else if (AutoApproveExternalTurns)
                 {
                     decision = ApprovalDecision.Approve();
                     Console.Error.WriteLine($"[approval] 外部回合自动批准：{call?.Name}（IM 同权——用户通道即授权）");
