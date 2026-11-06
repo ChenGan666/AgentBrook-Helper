@@ -16,6 +16,12 @@ public sealed class ProviderConfig
     public string ActiveModel { get; set; } = "";
     /// <summary>已选多模态模型（type≥4，供 media_generate 工具/子 Agent 调用）；空=无</summary>
     public string ActiveMediaModel { get; set; } = "";
+    /// <summary>
+    /// 已选转写模型（doc/Voice/01 §3.1）：**与 model_type 解耦**（第三方 /v1/models 不返回 model_type，
+    /// 第三轮评审定稿）——从 Models 任选或手填；绑定语义 = 用本 provider 的 BaseUrl/ApiKey 调用，
+    /// 与 chat 激活供应商无关。Protocol ∈ {空,"openai"} 才可挂（设置层校验）。
+    /// </summary>
+    public string ActiveAsrModel { get; set; } = "";
 
     public bool IsConfigured => !string.IsNullOrWhiteSpace(BaseUrl) && !string.IsNullOrWhiteSpace(ApiKey) && Models.Count > 0;
 

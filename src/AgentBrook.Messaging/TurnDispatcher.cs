@@ -234,7 +234,16 @@ public sealed class TurnDispatcher(
             new PrincipalRef(row.SenderId, 1, DisclosureScope.PairedPrivate),
             new ReplyTarget(row.ChannelId, row.InstanceId, row.AccountId, row.ChatId),
             PermissionPolicy.P0Default, approvals, row.Text,
-            Attachments: ParseAttachments(row));   // S8 附件：统一管道描述符（物化由通道插件实现）
+            Attachments: ParseAttachments(row))   // S8 附件：统一管道描述符（物化由通道插件实现）
+        {
+            // doc/Voice/01 §3.2.0 P2：转写回写闭包绑定（唯一持 row+store 处；init 属性，第四轮 N6）
+            PersistTranscript = (att, transcript) =>
+            {
+                var ok = TryPersistTranscript(row, att, transcript);
+                if (!ok) Console.Error.WriteLine($"[im] 转写回写失败（行已推进/清理），降级内存态：{att.RemoteId}");
+                return Task.CompletedTask;
+            },
+        };
         await journal.Db.Gate.WaitAsync(serviceCancellationToken).ConfigureAwait(false);
         try
         {
@@ -356,7 +365,7 @@ public sealed class TurnDispatcher(
             ("$files", filesJson), ("$idem", $"idem-{deliveryId}"), ("$at", DateTimeOffset.UtcNow.ToString("O")));
     }
 
-    /// <summary>解析入站附件描述符（统一管道 §8.1；无附件 → null）。</summary>
+    /// <summary>解析入站附件描述符（统一管道 §8.1；无附件 → null）。透传 State/Transcript（doc/Voice/01 §3.2.0 P3）。</summary>
     private static IReadOnlyList<TurnExecutionAttachment>? ParseAttachments(InboxRow row)
     {
         if (string.IsNullOrWhiteSpace(row.AttachmentsJson)) return null;
@@ -364,7 +373,39 @@ public sealed class TurnDispatcher(
         if (descriptors is null || descriptors.Count == 0) return null;
         return [.. descriptors.Select(d => new TurnExecutionAttachment(
             row.ChannelId, row.InstanceId, d.Provider, d.RemoteId, d.Name, d.MediaType,
-            (int)d.Kind, d.DeclaredBytes))];
+            (int)d.Kind, d.DeclaredBytes)
+        {
+            State = (int)d.State,               // 第四轮 N9：int 数值（Rejected=4），执行器 1b 判定用
+            Transcript = d.Transcript,          // 平台文本轨/幂等命中透传
+        })];
+    }
+
+    /// <summary>
+    /// 转写回写（doc/Voice/01 §3.2.0 P2/P3）：唯一同时持有 row 与 store 的接线点。
+    /// 匹配描述符（Provider+RemoteId）→ with 覆盖 Transcript → 持门 UPDATE；
+    /// 行不可写（已推进/清理）返回 false，执行器降级"本回合内存内转写"。
+    /// </summary>
+    private bool TryPersistTranscript(InboxRow row, TurnExecutionAttachment att, ImAttachmentTranscript transcript)
+    {
+        if (string.IsNullOrWhiteSpace(row.AttachmentsJson)) return false;
+        var descriptors = ImJson.Deserialize<List<ImAttachmentDescriptor>>(row.AttachmentsJson);
+        if (descriptors is null) return false;
+        var found = false;
+        var updated = new List<ImAttachmentDescriptor>(descriptors.Count);
+        foreach (var d in descriptors)
+        {
+            if (d.Provider == att.Provider && d.RemoteId == att.RemoteId)
+            {
+                updated.Add(d with { Transcript = transcript });
+                found = true;
+            }
+            else
+            {
+                updated.Add(d);
+            }
+        }
+        if (!found) return false;
+        return store.UpdateInboxAttachmentsJson(row.Id, ImJson.Serialize(updated)) > 0;
     }
 }
 

@@ -97,6 +97,8 @@ Each IM chat gets its own session in the session list (reused if it exists, crea
 
 Two buttons make IM supportable in practice: **Rebind channels** and **Open diagnostic log** (channel traffic and turn execution are written to `im/host-log.txt`).
 
+**Voice messages are transcribed for you.** A voice note sent to the bot (Telegram or WeChat) is turned into text before the agent sees it. The transcript is persisted with the message — restarts never re-transcribe and turn retries never re-bill — and the conversation shows `[voice] …` so you can tell it was spoken. Two engines are supported, both independent of your chat model: a **local offline plugin** (Settings → Plugins → Local Speech Recognition: sherpa-onnx + SenseVoice covering Chinese/English/Japanese/Korean/Cantonese, ~228 MB model downloaded from the plugin server with SHA-256 verification, audio never leaves the machine, with self-check and a built-in sample test) or a **cloud transcription model** (Settings → Models → Transcription model: point it at any model on an OpenAI-compatible provider — it is kept out of the chat-model list and the media picker). WeChat's own platform transcript is used first when the platform provides one. If no engine is configured, or the audio cannot be fetched, the bot replies with a clear message instead of silently dropping the voice note.
+
 ### An A2A network: many machines, one team
 
 Every Helper is also a network node. **Discovery**: LAN nodes find each other via UDP multicast, with node identity derived from an Ed25519 key — an IP change never turns a neighbor into a "new node". **Pairing**: both sides confirm, then verify a 6-digit code shown identically on both screens, guarding against spoofing and man-in-the-middle. Once paired, Helpers sync presence — online state, busy or idle, work state, even mood. **Peer sessions**: private one-to-one conversations with automatic offline retry, and delivery states you can see (written / delivered / processed).
@@ -232,7 +234,8 @@ Runtime state is generated automatically and stays out of version control:
 | Path | Contents |
 |---|---|
 | `workspace/session.json` | Conversation archive, restored on restart |
-| `workspace/models.json` | Model provider configuration |
+| `workspace/models.json` | Model provider configuration (including the optional transcription model) |
+| `workspace/models/asr/` | Local speech-recognition model files (downloaded from the plugin server, SHA-256 verified) |
 | `workspace/settings.json` | Assistant name, bubble icon, language, custom prompt |
 | `workspace/im/config.json` | IM channels and authorization mode (`InteractionMode`: `chat` default / `auto` auto-approve) |
 | `workspace/memory/`, `skills/`, `attachments/`, `projects/` | Memory, skills, attachments, team projects |

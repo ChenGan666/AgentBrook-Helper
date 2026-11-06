@@ -235,7 +235,7 @@ public partial class MainWindow : Window
                             Margin = new Thickness(12, 8, 12, 2),
                         });
                         // 对话模型组（type<4）：点选切换主模型
-                        foreach (var m in provider.Models.Where(m => provider.IsChatModel(m)))
+                        foreach (var m in provider.Models.Where(m => provider.IsChatModel(m) && m != provider.ActiveAsrModel))
                         {
                             var isActive = m == currentModel && provider.Name == currentProvider;
                             var model = m;
@@ -295,7 +295,7 @@ public partial class MainWindow : Window
                 var any = false;
                 foreach (var provider in providers)
                 {
-                    var mmModels = provider.Models.Where(m => !provider.IsChatModel(m)).ToList();
+                    var mmModels = provider.Models.Where(m => provider.TypeOf(m) is >= 4 and <= 7).ToList();   // B5：仅图像/视频；≥8 转写模型不入生成下拉
                     if (mmModels.Count == 0) continue;
                     any = true;
                     panel.Children.Add(new TextBlock

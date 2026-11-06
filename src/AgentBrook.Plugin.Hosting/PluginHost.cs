@@ -92,17 +92,19 @@ public sealed class PluginHost(HostDatabase db, string rootPath) : IPluginHostEx
     /// </summary>
     public async Task<int> UnloadPluginAsync(string pluginId, TimeSpan gracePeriod)
     {
-        List<string> instanceIds;
+        List<(string CapabilityId, string InstanceId)> instances;
         int removed = 0;
         lock (_gate)
         {
-            instanceIds = [.. _instances
+            instances = [.. _instances
                 .Where(kv => kv.Value.Instance.PluginId == pluginId)
-                .Select(kv => kv.Key)];
+                .Select(kv => (kv.Value.Instance.CapabilityId, kv.Value.Instance.InstanceId))];
         }
-        foreach (var instanceId in instanceIds)
+        foreach (var (capabilityId, instanceId) in instances)
         {
-            try { await StopInstanceAsync(instanceId, gracePeriod).ConfigureAwait(false); }
+            // 必须按（能力, 实例）停：字典键是 "{capabilityId}+{instanceId}"，而实例 id 普遍叫 "inst-1"，
+            // 用兼容重载按 instanceId 匹配会传错键 → 实例停不下来（卸载后通道仍在轮询的真机事故）
+            try { await StopInstanceAsync(capabilityId, instanceId, gracePeriod).ConfigureAwait(false); }
             catch (Exception) { /* 停实例失败不阻断工厂注销（卸载尽力而为） */ }
         }
         lock (_gate)

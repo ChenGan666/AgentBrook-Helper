@@ -134,6 +134,52 @@ public interface ISettingsContributor : IPluginCapability
     Task<PluginActionResult> RunActionAsync(string action, string? argumentsJson = null, IProgress<string>? progress = null, CancellationToken cancellationToken = default);
 }
 
+// ── 语音转写能力（v1.1 additive，doc/Voice/02 §4.1）────────────────────────
+// 宿主经 PluginRegistry.GetCapability<IAsrCapability>() 发现第一个已启用实现；
+// 契约对象一律属性式（评审纪律：共享契约新类型禁位置参数，防演进期位置破坏）。
+
+/// <summary>本地语音转写能力（可选能力接口）：插件提供离线 ASR 引擎（如 sherpa-onnx + SenseVoice）。</summary>
+public interface IAsrCapability : IPluginCapability
+{
+    /// <summary>引擎描述（设置页展示，如 "SenseVoice-Small (本地)"）。未就绪返回 null。</summary>
+    string? DescribeEngine();
+
+    /// <summary>是否就绪（模型已下载且自检通过）。</summary>
+    bool IsReady { get; }
+
+    /// <summary>转写 PCM 音频。解码归一化由宿主负责（16kHz 单声道；doc/Voice D9：插件只吃 PCM）。</summary>
+    Task<AsrCapabilityResult> TranscribeAsync(AsrCapabilityRequest request, CancellationToken cancellationToken = default);
+}
+
+/// <summary>转写请求。采样率默认 16kHz 单声道 PCM。</summary>
+public sealed class AsrCapabilityRequest
+{
+    /// <summary>PCM 音频字节（16bit LE 交错；单声道）。</summary>
+    public required ReadOnlyMemory<byte> Pcm16kMono { get; init; }
+
+    /// <summary>采样率（Hz）。默认 16000。</summary>
+    public int SampleRate { get; init; } = 16000;
+
+    /// <summary>语言提示（如 "zh"/"en"）；null=引擎自动检测。</summary>
+    public string? LanguageHint { get; init; }
+}
+
+/// <summary>转写结果。失败时 Success=false 且 Error 说明原因；音频字节不回传（脱敏红线）。</summary>
+public sealed class AsrCapabilityResult
+{
+    /// <summary>是否成功。</summary>
+    public required bool Success { get; init; }
+
+    /// <summary>转写文本（已剥特殊标签、含标点）。失败时为空串。</summary>
+    public string Text { get; init; } = "";
+
+    /// <summary>失败原因（Success=false 时供日志/回音）。</summary>
+    public string? Error { get; init; }
+
+    /// <summary>音频时长（供计费/遥测）。</summary>
+    public TimeSpan AudioDuration { get; init; }
+}
+
 /// <summary>插件入口发现标记：实现类型标注 [PluginEntry(id)]，宿主据此实例化。</summary>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
 public sealed class PluginEntryAttribute : Attribute

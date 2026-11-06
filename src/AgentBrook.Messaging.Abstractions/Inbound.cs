@@ -45,6 +45,13 @@ public sealed record ImAttachmentDescriptor(
     ImAttachmentState State,
     string? LocalBlobId)   // Materialized 后指向宿主 Blob（生成 ID）
 {
+    /// <summary>
+    /// 转写记录（doc/Voice/01 B2，additive）：平台文本轨（Engine="platform"）或宿主 ASR 回写。
+    /// 非位置 init 属性——10 参位置构造保持不动，防止 Telegram/Weixin/Bridge 三插件
+    /// 源码级与二进制级双重破坏；旧 attachments_json 缺字段反序列化为 null（向后兼容）。
+    /// </summary>
+    public ImAttachmentTranscript? Transcript { get; init; }
+
     public bool IsValid =>
         !string.IsNullOrWhiteSpace(Provider) &&
         SchemaVersion > 0 &&

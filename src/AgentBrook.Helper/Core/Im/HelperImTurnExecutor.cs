@@ -1,5 +1,7 @@
 using System.Text;
 using AgentBrook.Agent.IM;
+using AgentBrook.Helper.Core.Voice;
+using AgentBrook.Helper.Support;
 using AgentBrook.Messaging;
 using AgentBrook.Messaging.Abstractions;
 using AgentBrook.Runtime;
@@ -32,6 +34,7 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
     private readonly Func<string, bool>? _sendImmediate;                    // 回合中即时出站（授权/提问提示）
     private readonly bool _interactiveApprovals;                            // true=对话确认；false=自动放行（auto 模式）
     private readonly Func<bool>? _fullAccessAccessor;                       // 完全访问：IM 审批同样自动通过
+    private readonly Func<IAsrService?>? _asrServiceAccessor;               // 语音转写服务（doc/Voice/01 B3；可能晚装配，null=未装）
 
     public HelperImTurnExecutor(VersionedSessionStore store, HelperImAgentHost agentHost,
         ImTurnHooks? hooks = null, string? legacySessionsDir = null,
@@ -40,7 +43,8 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
         Func<TurnExecutionAttachment, CancellationToken, Task<TurnExecutionAttachmentBlob?>>? materializeAttachment = null,
         Func<string, bool>? sendImmediate = null,
         bool interactiveApprovals = false,
-        Func<bool>? fullAccessAccessor = null)
+        Func<bool>? fullAccessAccessor = null,
+        Func<IAsrService?>? asrServiceAccessor = null)
     {
         _store = store;
         _agentHost = agentHost;
@@ -52,6 +56,7 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
         _sendImmediate = sendImmediate;
         _interactiveApprovals = interactiveApprovals;
         _fullAccessAccessor = fullAccessAccessor;
+        _asrServiceAccessor = asrServiceAccessor;
     }
 
     public async Task<TurnOutcome> ExecuteAsync(TurnExecutionContext context, CancellationToken cancellationToken)
@@ -112,6 +117,20 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
                     }
                     var (modelName, imageInput, videoInput) = _agentHost.GetModelCapabilities(brook.CurrentModel);   // 解析模型=主界面当前选中
 
+                    // ── 语音门卫（doc/Voice/01 §3.2.1 步骤 0，物化前短路）：存在"无转写可用"的语音
+                    //    且转写未配置 → 直接回音（不物化——省一次 CDN 下载；平台转写命中的不受影响）──
+                    var pendingVoice = hasAttachments
+                        ? context.Attachments!.Where(a => a.Kind == 3 && a.Transcript is null && a.State != 4).ToList()
+                        : [];
+                    if (pendingVoice.Count > 0 && _asrServiceAccessor?.Invoke() is not { IsConfigured: true })
+                    {
+                        var gateEcho = I18n.T("ui.voice.not.configured");
+                        var gateEvents = new List<TurnEvent> { new(context.TurnId, 0, "assistant", gateEcho, null) };
+                        _hooks?.OnTurnEnd?.Invoke(context.SessionId, true);
+                        ImDiag.Log($"[im] 语音门卫：转写未配置，回音短路（{pendingVoice.Count} 条待转写语音）");
+                        return new TurnOutcome(true, gateEcho, gateEvents, [], null, null);
+                    }
+
                     // 附件能力检查：不支持→反馈请求方（不进会话、不调模型），提示切换多模态模型
                     var unsupported = "";
                     if (hasAttachments)
@@ -137,14 +156,20 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
                         }
                     }
 
-                    // ── 回合输入：附件=DataContent（会话历史承载图片，指令回合模型带图上下文）；文字=用户指令 ──
+                    // ── 回合输入：附件=DataContent（会话历史承载图片，指令回合模型带图上下文）；文字=用户指令；
+                    //    语音=三分支处理（doc/Voice/01 §3.2.1：Transcript 命中/Rejected/物化+转写+回写）──
                     Microsoft.Extensions.AI.ChatMessage turnInput;
                     var userEventText = userText;
                     var materialized = new List<TurnExecutionAttachmentBlob>();
                     if (hasAttachments)
                     {
                         var parts = new List<Microsoft.Extensions.AI.AIContent>();
-                        foreach (var att in context.Attachments!)
+
+                        // 语音附件统一走三分支（命中注入/Rejected 回音/物化+转写+回写），字节不进 DataContent
+                        var (voiceInjected, voiceTexts) = await ProcessVoiceAttachmentsAsync(context, cancellationToken).ConfigureAwait(false);
+
+                        // 非语音附件：物化 → DataContent（既有路径）
+                        foreach (var att in context.Attachments!.Where(a => a.Kind != 3))
                         {
                             TurnExecutionAttachmentBlob? blob = null;
                             try { blob = _materialize?.Invoke(att, cancellationToken).GetAwaiter().GetResult(); }
@@ -153,21 +178,31 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
                             materialized.Add(blob);
                             parts.Add(new Microsoft.Extensions.AI.DataContent(blob.Bytes, blob.MediaType ?? "image/jpeg"));
                         }
-                        // 全部附件物化失败：明确告知（不静默走空输入，否则用户以为附件已收到）
-                        if (materialized.Count == 0)
+
+                        // 全部不可处理（无语音结果也无物化产物）：明确告知（不静默走空输入，否则用户以为附件已收到）
+                        if (materialized.Count == 0 && voiceInjected.Count == 0)
                         {
                             var failed = "附件接收失败（可能超过大小限制、平台下载失败或文件已过期）。请重新发送一次。";
                             var failedEvents = new List<TurnEvent> { new(context.TurnId, 0, "assistant", failed, null) };
                             _hooks?.OnTurnEnd?.Invoke(context.SessionId, true);
                             return new TurnOutcome(true, failed, failedEvents, [], null, null);
                         }
-                        // 附件消息（无文字）：host 指令强约束——只回一句话（不描述/不分析/不执行任何工具）；
-                        // 会话历史保留图片，待用户发出具体指令后模型带图执行
-                        if (parts.Count > 0 && string.IsNullOrWhiteSpace(userText))
+
+                        // B9（既有缺口修复）：文字进模型输入——此前附件分支 userText 不进 parts，"文字+附件"的指令文本丢失
+                        if (!string.IsNullOrWhiteSpace(userText))
+                            parts.Add(new Microsoft.Extensions.AI.TextContent(userText));
+
+                        // 语音转写行注入（含平台转写/幂等命中/失败占位——确定性短语，非模型自答）
+                        foreach (var v in voiceInjected)
+                            parts.Add(new Microsoft.Extensions.AI.TextContent(v));
+
+                        // host 约束：userText 空且无语音注入才压"只回复已收到附件"（doc/Voice/01 §3.2.2）
+                        if (parts.Count > 0 && string.IsNullOrWhiteSpace(userText) && voiceInjected.Count == 0)
                             parts.Add(new Microsoft.Extensions.AI.TextContent(
                                 "（用户发来了附件。请只回复：已收到附件，等待具体指令。——不要描述或分析附件内容，不要执行任何工具，不要提出建议。）"));
+
                         turnInput = new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, parts);
-                        userEventText = string.IsNullOrWhiteSpace(userEventText) ? "[附件]" : userEventText;
+                        userEventText = BuildUserEventText(userText, voiceTexts);
                     }
                     else
                     {
@@ -217,6 +252,8 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
                             {
                                 "image/jpeg" => "jpg", "image/png" => "png", "image/webp" => "webp",
                                 "image/gif" => "gif", "video/mp4" => "mp4", "application/pdf" => "pdf",
+                                "audio/ogg" or "audio/opus" => "ogg", "audio/mpeg" => "mp3",
+                                "audio/wav" => "wav", "audio/silk" => "silk",
                                 _ => "file",
                             };
                             return (b.FileName ?? $"附件-{(b.BlobId ?? "x")[..Math.Min(8, (b.BlobId ?? "x").Length)]}",
@@ -305,7 +342,11 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
         {
             var parts = new List<Microsoft.Extensions.AI.AIContent>();
             var materialized = new List<TurnExecutionAttachmentBlob>();
-            foreach (var att in context.Attachments!)
+
+            // 语音附件三分支（与主路径同构；转写结果多半已在本回合主路径回写 inbox——此处命中幂等）
+            var (voiceInjected, voiceTexts) = await ProcessVoiceAttachmentsAsync(context, cancellationToken).ConfigureAwait(false);
+
+            foreach (var att in context.Attachments!.Where(a => a.Kind != 3))
             {
                 try
                 {
@@ -316,7 +357,7 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
                 }
                 catch (Exception ex) { Console.Error.WriteLine($"[im] 附件物化失败（降级路径）{att.RemoteId}：{ex.Message}"); }
             }
-            if (materialized.Count == 0)
+            if (materialized.Count == 0 && voiceInjected.Count == 0)
             {
                 // 全部物化失败：明确告知（不静默当作普通消息，否则用户以为已收到）
                 _hooks?.OnTurnEnd?.Invoke(context.SessionId, true);
@@ -324,17 +365,24 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
                 var failedEvents = new List<TurnEvent> { new(context.TurnId, 0, "assistant", failed, null) };
                 return new TurnOutcome(true, failed, failedEvents, [], null, null);
             }
-            if (string.IsNullOrWhiteSpace(userText))
+            // B9 + 语音注入 + host 约束判定（与主路径同构，doc/Voice/01 §3.2.2）
+            if (!string.IsNullOrWhiteSpace(userText))
+                parts.Add(new Microsoft.Extensions.AI.TextContent(userText));
+            foreach (var v in voiceInjected)
+                parts.Add(new Microsoft.Extensions.AI.TextContent(v));
+            if (parts.Count > 0 && string.IsNullOrWhiteSpace(userText) && voiceInjected.Count == 0)
                 parts.Add(new Microsoft.Extensions.AI.TextContent(
                     "（用户发来了附件。请只回复：已收到附件，等待具体指令。——不要描述或分析附件内容，不要执行任何工具，不要提出建议。）"));
             fallbackInput = new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, parts);
-            fallbackUserEventText = string.IsNullOrWhiteSpace(userText) ? "[附件]" : userText;
+            fallbackUserEventText = BuildUserEventText(userText, voiceTexts);
             fallbackArtifactsJson = SerializeArtifactsJson($"attach-{context.TurnId}", materialized.Select(b =>
             {
                 var ext = b.MediaType switch
                 {
                     "image/jpeg" => "jpg", "image/png" => "png", "image/webp" => "webp",
                     "image/gif" => "gif", "video/mp4" => "mp4", "application/pdf" => "pdf",
+                    "audio/ogg" or "audio/opus" => "ogg", "audio/mpeg" => "mp3",
+                    "audio/wav" => "wav", "audio/silk" => "silk",
                     _ => "file",
                 };
                 return (b.FileName ?? $"附件-{(b.BlobId ?? "x")[..Math.Min(8, (b.BlobId ?? "x").Length)]}",
@@ -402,7 +450,7 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
             new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase });
     }
 
-    /// <summary>产物媒体类型（按扩展名；小映射够 P0——未知扩展按文档流处理）。</summary>
+    /// <summary>产物媒体类型（按扩展名；小映射够 P0——未知扩展按文档流处理）。B7：wav 映射修正 + 补音频组。</summary>
     private static string GuessMediaType(string fileType) => fileType.ToLowerInvariant() switch
     {
         "png" => "image/png",
@@ -410,10 +458,116 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
         "gif" => "image/gif",
         "webp" => "image/webp",
         "mp4" => "video/mp4",
-        "mp3" or "wav" => "audio/mpeg",
+        "mp3" => "audio/mpeg",
+        "wav" or "oga" => "audio/wav",
+        "ogg" or "opus" => "audio/ogg",
+        "silk" => "audio/silk",
         "pdf" => "application/pdf",
         _ => "application/octet-stream",
     };
+
+    // ── 语音附件处理（doc/Voice/01 §3.2.1；主/降级路径共用）─────────────────────
+
+    /// <summary>
+    /// 语音附件三分支：a) Transcript 命中（平台文本轨/幂等回写）→ 直接注入；b) State=Rejected →
+    /// 确定性回音占位；c) 物化+转写+PersistTranscript 回写。语音字节一律不进 DataContent。
+    /// 返回（注入行，转写文本集——投影 userEventText 构造用）。
+    /// </summary>
+    private async Task<(List<string> Injected, List<string> Texts)> ProcessVoiceAttachmentsAsync(
+        TurnExecutionContext context, CancellationToken cancellationToken)
+    {
+        var injected = new List<string>();
+        var texts = new List<string>();
+        if (context.Attachments is null) return (injected, texts);
+
+        foreach (var att in context.Attachments.Where(a => a.Kind == 3))
+        {
+            // a) 平台文本轨 / 幂等命中（判定只看描述符位，不猜 userText 来源——第三轮 N1 纪律）
+            if (att.Transcript is { } hit)
+            {
+                injected.Add($"[语音] {hit.Text}");
+                texts.Add(hit.Text);
+                continue;
+            }
+
+            // b) Rejected（微信无下载参数，B8 改造产物）→ 确定性回音占位，不物化
+            if (att.State == 4)
+            {
+                var unavail = I18n.T("ui.voice.unavailable");
+                injected.Add($"[语音] {unavail}");
+                texts.Add(unavail);
+                continue;
+            }
+
+            // c) 物化 + 转写 + 回写（幂等键防重试重复计费）
+            TurnExecutionAttachmentBlob? blob = null;
+            try { blob = _materialize?.Invoke(att, cancellationToken).GetAwaiter().GetResult(); }
+            catch (Exception ex) { Console.Error.WriteLine($"[im] 语音物化失败 {att.RemoteId}：{ex.Message}"); }
+            if (blob is null)
+            {
+                var unavail = I18n.T("ui.voice.unavailable");
+                injected.Add($"[语音] {unavail}");
+                texts.Add(unavail);
+                continue;
+            }
+
+            var asr = _asrServiceAccessor?.Invoke();
+            if (asr is null)
+            {
+                var unavail = I18n.T("ui.voice.unavailable");
+                injected.Add($"[语音] {unavail}");
+                texts.Add(unavail);
+                continue;
+            }
+
+            var request = new AsrRequest(blob.Bytes, blob.MediaType ?? "audio/ogg");
+            var result = await asr.TranscribeAsync(request, cancellationToken).ConfigureAwait(false);
+            if (result.Success && !string.IsNullOrWhiteSpace(result.Text))
+            {
+                var transcript = new ImAttachmentTranscript
+                {
+                    Text = result.Text,
+                    IdempotencyKey = MakeIdempotencyKey(att, blob.Bytes),
+                    Engine = result.Engine,
+                    Duration = result.Duration,
+                };
+                try
+                {
+                    context.PersistTranscript?.Invoke(att, transcript);   // 行已推进/清理时返回 false→降级内存态
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"[im] 转写回写异常 {att.RemoteId}：{ex.Message}（下回合重转写，可接受）");
+                }
+                injected.Add($"[语音] {result.Text}");
+                texts.Add(result.Text);
+            }
+            else
+            {
+                var reason = result.Success ? "empty" : result.Error ?? "unknown";
+                var failed = I18n.T("ui.voice.transcribe.failed", reason);
+                injected.Add($"[语音] {failed}");
+                texts.Add(failed);
+            }
+        }
+        return (injected, texts);
+    }
+
+    /// <summary>投影 user 事件文本（doc/Voice/01 §3.2.2）：userText + 转写行合成；全空 → "[附件]"。</summary>
+    private static string BuildUserEventText(string userText, List<string> voiceTexts)
+    {
+        var segments = new List<string>();
+        if (!string.IsNullOrWhiteSpace(userText)) segments.Add(userText);
+        segments.AddRange(voiceTexts.Select(t => $"[语音] {t}"));
+        return segments.Count > 0 ? string.Join(" ", segments) : "[附件]";
+    }
+
+    /// <summary>转写幂等键（doc/Voice/01 §3.2.3）：RemoteId + 字节 SHA 前 16 hex，防重试重复计费。</summary>
+    private static string MakeIdempotencyKey(TurnExecutionAttachment att, byte[] bytes)
+    {
+        var sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));
+        return $"{att.RemoteId}-{sha[..16]}";
+    }
 
     /// <summary>剥离模型误发的工具调用标记（DSML 块等）：按关键词定位所在行，整行起截断——只保留正文。
     /// 兼容全角/半角竖线与重复竖线变体（<｜｜DSML｜｜、<|DSML|> 等）。</summary>

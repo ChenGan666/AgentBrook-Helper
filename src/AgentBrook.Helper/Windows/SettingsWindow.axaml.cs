@@ -563,6 +563,9 @@ public partial class SettingsWindow : WindowBase
             return;
         }
 
+        // 孤儿状态自愈：目录被外部删除的残留条目先清掉（否则可用列表被误跳过、IM 板块误判已装）
+        plugins.CleanupOrphanState();
+
         // 已装插件（空则显示占位说明）
         var installed = plugins.ListInstalled();
         if (installed.Count == 0)
@@ -635,6 +638,23 @@ public partial class SettingsWindow : WindowBase
                 try
                 {
                     ClosePluginDialog();   // 对话框持有插件实例，先关（热插拔回收需要）
+
+                    // IM 通道插件：卸载时持久化关闭对应通道开关（用户要求：卸载清配置/开关；
+                    // 通道配置与账号存档保留供重装恢复，开关默认停用避免卸载后仍自启）
+                    if (id.StartsWith("im-", StringComparison.Ordinal))
+                    {
+                        var channelType = id["im-".Length..];
+                        var wsDir = UiPrefs.WorkspaceDir();
+                        var imSettings = AgentBrook.Helper.Core.Im.ImSettings.Load(wsDir);
+                        var channel = imSettings.Channels.FirstOrDefault(c =>
+                            c.Type.Equals(channelType, StringComparison.OrdinalIgnoreCase));
+                        if (channel is not null && channel.Enabled)
+                        {
+                            channel.Enabled = false;
+                            imSettings.Save(wsDir);
+                        }
+                    }
+
                     var fullyRemoved = await plugins.UninstallAsync(id);
                     SetPluginStatus(I18n.T(fullyRemoved ? "ui.plugins.uninstalled" : "ui.plugins.uninstall.restarted", id));
                     _ = RefreshPluginLists();
@@ -680,7 +700,27 @@ public partial class SettingsWindow : WindowBase
             row.Children.Add(toggle);
             toggle.IsCheckedChanged += async (_, _) =>
             {
-                try { await plugins.SetEnabledAsync(id, toggle.IsChecked == true); }
+                try
+                {
+                    var enabling = toggle.IsChecked == true;
+                    await plugins.SetEnabledAsync(id, enabling);
+                    // IM 通道插件：启用时恢复通道开关并热绑定（停用路径由类别卸载器关开关+解绑；
+                    // 不做这步则通道开关停留在 disabled，启用后通道不会回绑）
+                    if (enabling && id.StartsWith("im-", StringComparison.Ordinal))
+                    {
+                        var channelType = id["im-".Length..];
+                        var wsDir = UiPrefs.WorkspaceDir();
+                        var imSettings = AgentBrook.Helper.Core.Im.ImSettings.Load(wsDir);
+                        var channel = imSettings.Channels.FirstOrDefault(c =>
+                            c.Type.Equals(channelType, StringComparison.OrdinalIgnoreCase));
+                        if (channel is not null && !channel.Enabled)
+                        {
+                            channel.Enabled = true;
+                            imSettings.Save(wsDir);
+                        }
+                        await AgentBrook.Helper.Core.Im.ImComposition.EnsureChannelBoundAsync(channelType);
+                    }
+                }
                 catch (Exception ex)
                 {
                     Console.Error.WriteLine($"[plugins] SetEnabled: {ex.Message}");
@@ -1453,6 +1493,7 @@ public partial class SettingsWindow : WindowBase
         SetT("LabelApiEndpoint", "ui.api.endpoint.openai.compatible");
         SetT("LabelApiKey", "ui.api.key");
         SetT("LabelModelsCsv", "ui.models.comma.separated.first.is.default");
+        SetT("LabelAsrModel", "ui.models.asr.title");
         }
         catch (Exception ex)
         {
@@ -1502,6 +1543,7 @@ public partial class SettingsWindow : WindowBase
             Models = [.. p.Models],
             ActiveModel = p.ActiveModel,
             ActiveMediaModel = p.ActiveMediaModel,
+            ActiveAsrModel = p.ActiveAsrModel,
             ModelTypes = new Dictionary<string, int>(p.ModelTypes),
             ModelNames = new Dictionary<string, string>(p.ModelNames),
             ModelEndpoints = new Dictionary<string, string>(p.ModelEndpoints),
@@ -1617,6 +1659,7 @@ public partial class SettingsWindow : WindowBase
         BaseUrlBox.Text = p.BaseUrl;
         ApiKeyBox.Text = p.ApiKey;
         ModelsBox.Text = string.Join(", ", p.Models);
+        AsrModelBox.Text = p.ActiveAsrModel;
         _ = RefreshBalanceAsync();
     }
 
@@ -1638,6 +1681,19 @@ public partial class SettingsWindow : WindowBase
             p.ActiveModel = p.Models.FirstOrDefault(p.IsChatModel) ?? "";
         }
         if (!p.Models.Contains(p.ActiveMediaModel) || p.IsChatModel(p.ActiveMediaModel)) p.ActiveMediaModel = "";
+        // 转写模型（doc/Voice/01 A0/A5）：与 model_type 解耦——任选/手填，但须挂 OpenAI 兼容供应商且 Key 有效
+        var asr = AsrModelBox.Text?.Trim() ?? "";
+        if (asr.Length > 0)
+        {
+            var protocolOk = string.IsNullOrEmpty(p.Protocol) || p.Protocol.Equals("openai", StringComparison.OrdinalIgnoreCase);
+            var keyOk = !string.IsNullOrWhiteSpace(p.ApiKey) && !ProviderConfig.IsPlaceholderApiKey(p.ApiKey);
+            if (!protocolOk || !keyOk)
+            {
+                asr = "";
+                Hint(I18n.T("ui.models.asr.invalid"));
+            }
+        }
+        p.ActiveAsrModel = asr;
     }
 
     private async Task SaveAndApplyAsync()
@@ -1708,6 +1764,7 @@ public partial class SettingsWindow : WindowBase
                     // 全量入列
                     // 默认激活优先文本模型，避免默认落到图像/视频
                     ModelsBox.Text = string.Join(", ", p.Models);
+                    AsrModelBox.Text = p.ActiveAsrModel;
                 }
             }
             catch { /* 拉取失败：按原逻辑提示未配置 */ }

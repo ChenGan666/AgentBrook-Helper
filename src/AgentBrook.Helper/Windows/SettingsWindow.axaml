@@ -436,6 +436,8 @@
                                 <TextBlock x:Name="LabelModelsCsv" Text="模型清单（逗号分隔，第一个为默认）" Classes="formLabel"/>
                                 <TextBox x:Name="ModelsBox" Watermark="model-a, model-b" FontSize="14" Height="64"
                                          TextWrapping="Wrap" AcceptsReturn="True"/>
+                                <TextBlock x:Name="LabelAsrModel" Text="转写模型（语音识别）" Classes="formLabel"/>
+                                <TextBox x:Name="AsrModelBox" Watermark="留空=不启用；填模型清单中的模型名" FontSize="14"/>
                                 <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,18,0,0"
                                             HorizontalAlignment="Left">
                                     <Button x:Name="UpdateBtn" Classes="ghostBtn" Content="更新" Tag="provider-test"/>

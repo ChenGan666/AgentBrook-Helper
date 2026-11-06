@@ -232,6 +232,14 @@ internal static partial class I18n
         ["ui.plugins.privacy.install.model"] = "Install model (auto download + self-check)",
         ["ui.plugins.privacy.model.installed"] = "Installed",
         ["ui.plugins.privacy.model.test"] = "Test",        ["ui.plugins.privacy.self.check"] = "Run environment self-check",
+        // ── Voice (doc/Voice/01 §3.3: IM voice gate & echoes) ──
+        ["ui.voice.not.configured"] = "Got a voice message, but no speech-to-text is configured yet — install the local ASR plugin or set a transcription model in Settings and resend, or just type it.",
+        ["ui.voice.transcribe.failed"] = "Couldn't transcribe this voice message ({0}); try again later or type it out.",
+        ["ui.voice.unavailable"] = "This voice message can't be transcribed right now (platform transcript unavailable).",
+        ["ui.voice.music.file"] = "Received an audio file ({0}); I can't process audio files themselves yet.",
+        // ── Models page · ASR model (doc/Voice/01 B5) ──
+        ["ui.models.asr.title"] = "Transcription model (speech recognition)",
+        ["ui.models.asr.invalid"] = "Transcription model ignored: must be on an OpenAI-compatible provider with a valid API key.",
         ["ui.plugins.privacy.dict.section"] = "Sensitive term dictionary",
         ["ui.plugins.privacy.dict.watermark"] = "Enter a term, e.g. full company name",
         ["ui.plugins.privacy.dict.add"] = "Add",

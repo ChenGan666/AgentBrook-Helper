@@ -46,6 +46,8 @@ public partial class SettingsWindow
         _imSectionBuilding = true;
         try
         {
+            // 孤儿状态自愈：插件目录被外部删除时，残留条目会让微信卡误判"已装"（doc/Voice 真机修复）
+            App.Controller.Agent?.PluginManager?.CleanupOrphanState();
             await RefreshImSectionCoreAsync();
         }
         finally
@@ -607,10 +609,16 @@ public partial class SettingsWindow
     /// <summary>微信（iLink/ClawBot）卡：扫码登录 → 自动落库并热绑定。二维码由本地把 qrcode_img_content 编码成图。</summary>
     private Control BuildWeixinCard(ImSettings settings, PluginIndexEntry? entry)
     {
-        var installed = entry is null
-            || App.Controller.Agent?.PluginManager?.ListInstalled().ContainsKey("im-weixin") == true;
+        // 已装判定（doc/Voice 真机修复）：index 条目缺失（如生产 index 被单插件覆盖）时不再无条件当作已装——
+        // 以 state（市场安装）或本地布点目录真实存在为准（workspace/plugins/im-weixin 或 workspace/im/plugins/im-weixin）
+        var wsRoot = UiPrefs.WorkspaceDir();
+        var installed =
+            App.Controller.Agent?.PluginManager?.ListInstalled().ContainsKey("im-weixin") == true
+            || Directory.Exists(Path.Combine(wsRoot, "plugins", "im-weixin"))
+            || Directory.Exists(Path.Combine(wsRoot, "im", "plugins", "im-weixin"));
         var channel = settings.Channels.FirstOrDefault(c => c.Type == "weixin");
-        var enabled = settings.ImEnabled && (channel?.Enabled ?? false);
+        // 状态联动（doc/Voice 真机修复）：插件未安装时不得显示"已启用"——配置保留但能力随插件走
+        var enabled = installed && settings.ImEnabled && (channel?.Enabled ?? false);
 
         var card = new Border
         {

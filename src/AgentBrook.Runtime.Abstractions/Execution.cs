@@ -119,6 +119,33 @@ public sealed record TurnExecutionContext(
         (Origin == TurnOrigin.Local
             ? Principal is null && ReplyTarget is null
             : Principal is { IsValid: true } && ReplyTarget is { IsValid: true });
+
+    /// <summary>
+    /// 转写回写委托（additive init 属性，第四轮 N6 纪律；doc/Voice/01 §3.2.0 P2）：
+    /// 由 TurnDispatcher 在构造 context 时闭包绑定（唯一同时持有 InboxRow 与 MessagingStore 处——
+    /// ImComposition 拿不到 row.Id）。执行器物化后转写完成时调用；行不可写时执行器降级内存态。
+    /// </summary>
+    public Func<TurnExecutionAttachment, ImAttachmentTranscript, Task>? PersistTranscript { get; init; }
+}
+
+/// <summary>
+/// 转写记录（doc/Voice/01 §3.2.0，第四轮 N8：落 Runtime.Abstractions——放 Messaging.Abstractions
+/// 会程序集循环）：平台文本轨 Engine="platform"；宿主 ASR 回写填 IdempotencyKey/Engine/Duration。
+/// 属性式 class（评审纪律：共享契约新类型禁位置参数）。
+/// </summary>
+public sealed class ImAttachmentTranscript
+{
+    /// <summary>转写文本（含标点）。</summary>
+    public required string Text { get; init; }
+
+    /// <summary>幂等键（RemoteId + blob SHA 前 16 hex）；平台文本轨无 key。</summary>
+    public string? IdempotencyKey { get; init; }
+
+    /// <summary>引擎来源："platform"=平台文本轨；其余=ASR 引擎名。</summary>
+    public string? Engine { get; init; }
+
+    /// <summary>音频时长（计费/遥测）。</summary>
+    public TimeSpan? Duration { get; init; }
 }
 
 /// <summary>
@@ -145,7 +172,15 @@ public sealed record TurnExecutionAttachment(
     string? Name,
     string? MediaType,
     int Kind,                 // ImAttachmentKind：1=File 2=Image 3=Voice 4=Video
-    long? DeclaredBytes);
+    long? DeclaredBytes)
+{
+    /// <summary>转写记录（平台文本轨或上回合 ASR 回写；执行器幂等注入依据，doc/Voice/01 §3.2.0 P1）。null=尚无转写。</summary>
+    public ImAttachmentTranscript? Transcript { get; init; }
+
+    /// <summary>物化状态数值（ImAttachmentState 语义：1=Referenced 2=Materialized 3=Expired 4=Rejected 5=BlockedByProvider；
+    /// 用 int 避免本程序集依赖 Messaging.Abstractions——第四轮 N8/N9 纪律）。调度器从描述符透传。</summary>
+    public int State { get; init; }
+}
 
 /// <summary>物化结果（通道插件下载 → 宿主 Blob → 字节回读；多模态模型输入用）。
 /// LocalPath = 宿主 Blob 磁盘路径（会话界面用户侧渲染附件用；宿主按自身 Blob 约定填充）。</summary>

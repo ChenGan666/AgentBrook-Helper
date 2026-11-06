@@ -232,6 +232,14 @@ internal static partial class I18n
         ["ui.plugins.privacy.install.model"] = "Instal model (unduh otomatis + self-check)",
         ["ui.plugins.privacy.model.installed"] = "Terpasang",
         ["ui.plugins.privacy.model.test"] = "Uji",        ["ui.plugins.privacy.self.check"] = "Jalankan self-check lingkungan",
+        // ── Suara (doc/Voice/01 §3.3: gerbang & gema suara IM) ──
+        ["ui.voice.not.configured"] = "Menerima pesan suara, tetapi pengenalan suara belum dikonfigurasi — pasang plugin ASR lokal atau atur model transkripsi di Pengaturan lalu kirim ulang, atau tulis saja.",
+        ["ui.voice.transcribe.failed"] = "Tidak bisa mentranskan pesan suara ini ({0}); coba lagi nanti atau tulis teksnya.",
+        ["ui.voice.unavailable"] = "Pesan suara ini belum bisa ditranskan saat ini (transkrip platform tidak tersedia).",
+        ["ui.voice.music.file"] = "Menerima berkas audio ({0}); saya belum bisa memproses berkas audio itu sendiri.",
+        // ── Halaman model · model ASR (doc/Voice/01 B5) ──
+        ["ui.models.asr.title"] = "Model transkripsi (pengenalan suara)",
+        ["ui.models.asr.invalid"] = "Model transkripsi diabaikan: harus pada penyedia kompatibel OpenAI dengan API key valid.",
         ["ui.plugins.privacy.dict.section"] = "Kamus istilah sensitif",
         ["ui.plugins.privacy.dict.watermark"] = "Masukkan istilah, mis. nama lengkap perusahaan",
         ["ui.plugins.privacy.dict.add"] = "Tambah",

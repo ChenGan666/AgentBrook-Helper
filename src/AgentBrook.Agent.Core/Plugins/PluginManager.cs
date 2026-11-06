@@ -134,12 +134,27 @@ public sealed class PluginManager
         return Path.Combine(Path.Combine(_workspaceRoot, "plugins"), id, leaf);
     }
 
-    /// <summary>启用（已装未加载 → 异步加载；已加载 → 标记启用）。真异步：插件 Initialize 不阻塞调用线程。</summary>
+    /// <summary>启用（已装未加载 → 异步加载；已加载 → 标记启用）。真异步：插件 Initialize 不阻塞调用线程。
+    /// 外部宿主类别（im 等）启停分流到类别 loader/unloader：它们不在 _registry 中，
+    /// 旧路径对运行态无效果（停用后通道实例仍在轮询）或会误走旧生命周期加载。</summary>
     public async Task SetEnabledAsync(string id, bool enabled)
     {
         _state.SetEnabled(id, enabled);
+        var category = _state.Snapshot().TryGetValue(id, out var st) ? st.Category : "plugin";
         if (enabled)
         {
+            if (TryGetCategoryLoader(category, out var categoryLoader))
+            {
+                var version = _state.GetVersion(id)
+                    ?? throw new InvalidOperationException($"插件 {id} 未安装");
+                await categoryLoader(ResolveDir(id, version)).ConfigureAwait(false);
+                return;
+            }
+            if (IsExternalCategory(category))
+            {
+                throw new InvalidOperationException(
+                    $"插件 {id} 属外部宿主类别（{category}），宿主未就绪，无法启用");
+            }
             if (!_registry.IsLoaded(id))
             {
                 var version = _state.GetVersion(id);
@@ -155,6 +170,15 @@ public sealed class PluginManager
         }
         else
         {
+            if (IsExternalCategory(category))
+            {
+                // 外部宿主负责释放（停实例 + 解绑通道 + 卸 ALC）；宿主未就绪时状态已记录，下次启动不加载
+                if (_categoryUnloaders.TryGetValue(category, out var unloader))
+                {
+                    await unloader(id).ConfigureAwait(false);
+                }
+                return;
+            }
             _registry.SetEnabled(id, false);
         }
     }
@@ -219,6 +243,36 @@ public sealed class PluginManager
         }
         _state.Remove(id);
         return unloaded;
+    }
+
+    /// <summary>
+    /// 孤儿状态自愈：插件目录被外部删除（或历史卸载残留）时，state.json 残留条目会让
+    /// 「可用列表」被 ListInstalled 误跳过、IM 板块误判"已装"（真机两案例）。目录不存在 → 清条目。
+    /// 启动恢复与插件列表刷新时调用；返回清理数。
+    /// </summary>
+    public int CleanupOrphanState()
+    {
+        var removed = 0;
+        foreach (var (id, entry) in _state.Snapshot())
+        {
+            // im 类别（及任何外部宿主类别）不清理：手工布点目录（workspace/im/plugins）不在 ResolveDir 下，
+            // 目录存在与否由外部宿主管理——误清会让正在使用的通道插件失效
+            if (IsExternalCategory(entry.Category)) continue;
+            try
+            {
+                if (!Directory.Exists(ResolveDir(id, entry.Version)))
+                {
+                    _state.Remove(id);
+                    removed++;
+                    _log?.Invoke($"[plugins] 孤儿状态清理：{id}（目录不存在）");
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.Invoke($"[plugins] 孤儿状态检查跳过 {id}：{ex.Message}");
+            }
+        }
+        return removed;
     }
 
     // ── 装饰链 / 设置 / 生命周期 ─────────────────────────────────────────
@@ -288,6 +342,7 @@ public sealed class PluginManager
     /// <summary>启动恢复：按 state.json 加载全部 enabled 插件。</summary>
     public async Task RestoreAsync()
     {
+        CleanupOrphanState();
         foreach (var (id, entry) in _state.Snapshot())
         {
             if (!entry.Enabled)

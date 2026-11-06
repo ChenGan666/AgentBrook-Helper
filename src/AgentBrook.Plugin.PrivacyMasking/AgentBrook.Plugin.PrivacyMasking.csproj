@@ -19,7 +19,8 @@
   <ItemGroup>
     <!-- 插件私有依赖（随插件包分发，AssemblyDependencyResolver 从插件目录解析） -->
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
-    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />
+    <!-- 1.28：与 ASR 插件（sherpa-onnx 需 ORT API 28）进程内统一 ORT 版本——两插件共存必需（doc/Voice 真机修复） -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.28.0" />
     <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.11.0" />
   </ItemGroup>
 

@@ -130,6 +130,15 @@ public sealed class MessagingStore(ImDatabase db)
     public int RescheduleInterruptedInbox() =>
         Db.ExecuteNonQuery("UPDATE inbox SET status='Pending' WHERE status='Processing'");
 
+    /// <summary>
+    /// 语音转写回写（doc/Voice/01 §3.2.0 P4）：单行持门 UPDATE，仅 Pending/Processing 行可写；
+    /// 幂等命中查询同样读本列（attachments_json 内 Transcript）。返回受影响行数（0=行已推进/清理）。
+    /// </summary>
+    public int UpdateInboxAttachmentsJson(long id, string attachmentsJson) =>
+        Db.ExecuteNonQuery(
+            "UPDATE inbox SET attachments_json=$att WHERE id=$id AND status IN ('Pending','Processing')",
+            ("$att", attachmentsJson), ("$id", id));
+
     public InboxRow? GetInboxByDedupKey(string dedupKey)
     {
         using var cmd = Db.CreateCommand("SELECT * FROM inbox WHERE dedup_key = $dk", ("$dk", dedupKey));

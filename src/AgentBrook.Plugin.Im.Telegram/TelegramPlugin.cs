@@ -536,6 +536,17 @@ public sealed class TelegramChannel : IImChannel, ICapabilityInstance
                 ImAttachmentState.Referenced, null));
         }
 
+        // B6（doc/Voice/01 缺陷#B2）：音乐/音频文件不再静默丢弃（此前连文本都没有 → 消息整体被忽略）——
+        // 投递占位提示文本（无附件、不转写：音频文件本身不在语音识别范围）
+        if (msg.TryGetProperty("audio", out var audioMsg))
+        {
+            var audioName = audioMsg.TryGetProperty("title", out var audioTitle) && !string.IsNullOrWhiteSpace(audioTitle.GetString())
+                ? audioTitle.GetString()!
+                : audioMsg.TryGetProperty("file_name", out var audioFileName) ? audioFileName.GetString() : null;
+            var note = $"[音乐文件：{audioName ?? "未命名"}]（我暂不支持直接处理音频文件内容）";
+            text = string.IsNullOrEmpty(text) ? note : $"{text} {note}";
+        }
+
         // 纯 sticker/表情等：文本与附件皆空 → 明确忽略（不算丢消息，Accepted 计入已确认，T01）
         if (text.Length == 0 && (attachments is null || attachments.Count == 0)) return null;
 

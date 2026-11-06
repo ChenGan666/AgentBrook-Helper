@@ -91,6 +91,9 @@ internal static class ModelCatalog
         if (!p.Models.Contains(p.ActiveModel) || !p.IsChatModel(p.ActiveModel))
             p.ActiveModel = p.Models.FirstOrDefault(p.IsChatModel) ?? "";
         if (!p.Models.Contains(p.ActiveMediaModel) || p.IsChatModel(p.ActiveMediaModel)) p.ActiveMediaModel = "";
+        // 转写模型（doc/Voice/01 A4，第五轮 N4）：与 model_type 解耦——只做"模型从清单移除即清空"，
+        // 不做 type 校验（手填模型名受"须与供应商清单一致"约束，刷新后被洗掉属预期）
+        if (!string.IsNullOrEmpty(p.ActiveAsrModel) && !p.Models.Contains(p.ActiveAsrModel)) p.ActiveAsrModel = "";
         return before != Fingerprint(p);
     }
 }

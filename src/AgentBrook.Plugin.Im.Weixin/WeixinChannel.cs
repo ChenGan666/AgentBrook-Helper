@@ -399,10 +399,15 @@ public sealed class WeixinChannel : IImChannel, ICapabilityInstance
         var text = "";
         var hasUnsupportedItem = false;
         List<ImAttachmentDescriptor>? attachments = null;
+        string? voiceTranscript = null;          // B11：平台转写文本（voice_item.text；多条语音取最后一条，罕见）
+        bool adoptedIntoText = false;            // R1 方案 A：本次采纳动作是否填过 text（决定是否清空）
+        var pendingRejectedVoice = new List<int>();  // B8：无下载参数的语音项索引 → 合成 Rejected 描述符
+        var itemIndex = -1;
         if (msg.TryGetProperty("item_list", out var items) && items.ValueKind == JsonValueKind.Array)
         {
             foreach (var item in items.EnumerateArray())
             {
+                itemIndex++;
                 var type = item.TryGetProperty("type", out var ty) && ty.ValueKind == JsonValueKind.Number ? ty.GetInt32() : 0;
                 if (type == 1)
                 {
@@ -412,10 +417,19 @@ public sealed class WeixinChannel : IImChannel, ICapabilityInstance
                 }
                 if (type == 3)
                 {
-                    // 语音：可直接取平台转写文本（省 ASR）
+                    // 语音：平台转写文本（doc/Voice B11，第五轮 R1 + 第六轮混合消息边界）——
+                    // voice_item.text 存在即记入描述符 Transcript（与 text 是否为空无关）；仅当本次
+                    // 采纳动作填过 text 时才清空（文本单通道注入，防 B9 修复后 userText 双份）
                     if (item.TryGetProperty("voice_item", out var vi) && vi.TryGetProperty("text", out var vt)
-                        && string.IsNullOrEmpty(text))
-                        text = vt.GetString() ?? "";
+                        && !string.IsNullOrWhiteSpace(vt.GetString()))
+                    {
+                        voiceTranscript = vt.GetString();
+                        if (string.IsNullOrEmpty(text))
+                        {
+                            text = voiceTranscript;
+                            adoptedIntoText = true;
+                        }
+                    }
                 }
                 if (type != 1)
         {
@@ -425,6 +439,19 @@ public sealed class WeixinChannel : IImChannel, ICapabilityInstance
             Log($"[wx] 媒体项 type={type} 字段=[{keys}]");
         }
         var descriptor = BuildMediaDescriptor(type, item);
+                if (type == 3)
+                {
+                    // B8（doc/Voice/01）：无下载参数的语音不再落 hasUnsupportedItem（通用"附件失败"）——
+                    // 合成 State=Rejected 描述符（RemoteId 用消息项 id），执行器走确定性回音 ui.voice.unavailable
+                    if (descriptor is null)
+                    {
+                        pendingRejectedVoice.Add(itemIndex);
+                        continue;   // 跳过统一入列（下方 messageId 解析后合成）
+                    }
+                    // B11：平台转写挂描述符（Engine="platform"）——执行器单一判定"Transcript 非空=免转写直用"
+                    if (voiceTranscript is not null)
+                        descriptor = descriptor with { Transcript = new ImAttachmentTranscript { Text = voiceTranscript, Engine = "platform" } };
+                }
                 if (descriptor is not null) (attachments ??= []).Add(descriptor);
                 else hasUnsupportedItem = true;
             }
@@ -444,6 +471,17 @@ public sealed class WeixinChannel : IImChannel, ICapabilityInstance
             : (msg.TryGetProperty("client_id", out var cid) ? cid.GetString() ?? "" : "");
         if (string.IsNullOrEmpty(messageId))
             messageId = Guid.NewGuid().ToString("N");
+
+        // B8（doc/Voice/01）：无下载参数语音的合成 Rejected 描述符（messageId 已有 Guid 兜底，IsValid 仅要求非空）
+        foreach (var idx in pendingRejectedVoice)
+            (attachments ??= []).Add(new ImAttachmentDescriptor(WeixinMedia.Provider, 1,
+                $"voice-{messageId}-{idx}", "voice.silk", "audio/silk",
+                ImAttachmentKind.Voice, null, null, ImAttachmentState.Rejected, null));
+
+        // R1 方案 A（doc/Voice/01 B11）：平台转写文本只走 Transcript 通道——本次采纳填过 text 则清空，
+        // 防 B9 修复后 userText 与 [语音] 注入双份进模型输入
+        if (voiceTranscript is not null && adoptedIntoText)
+            text = "";
 
         var timestamp = Clock.GetUtcNow();
         if (msg.TryGetProperty("create_time_ms", out var ctm) && ctm.ValueKind == JsonValueKind.Number)

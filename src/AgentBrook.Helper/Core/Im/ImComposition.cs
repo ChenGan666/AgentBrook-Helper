@@ -51,6 +51,41 @@ public sealed class ImComposition
     private readonly object _boundGate = new();
     private ImDatabase? _db;
     private HelperImAgentHost? _agentHost;
+    private Helper.Core.Voice.IAsrService? _asrService;   // 语音转写（doc/Voice B4）：惰性装配
+
+    /// <summary>
+    /// 装配转写服务（doc/Voice/01 B4）：解析链 = 本地插件（IAsrCapability，经主 Agent 的 PluginManager
+    /// Registry 发现）→ 云端（workspace/models.json 内 ActiveAsrModel 所在 provider，Protocol∈{空,openai}）。
+    /// 每回合即时取配置——设置页/插件启停下一回合即生效，无需重启。
+    /// </summary>
+    private Helper.Core.Voice.IAsrService BuildAsrService() => new Helper.Core.Voice.AsrService(
+        pluginCapability: () =>
+        {
+            try
+            {
+                return _agentAccessor()?.PluginManager?.Registry
+                    .GetCapability<AgentBrook.Plugin.Abstractions.IAsrCapability>();
+            }
+            catch { return null; }   // Agent 未就绪/插件层异常 → 回落云端
+        },
+        cloudConfig: () =>
+        {
+            try
+            {
+                var settings = ProviderSettings.Load(Path.Combine(_workspaceRoot, "models.json"));
+                foreach (var p in settings.Providers)
+                {
+                    if (string.IsNullOrWhiteSpace(p.ActiveAsrModel)) continue;
+                    // Protocol 限定（doc 01 §3.1）：anthropic/zhipu 等协议族无 OpenAI 兼容转写端点
+                    if (!(string.IsNullOrEmpty(p.Protocol) || p.Protocol.Equals("openai", StringComparison.OrdinalIgnoreCase))) continue;
+                    if (string.IsNullOrWhiteSpace(p.BaseUrl) || string.IsNullOrWhiteSpace(p.ApiKey)) continue;
+                    if (ProviderConfig.IsPlaceholderApiKey(p.ApiKey)) continue;
+                    return new Helper.Core.Voice.CloudAsrProvider.CloudConfig(p.BaseUrl, p.ApiKey, p.ActiveAsrModel);
+                }
+                return null;
+            }
+            catch { return null; }   // models.json 损坏 → 无云端
+        });
     private bool _started;
     private readonly List<IAsyncDisposable> _disposables = [];
 
@@ -573,10 +608,51 @@ public sealed class ImComposition
                 await Console.Error.WriteLineAsync(
                     $"[im] 插件已由 IM 宿主加载（category=im，{factories.Count} 个能力）：{dir}");
             });
-            // 卸载分流：先由 IM 宿主释放（停实例 + 注销工厂 + 卸 ALC），否则 Windows 上 DLL 被占用无法删除
+            // 卸载/停用分流：先解绑运行时通道（_bound/messaging 绑定/状态快照），再由 IM 宿主释放
+            // （停实例 + 注销工厂 + 卸 ALC），否则 Windows 上 DLL 被占用无法删除；
+            // 不解绑则 _bound 残留 → UI 仍显示"已绑定"、Sink 路由滞留（真机事故：卸载后 weixin 仍在运行）
             readyAgent.PluginManager!.RegisterCategoryUnloader("im", async pluginId =>
             {
-                var host = Instance?._pluginHost;
+                var composition = Instance;
+                var channelType = pluginId.StartsWith("im-", StringComparison.Ordinal)
+                    ? pluginId["im-".Length..] : pluginId;
+                if (composition is not null)
+                {
+                    // 配置快照可能陈旧（登录/设置页写过盘），重读再解绑
+                    try { composition._settings = ImSettings.Load(composition._workspaceRoot); }
+                    catch (Exception ex) { ImDiag.Log($"[im] 卸载前重读配置失败 {pluginId}：{ex.Message}"); }
+                    foreach (var ch in composition._settings.Channels
+                        .Where(c => c.Type.Equals(channelType, StringComparison.OrdinalIgnoreCase)).ToList())
+                    {
+                        await composition.UnbindChannelAsync(ch).ConfigureAwait(false);
+                        lock (s_channelStatus) s_channelStatus.Remove(ch.ChannelId);
+                    }
+                    // 待加载队列清残：宿主就绪前登记的目录不应在下次启动时被补加载
+                    lock (s_pendingPackages) s_pendingPackages.RemoveAll(d =>
+                        string.Equals(
+                            Path.GetFileName(Path.GetDirectoryName(d.TrimEnd(Path.DirectorySeparatorChar))!),
+                            pluginId, StringComparison.OrdinalIgnoreCase));
+                }
+
+                // 通道开关持久化关闭：停用与卸载共用本卸载器；凭据/账号存档保留供重装恢复
+                try
+                {
+                    var ws = composition?._workspaceRoot ?? s_workspaceRoot ?? UiPrefs.WorkspaceDir();
+                    var imSettings = ImSettings.Load(ws);
+                    var dirty = false;
+                    foreach (var ch in imSettings.Channels.Where(c =>
+                        c.Type.Equals(channelType, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        if (ch.Enabled) { ch.Enabled = false; dirty = true; }
+                    }
+                    if (dirty) imSettings.Save(ws);
+                }
+                catch (Exception ex)
+                {
+                    ImDiag.Log($"[im] 通道开关持久化失败 {pluginId}：{ex.Message}");
+                }
+
+                var host = composition?._pluginHost;
                 if (host is null) return;
                 try
                 {
@@ -889,7 +965,9 @@ public sealed class ImComposition
                 // auto 模式：保持旧的"全自动放行"；每回合读配置——设置页切换后下一回合即生效
                 interactiveApprovals: !string.Equals(
                     ImSettings.Load(_workspaceRoot).InteractionMode, "auto", StringComparison.OrdinalIgnoreCase),
-                fullAccessAccessor: () => App.Controller?.FullAccess == true),
+                fullAccessAccessor: () => App.Controller?.FullAccess == true,
+                // 语音转写（doc/Voice/01 B4）：惰性装配（Agent/设置可能未就绪），每回合即时取
+                asrServiceAccessor: () => _asrService ??= BuildAsrService()),
             new HelperApprovalPort(), Caps(), workspaceRootOverride: _workspaceRoot);
         await messaging.StartAsync().ConfigureAwait(false);
         _messaging = messaging;

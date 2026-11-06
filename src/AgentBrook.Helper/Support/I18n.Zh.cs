@@ -232,6 +232,14 @@ internal static partial class I18n
         ["ui.plugins.privacy.install.model"] = "安装模型（自动下载+自检）",
         ["ui.plugins.privacy.model.installed"] = "已安装",
         ["ui.plugins.privacy.model.test"] = "测试",        ["ui.plugins.privacy.self.check"] = "运行环境自检",
+        // ── 语音（doc/Voice/01 §3.3：IM 语音识别门卫与回音）──
+        ["ui.voice.not.configured"] = "收到语音消息，但尚未配置语音识别——可在设置中安装本地语音识别插件或配置转写模型后重发，也可以直接用文字。",
+        ["ui.voice.transcribe.failed"] = "这条语音我没能转写出来（{0}），请稍后再试或改用文字。",
+        ["ui.voice.unavailable"] = "这条语音暂时无法转写（未能获取平台转写）。",
+        ["ui.voice.music.file"] = "收到一个音频文件（{0}），我暂不支持处理音频文件本身。",
+        // ── 模型页·转写模型（doc/Voice/01 B5）──
+        ["ui.models.asr.title"] = "转写模型（语音识别）",
+        ["ui.models.asr.invalid"] = "转写模型已忽略：需挂 OpenAI 兼容供应商且 API Key 有效。",
         ["ui.plugins.privacy.dict.section"] = "敏感词词典",
         ["ui.plugins.privacy.dict.watermark"] = "输入词条，如公司全名",
         ["ui.plugins.privacy.dict.add"] = "添加",
