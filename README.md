@@ -93,6 +93,8 @@ Each IM chat gets its own session in the session list (reused if it exists, crea
 
 **Files travel both ways.** Photos sent from the phone are downloaded and decrypted (iLink CDN + AES-128-ECB), land in the conversation and render inline; the model reads them only if the selected model declares image input, otherwise you get an explicit hint. Deliverables produced by the Helper — screenshots, charts, reports — are encrypted and uploaded back to WeChat as image or file messages. Attachments and instructions can be sent separately: each attachment is acknowledged, and your next instruction runs with the pending attachments in context.
 
+**Approvals and questions happen in the chat.** When an IM turn needs to authorize a tool or ask you something, the prompt arrives as an IM message instead of a desktop card: reply `1` to allow or `2` to deny an approval; for a question, reply with the option number or type your own answer. Only the paired sender can answer, approvals time out to a deny, and anything else you send while one is pending is treated as a new message (the pending action is denied). Settings → IM Connections switches between **Ask in chat** (default) and **Auto-approve**.
+
 Two buttons make IM supportable in practice: **Rebind channels** and **Open diagnostic log** (channel traffic and turn execution are written to `im/host-log.txt`).
 
 ### An A2A network: many machines, one team
@@ -232,6 +234,7 @@ Runtime state is generated automatically and stays out of version control:
 | `workspace/session.json` | Conversation archive, restored on restart |
 | `workspace/models.json` | Model provider configuration |
 | `workspace/settings.json` | Assistant name, bubble icon, language, custom prompt |
+| `workspace/im/config.json` | IM channels and authorization mode (`InteractionMode`: `chat` default / `auto` auto-approve) |
 | `workspace/memory/`, `skills/`, `attachments/`, `projects/` | Memory, skills, attachments, team projects |
 
 ## Built-in tools
