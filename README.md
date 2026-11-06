@@ -257,6 +257,21 @@ Around 57 tools ship with the core, grouped by surface:
 | **Interaction** | `ask_user` — suspends the turn for a real answer |
 | **A2A** | `a2a_status` `a2a_list_peers` `a2a_pair` `a2a_send_message` `a2a_send_all` `a2a_send_file` `a2a_create_group` `a2a_group_send` `a2a_group_rename` `a2a_list_groups` `a2a_report_daily_sales` — LAN discovery, pairing, messaging, files, groups and business scenarios |
 
+## Plugin development
+
+Capabilities are plugged in, not patched in: **privacy masking, speech recognition, IM channels** — each one is an independent plugin (`src/AgentBrook.Plugin.*`) loaded through a collectible `AssemblyLoadContext`, installed and enabled from Settings → Plugins without restarting the Helper.
+
+**Developing a plugin requires strictly following the plugin development guide — [doc/19-plugin-development-guide.md](doc/19-plugin-development-guide.md).** It is normative, not advisory. Every rule there is backed by a real incident, and violating any red line gets a plugin rejected — it fails to load, crashes the host process, or breaks installation from the plugin market:
+
+- **No self-built `HttpClient`** — all downloads go through `host.Download` (progress, timeouts, atomic temp files centralized in the host).
+- **Zero residue after `ShutdownAsync`** — no background threads, timers or native sessions may survive; shutdown must be idempotent and fast.
+- **Never ship host-shared contract assemblies** inside the plugin package, and the plugin's references to them must stay at `1.0.0.0` (a leaked `VERSION` env var once compiled them as `1.0.17.0` → `Unable to load ... Version=1.0.17.0`).
+- **Contract objects are `init`-property only** — no positional records with defaults; existing positional records are extended with non-positional `init` members.
+- **New contract types go in the lowest assembly** that already is referenced — never introduce an assembly cycle.
+- **Native runtimes are process-wide singletons** — declare `runtimes/{rid}/native` in `deps.json` and align the version with existing plugins (the first-loaded OnnxRuntime wins; a mismatched version surfaced as `System.ExecutionEngineException`).
+- **Models and data packs are published on the plugin server** and verified against a baked-in SHA-256 — no runtime links to third-party sources.
+- **Release `sha256`/`size` in `index.json` are computed from the actual zip** (`tools/plugin-publish/rebuild-plugin-index.py --check` must be clean before upload).
+
 ## Repository layout
 
 ```

@@ -7,7 +7,9 @@ artifacts/
 *.userosscache
 *.sln.docstates
 *.binlog
-doc/
+# 设计文档默认不入镜像，但插件开发规范是 README 强制引用的对外规范——单独放行
+doc/*
+!doc/19-plugin-development-guide.md
 scr/README.md
 
 # ───────── IDE / 编辑器 ─────────

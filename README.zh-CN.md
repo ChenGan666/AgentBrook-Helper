@@ -257,6 +257,21 @@ cd src/AgentBrook.Agent && dotnet run
 | **交互** | `ask_user` —— 挂起当前回合，等一个真实回答 |
 | **A2A 协作** | `a2a_status` `a2a_list_peers` `a2a_pair` `a2a_send_message` `a2a_send_all` `a2a_send_file` `a2a_create_group` `a2a_group_send` `a2a_group_rename` `a2a_list_groups` `a2a_report_daily_sales` —— 局域网发现、配对、消息、文件、群组与行业协作场景 |
 
+## 插件开发
+
+能力以插件形式接入，而不是改宿主：**隐私脱敏、语音识别、IM 通道**——每个都是独立插件（`src/AgentBrook.Plugin.*`），经可收集 `AssemblyLoadContext` 加载，在「设置 → 插件」里安装与启停，无需重启 Helper。
+
+**开发插件必须严格遵循插件开发指南 —— [doc/19-plugin-development-guide.md](doc/19-plugin-development-guide.md)。** 它是强制规范而非建议：其中每一条都对应一次真机事故，违反任一红线即不予上架——插件会加载失败、拖垮宿主进程，或导致从插件市场安装失败：
+
+- **禁止自建 `HttpClient`**——下载一律走 `host.Download`（进度、超时、原子落盘由宿主集中维护）
+- **`ShutdownAsync` 之后零残留**——不得有后台线程、定时器、原生会话存活；停止必须幂等且快速返回
+- **插件包不得携带宿主共享契约程序集**，且插件内对其引用版本必须是 `1.0.0.0`（曾因 `VERSION` 环境变量泄漏被编成 `1.0.17.0` → 报 `Unable to load ... Version=1.0.17.0`）
+- **契约对象一律属性式**（`init`）——禁止"位置参数 record + 默认值"；存量位置 record 只能用非位置 `init` 成员扩展
+- **新增契约类型只能落在最底层（被依赖方）程序集**——禁止反向引用造成程序集循环
+- **原生运行时是进程级单例**——`deps.json` 必须声明 `runtimes/{rid}/native`，且版本必须与既有插件统一（先加载者生效；版本错配曾以 `System.ExecutionEngineException` 形式暴露）
+- **模型/数据包由服务端统一发布**并做内置 SHA-256 校验——禁止运行时外链第三方源
+- **发布包 `index.json` 的 `sha256`/`size` 必须由实际 zip 计算**（上传前 `tools/plugin-publish/rebuild-plugin-index.py --check` 必须零漂移）
+
 ## 仓库结构
 
 ```
