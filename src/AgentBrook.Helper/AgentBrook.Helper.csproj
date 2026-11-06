@@ -7,6 +7,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>AgentBrook.Helper</RootNamespace>
     <Description>AgentBrook.Helper —— 跨平台桌面客户端（Avalonia，macOS/Windows）：语音优先，复用 AgentBrook.Agent.Core。</Description>
+    <!-- 文件属性元数据（Windows 资源管理器/杀软信誉参考；契约：公司=主体全称，产品/标题保持英文品牌名） -->
+    <Company>福州知数能信息科技有限责任公司</Company>
+    <Product>AgentBrook Helper</Product>
+    <AssemblyTitle>AgentBrook Helper</AssemblyTitle>
+    <Copyright>Copyright © 2026 福州知数能信息科技有限责任公司</Copyright>
     <!-- Windows 可执行文件图标（macOS 走 build-mac-app.sh 打包的 .icns） -->
     <ApplicationIcon>Assets/app-icon.ico</ApplicationIcon>
   </PropertyGroup>
