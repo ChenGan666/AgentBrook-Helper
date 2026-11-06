@@ -899,6 +899,17 @@ public sealed class ImComposition
         {
             LegacyStore()?.Touch(notice.SessionId);   // 列表时间戳只在真实提交后推进（执行器 Touch 预提交会"假活跃"）
             LastTurnError = notice.Completed ? null : (notice.Error ?? "回合失败（原因未返回）");
+            if (!notice.Completed && !string.IsNullOrWhiteSpace(notice.SessionId))
+            {
+                // 失败要有回音（含连续失败停止重试）：否则用户只看到消息"石沉大海"
+                try
+                {
+                    var detail = notice.Error ?? "原因未返回";
+                    if (detail.Length > 200) detail = detail[..200] + "…";
+                    messaging.EnqueueOutbound(notice.SessionId, I18n.T("im.turn.failed.notice", detail));
+                }
+                catch (Exception ex) { ImDiag.Log($"[im] 失败提示投递失败：{ex.Message}"); }
+            }
             TurnCommittedHook?.Invoke(notice.SessionId, notice.Completed, notice.Error);
         };
 

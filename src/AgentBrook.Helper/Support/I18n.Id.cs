@@ -639,6 +639,7 @@ internal static partial class I18n
         ["ui.im.weixin.code.blocked"] = "Terlalu banyak kode salah; klik \"Pindai QR lagi\".",
         ["ui.im.weixin.expired"] = "Kode QR kedaluwarsa — klik \"Pindai QR untuk masuk\" untuk kode baru.",
         ["ui.im.weixin.provider.missing"] = "Plugin WeChat belum dimuat: pasang/aktifkan plugin im-weixin dulu.",
+        ["im.turn.failed.notice"] = "⚠ Pemrosesan gagal: {0} (kirim ulang pesan untuk mencoba lagi)",
         ["ui.im.interaction.mode"] = "Otorisasi IM",
         ["ui.im.interaction.chat"] = "Konfirmasi di chat (disarankan)",
         ["ui.im.interaction.auto"] = "Setujui otomatis",

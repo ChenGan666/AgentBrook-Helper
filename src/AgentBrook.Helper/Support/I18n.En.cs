@@ -639,6 +639,7 @@ internal static partial class I18n
         ["ui.im.weixin.code.blocked"] = "Too many wrong pairing codes; click \"Scan QR again\".",
         ["ui.im.weixin.expired"] = "QR code expired — click \"Scan QR to sign in\" to get a new one.",
         ["ui.im.weixin.provider.missing"] = "WeChat plugin not loaded: install/enable the im-weixin plugin first.",
+        ["im.turn.failed.notice"] = "⚠ Processing failed: {0} (resend the message to try again)",
         ["ui.im.interaction.mode"] = "IM authorization",
         ["ui.im.interaction.chat"] = "Ask in chat (recommended)",
         ["ui.im.interaction.auto"] = "Auto-approve",

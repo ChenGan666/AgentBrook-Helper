@@ -41,6 +41,10 @@ public sealed class TurnDispatcher(
 {
     private readonly SemaphoreSlim _wake = new(0);
 
+    /// <summary>同一入站消息的连续失败计数（成功即清零；达到上限停止自动重试，防无限重跑模型）。</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<long, int> _consecutiveFailures = new();
+    private const int MaxConsecutiveFailures = 5;
+
     /// <summary>诊断：最近一次回合处理异常（测试失败定位用）。</summary>
     public Exception? LastDispatcherError { get; private set; }
 
@@ -110,6 +114,7 @@ public sealed class TurnDispatcher(
             try
             {
                 await ExecuteTurnAsync(row).ConfigureAwait(false);
+                if (row is not null) _consecutiveFailures.TryRemove(row.Id, out _);   // 成功：清零重试计数
             }
             finally
             {
@@ -126,10 +131,43 @@ public sealed class TurnDispatcher(
         {
             LastDispatcherError = ex;
             Console.Error.WriteLine($"[im-dispatch] 回合处理失败（将回 Pending 退避重试）：{ex.Message}");
-            if (row is not null) await RescheduleAsync(row).ConfigureAwait(false);   // 失败回 Pending（留库，可重试/可查）
+            if (row is not null)
+            {
+                // 有限重试：同一条消息连续失败 N 次 → 停止自动重试（否则会无限重跑模型/刷屏，
+                // 例如陈旧 revision 的保存冲突）；留库 Done+原因，并通知宿主回一条失败提示。
+                var attempts = _consecutiveFailures.AddOrUpdate(row.Id, 1, (_, n) => n + 1);
+                if (attempts >= MaxConsecutiveFailures)
+                {
+                    _consecutiveFailures.TryRemove(row.Id, out _);
+                    await FailPermanentlyAsync(row, ex).ConfigureAwait(false);
+                    return true;
+                }
+                await RescheduleAsync(row).ConfigureAwait(false);   // 失败回 Pending（留库，可重试/可查）
+            }
             await Task.Delay(500, serviceCancellationToken).ConfigureAwait(false);   // 失败退避：防无延迟死循环垃圾风暴
             return true;
         }
+    }
+
+    /// <summary>连续失败达到上限：定格该入站消息（不再重试），并通知宿主（转成 IM 失败提示）。</summary>
+    private async Task FailPermanentlyAsync(InboxRow row, Exception ex)
+    {
+        var route = store.FindRoute(row.ChannelId, row.InstanceId, row.AccountId, row.ChatId);
+        await store.Db.Gate.WaitAsync(serviceCancellationToken).ConfigureAwait(false);
+        try
+        {
+            store.Db.Execute(
+                "UPDATE inbox SET status='Done', processed_at=$at, reject_reason=$r WHERE id=$id",
+                ("$at", DateTimeOffset.UtcNow.ToString("O")),
+                ("$r", "RetryLimit: " + (ex.Message.Length > 240 ? ex.Message[..240] : ex.Message)),
+                ("$id", row.Id));
+        }
+        finally
+        {
+            store.Db.Gate.Release();
+        }
+        Console.Error.WriteLine($"[im-dispatch] 连续失败 {MaxConsecutiveFailures} 次，停止重试（inbox={row.Id}）：{ex.Message}");
+        TurnCompleted?.Invoke(new TurnCompletedNotice(route?.SessionId ?? "", "", row.DedupKey, false, ex.Message));
     }
 
     private async Task RescheduleAsync(InboxRow row)

@@ -639,6 +639,7 @@ internal static partial class I18n
         ["ui.im.weixin.code.blocked"] = "配对码多次错误已被限制，请点击「重新扫码登录」。",
         ["ui.im.weixin.expired"] = "二维码已过期，请点击「扫码登录微信」重新获取。",
         ["ui.im.weixin.provider.missing"] = "微信插件未加载：请先在 IM 连接板块安装/启用 im-weixin 插件。",
+        ["im.turn.failed.notice"] = "⚠ 处理失败：{0}（可重发这条消息再试）",
         ["ui.im.interaction.mode"] = "IM 授权方式",
         ["ui.im.interaction.chat"] = "对话确认（推荐）",
         ["ui.im.interaction.auto"] = "自动放行",

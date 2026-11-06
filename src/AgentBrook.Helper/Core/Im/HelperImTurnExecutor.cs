@@ -95,7 +95,18 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
                     using var interactionScope = router is null ? null : brook.BeginExternalInteraction(router);
                     brook.ExternalTurnActive = true;              // 转写门控（必须先于 SwitchSession 的 Reconcile）
                     brook.AutoApproveExternalTurns = router is null;   // 无交互能力时的兜底策略
-                    await brook.SwitchSessionAsync(context.SessionId).ConfigureAwait(false);   // IM 会话就位（载入最新 CURRENT）
+                    // IM 会话就位：**同会话也必须从 CURRENT 重载**——上一回合的提交由调度器推进，
+                    // 进程内载入基线会落后一版（SwitchSessionAsync 同会话早返回不重载），
+                    // 后续保存会以陈旧 revision 撞 [RevisionConflict]，调度器重试→模型重跑→无限循环
+                    if (brook.CurrentSessionId == context.SessionId)
+                    {
+                        if (!await brook.ReloadCurrentSessionAsync().ConfigureAwait(false))
+                            ImDiag.Log($"[im] 同会话重载失败（非版本化/无快照），继续使用内存态：{context.SessionId}");
+                    }
+                    else
+                    {
+                        await brook.SwitchSessionAsync(context.SessionId).ConfigureAwait(false);
+                    }
                     var (modelName, imageInput, videoInput) = _agentHost.GetModelCapabilities(brook.CurrentModel);   // 解析模型=主界面当前选中
 
                     // 附件能力检查：不支持→反馈请求方（不进会话、不调模型），提示切换多模态模型
@@ -260,6 +271,9 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
                 catch (Exception ex)
                 {
                     ImDiag.Log($"[im] 回合失败：session={context.SessionId} {ex.GetType().Name}: {ex.Message}");
+                    // 丢弃未提交的内存回合（失败=未提交）：否则重试会累积重复往来、
+                    // 后续重载对账还会把未提交内容写进 transcript（界面出现幻影回复）
+                    try { await brook.ReloadCurrentSessionAsync().ConfigureAwait(false); } catch { }
                     _hooks?.OnTurnEnd?.Invoke(context.SessionId, false);
                     throw;
                 }
