@@ -67,6 +67,7 @@ internal sealed class VoiceAnnouncer
     /// <summary>
     /// 同步门卫段（微秒级，全内存判定；N2-a）：通过返回 true（调用方跳过本回合提示音），
     /// 同时启动后台摘要/播报链。任何分支都不抛异常、不阻塞。
+    /// 每回合的首行判定与所有拒绝原因都落 voice-log（Windows GUI 无控制台——排障唯一痕迹）。
     /// </summary>
     public bool TryBeginAnnounce(BrookAgent? agent, int turnSeq, string userText, string finalAnswer,
         TaskArtifacts? artifacts, bool sawTurnCompleted, bool turnCancelled, bool turnHadError, bool convActive)
@@ -80,11 +81,22 @@ internal sealed class VoiceAnnouncer
             }
             catch { /* 插件热插拔竞态：按未安装处理 */ }
 
+            bool Reject(string reason)
+            {
+                VLog($"turn {turnSeq}: 跳过播报——{reason}");
+                return false;
+            }
+
+            VLog($"turn {turnSeq}: 回合结束（完成={sawTurnCompleted} 取消={turnCancelled} 出错={turnHadError} 前台={convActive}，" +
+                 $"回答长度={finalAnswer.Length}，tts={(cap is null ? "未装" : cap.IsReady ? "就绪" : "未就绪")}）");
+
             // 0a 用户中断：唯一不播的完成态（需求 §5.5）
-            if (turnCancelled) return false;
+            if (turnCancelled) return Reject("用户中断");
 
             // 0e 插件门卫：未装/停用/总开关关/模型未就绪
-            if (cap is null || !cap.AutoAnnounceEnabled || !cap.IsReady) return false;
+            if (cap is null) return Reject("tts 插件未安装或未启用");
+            if (!cap.AutoAnnounceEnabled) return Reject("自动播报开关为关");
+            if (!cap.IsReady) return Reject("模型未就绪");
 
             // 语言门卫：播报语言 ∉ {zh,en}（如 id 语 UI + 跟随界面）→ 跳过（引擎 v1 只支持中英）
             var lang = cap.AnnounceLanguage switch
@@ -93,7 +105,7 @@ internal sealed class VoiceAnnouncer
                 TtsAnnounceLanguage.English => "en",
                 _ => I18n.Lang,
             };
-            if (lang is not ("zh" or "en")) return false;
+            if (lang is not ("zh" or "en")) return Reject($"播报语言 {lang} 引擎不支持");
 
             // 0b statusHint：仅用户中断不播（上面已排除）；崩溃回合播"出错了"（N1）
             var statusHint =
@@ -103,19 +115,21 @@ internal sealed class VoiceAnnouncer
                 "normal";
 
             // 0c IM 会话不播（v1 范围；:566 先例）
-            if (agent?.CurrentSessionId.StartsWith("im-", StringComparison.Ordinal) == true) return false;
+            if (agent?.CurrentSessionId.StartsWith("im-", StringComparison.Ordinal) == true)
+                return Reject("IM 会话（v1 不播）");
 
             // 0d 播报时机=仅窗口后台（默认，B1）
-            if (convActive && cap.AnnounceOnlyWhenInactive) return false;
+            if (convActive && cap.AnnounceOnlyWhenInactive) return Reject("仅窗口后台模式且对话窗在前台");
 
             // 内容门卫：没有任何可播依据
-            if (string.IsNullOrWhiteSpace(userText) && string.IsNullOrWhiteSpace(finalAnswer)) return false;
+            if (string.IsNullOrWhiteSpace(userText) && string.IsNullOrWhiteSpace(finalAnswer))
+                return Reject("用户输入与回答均为空");
 
             // 0f 去重（B2：TaskId 可空 → turnSeq 降级键；登记于同步段，后台失败不回滚——本就无重试语义）
             var key = artifacts?.TaskId is { Length: > 0 } taskId ? taskId : $"seq:{turnSeq}";
             lock (_gate)
             {
-                if (!_announcedKeys.Add(key)) return false;
+                if (!_announcedKeys.Add(key)) return Reject($"去重命中（{key}）");
                 _announcedOrder.Enqueue(key);
                 while (_announcedOrder.Count > LruCap && _announcedOrder.TryDequeue(out var old))
                 {
@@ -123,11 +137,13 @@ internal sealed class VoiceAnnouncer
                 }
             }
 
+            VLog($"turn {turnSeq}: 门卫通过（statusHint={statusHint} lang={lang}），启动后台播报链");
             BeginAnnounceChain(agent, cap, turnSeq, userText, finalAnswer, artifacts, statusHint, lang);
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            VLog($"turn {turnSeq}: 门卫异常 {ex.GetType().Name}，回退纯提示音");
             return false;   // 门卫任何异常 → 回退纯提示音行为
         }
     }
@@ -164,29 +180,38 @@ internal sealed class VoiceAnnouncer
         catch { }
         try
         {
+            var prompt = BuildUserPrompt(userText, finalAnswer, artifacts, statusHint, lang);
             using var summaryCts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            var summary = await agent.QuickCompleteAsync(
-                SummarySystemPrompt,
-                BuildUserPrompt(userText, finalAnswer, artifacts, statusHint, lang),
-                summaryCts.Token).ConfigureAwait(false);
+            string summary;
+            try
+            {
+                summary = await agent.QuickCompleteAsync(SummarySystemPrompt, prompt, summaryCts.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // 摘要档模型不可用（Windows 工作区常未配置摘要档）→ 回退主模型重试（同一 20s 预算内）
+                VLog($"turn {turnSeq}: 摘要档调用失败（{ex.GetType().Name}），回退主模型重试");
+                summary = await agent.QuickCompleteAsync(SummarySystemPrompt, prompt, summaryCts.Token, useMainModel: true).ConfigureAwait(false);
+            }
             summary = Sanitize(summary);
             if (string.IsNullOrWhiteSpace(summary))
             {
-                Log($"[tts-announcer] turn {turnSeq}: 摘要为空，跳过播报");
+                VLog($"turn {turnSeq}: 摘要为空，跳过播报");
                 return;
             }
+            VLog($"turn {turnSeq}: 摘要生成成功（{summary.Length} 字），开始合成播放");
 
             using var speakCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             var result = await cap.SpeakAsync(new TtsSpeakRequest { Text = summary }, speakCts.Token).ConfigureAwait(false);
-            Log($"[tts-announcer] turn {turnSeq}: 播报 {(result.Success ? $"完成（音频 {result.AudioMs}ms，合成 {result.SynthMs}ms）" : $"失败（{result.ErrorCode}）")}，摘要长度 {summary.Length}");
+            VLog($"turn {turnSeq}: 播报 {(result.Success ? $"完成（音频 {result.AudioMs}ms，合成 {result.SynthMs}ms）" : $"失败（{result.ErrorCode}）")}，摘要长度 {summary.Length}");
         }
         catch (OperationCanceledException)
         {
-            Log($"[tts-announcer] turn {turnSeq}: 摘要/播报超时或被取消，静默让位（N2-a 代价）");
+            VLog($"turn {turnSeq}: 摘要/播报超时或被取消，静默让位（N2-a 代价）");
         }
         catch (Exception ex)
         {
-            Log($"[tts-announcer] turn {turnSeq}: 链路异常 {ex.GetType().Name}，静默（不视为任务失败）");
+            VLog($"turn {turnSeq}: 链路异常 {ex.GetType().Name}：{ex.Message}，静默（不视为任务失败）");
         }
         finally
         {
@@ -253,5 +278,10 @@ internal sealed class VoiceAnnouncer
 
     private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max] + "…";
 
-    private static void Log(string message) => Console.Error.WriteLine(message);
+    /// <summary>播报链诊断落盘（voice-log.txt，Helper 内部同款 256KB 纪律）——Windows GUI 无控制台的唯一痕迹。</summary>
+    private static void VLog(string message)
+    {
+        VoiceLog.Write("[tts-announcer] " + message);
+        Console.Error.WriteLine("[tts-announcer] " + message);
+    }
 }
