@@ -245,7 +245,8 @@ Runtime state is generated automatically and stays out of version control:
 |---|---|
 | `workspace/session.json` | Conversation archive, restored on restart |
 | `workspace/models.json` | Model provider configuration (including the optional transcription model) |
-| `workspace/models/asr/` | Local speech-recognition model files (downloaded from the plugin server, SHA-256 verified) |
+| `workspace/models/asr/` |
+| `workspace/voice/voice-log.txt` | Voice input diagnostic log (capture sizes, engine, failure codes; never audio content) | Local speech-recognition model files (downloaded from the plugin server, SHA-256 verified) |
 | `workspace/settings.json` | Assistant name, bubble icon, language, custom prompt |
 | `workspace/im/config.json` | IM channels and authorization mode (`InteractionMode`: `chat` default / `auto` auto-approve) |
 | `workspace/memory/`, `skills/`, `attachments/`, `projects/` | Memory, skills, attachments, team projects |

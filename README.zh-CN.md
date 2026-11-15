@@ -245,7 +245,8 @@ cd src/AgentBrook.Agent && dotnet run
 |---|---|
 | `workspace/session.json` | 会话存档，重启恢复 |
 | `workspace/models.json` | 模型供应商配置（含可选的转写模型选择） |
-| `workspace/models/asr/` | 本地语音识别模型文件（从插件服务器下载，SHA-256 校验） |
+| `workspace/models/asr/` |
+| `workspace/voice/voice-log.txt` | 语音输入诊断日志（采集字节数/识别引擎/失败原因，不含语音内容） | 本地语音识别模型文件（从插件服务器下载，SHA-256 校验） |
 | `workspace/settings.json` | 助手名字、气泡图标、语言、默认提示词 |
 | `workspace/im/config.json` | IM 通道配置与授权方式（`InteractionMode`：`chat` 默认 / `auto` 自动放行） |
 | `workspace/memory/`、`skills/`、`attachments/`、`projects/` | 记忆、技能、附件、团队项目 |
