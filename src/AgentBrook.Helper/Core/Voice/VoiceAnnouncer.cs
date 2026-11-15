@@ -1,6 +1,7 @@
 using System.Text;
 using AgentBrook.Agent;
 using AgentBrook.Agent.Infrastructure;
+using AgentBrook.Helper.Core.Voice;
 using AgentBrook.Helper.Support;
 using AgentBrook.Plugin.Abstractions;
 
