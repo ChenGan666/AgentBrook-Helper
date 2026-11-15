@@ -176,10 +176,12 @@ internal sealed class ImTurnInteractionRouter : IBrookInteraction
     private readonly TimeSpan _timeout;
     private readonly Func<bool>? _fullAccess;
     private readonly Func<string, string>? _restoreDisplay;
+    private readonly bool _autoApprove;
 
     internal ImTurnInteractionRouter(string sessionId, ReplyTarget target, string senderId,
         Func<string, bool> send, Action<string>? log = null, TimeSpan? timeout = null,
-        Func<bool>? fullAccess = null, Func<string, string>? restoreDisplay = null)
+        Func<bool>? fullAccess = null, Func<string, string>? restoreDisplay = null,
+        bool autoApprove = false)
     {
         _sessionId = sessionId;
         _target = target;
@@ -189,6 +191,7 @@ internal sealed class ImTurnInteractionRouter : IBrookInteraction
         _timeout = timeout ?? TimeSpan.FromMinutes(5);
         _fullAccess = fullAccess;
         _restoreDisplay = restoreDisplay;
+        _autoApprove = autoApprove;
     }
 
     public async Task<ApprovalDecision> GetApprovalAsync(string toolName, string? argumentsJson,
@@ -198,6 +201,12 @@ internal sealed class ImTurnInteractionRouter : IBrookInteraction
         if (_fullAccess?.Invoke() == true)
         {
             _log($"[im] 完全访问：自动批准 {toolName}（IM 同权）");
+            return ApprovalDecision.Approve();
+        }
+        // IM 授权"自动放行"：授权直接批准不发提示；提问（AskUserAsync）不受影响，仍发 IM 等用户回答
+        if (_autoApprove)
+        {
+            _log($"[im] 自动放行：批准 {toolName}（session={_sessionId}）");
             return ApprovalDecision.Approve();
         }
         // 隐私插件的占位符先还原：提示会发到聊天平台，用户看到的应是真实内容

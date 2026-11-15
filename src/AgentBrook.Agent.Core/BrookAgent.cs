@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using AgentBrook.Agent.Configuration;
 using AgentBrook.Agent.Infrastructure;
 using AgentBrook.Agent.Mcp;
@@ -214,7 +215,8 @@ public sealed class BrookAgent : IAsyncDisposable
         Action<string>? log = null,
         IEnumerable<Microsoft.Extensions.AI.AITool>? additionalTools = null,
         string? additionalInstructions = null,
-        Infrastructure.ISessionCommitSink? persistence = null)
+        Infrastructure.ISessionCommitSink? persistence = null,
+        Func<string, IChatClient>? chatClientFactory = null)
     {
         ArgumentNullException.ThrowIfNull(config);
         interaction ??= new NullInteraction();
@@ -248,10 +250,15 @@ public sealed class BrookAgent : IAsyncDisposable
         // 插件安装/启停/卸载/总开关切换即时生效，无需重启（装饰链不再一次性烘焙）
         Func<IChatClient, IChatClient> pluginDecorate = inner => new PluginPipelineChatClient(inner, pluginManager.Registry);
 
-        IChatClient chatClient = AgentFactory.CreateChatClient(
-            activeProvider.BaseUrl, activeProvider.ApiKey,
-            string.IsNullOrEmpty(activeProvider.ActiveModel) ? activeProvider.Models.FirstOrDefault() ?? "" : activeProvider.ActiveModel,
-            decorate: pluginDecorate);
+        // chatClientFactory：仅供测试注入脚本化客户端（生产为 null → 走真实供应商客户端）。
+        // 注入时仍套插件装饰链，保证测试跑的链路与生产一致。
+        var activeModel = string.IsNullOrEmpty(activeProvider.ActiveModel)
+            ? activeProvider.Models.FirstOrDefault() ?? ""
+            : activeProvider.ActiveModel;
+        IChatClient chatClient = chatClientFactory is null
+            ? AgentFactory.CreateChatClient(activeProvider.BaseUrl, activeProvider.ApiKey, activeModel,
+                decorate: pluginDecorate)
+            : pluginDecorate(chatClientFactory(activeModel));
 
         // 合并用户级 MCP 配置（workspace/mcp-user.json，由 mcp_add_server 工具写入）
         var userServers = UserMcpConfigStore.Load(workspace.Root);
@@ -311,7 +318,11 @@ public sealed class BrookAgent : IAsyncDisposable
         var mcpTools = new McpTools(workspace.Root,
             config.MCP.Servers.Select(s => s.Name).ToList());
         var userTools = new UserInteractionTools(interaction);
-        var todoTools = new TodoTools();   // 模型可见的任务清单（长任务计划/进度自查）
+        var todoTools = new TodoTools(_ =>
+        {
+            // 清单被模型改写 → 本回合的收尾门卫才可用它判断"计划是否做完"
+            if (brookRef is not null) brookRef._todoTouchedThisTurn = true;
+        });   // 模型可见的任务清单（长任务计划/进度自查）
 
         // 项目团队：主 Agent 具备派生/指挥工作 Agent 的能力
         var teamTools = new Team.TeamTools(
@@ -461,6 +472,7 @@ public sealed class BrookAgent : IAsyncDisposable
         brook._artifacts = artifactCollector;
         brook._sessions = sessions;
         brook._skillStore = skillStore;
+        brook._todoTools = todoTools;   // 回合收尾门卫：检查未完成项
         brook._sessionId = current.Id;
         brook._persistence = persistence;   // S7：versioned 工作区分流钩子（null=legacy）
         brook._sessionFile = sessions.SessionFile(current.Id);
@@ -605,6 +617,18 @@ public sealed class BrookAgent : IAsyncDisposable
 
     /// <summary>回合内插队消息队列：下一轮模型调用时并入会话，Agent 自行判断与当前任务的关联。</summary>
     private readonly ConcurrentQueue<ChatMessage> _steeringQueue = new();
+
+    // ───────── 回合收尾门卫：模型"只说要做什么"就停下的自动续跑（用户不必手动发"继续"）─────────
+    // 单个回合最多自动续跑次数：防止模型反复只输出计划造成死循环
+    private const int MaxAutoContinues = 3;
+
+    /// <summary>自动续跑注记前缀：只给模型看，转写/回放整条丢弃（否则 UI 会冒出假用户气泡）。</summary>
+    private const string AutoContinueNotePrefix = "[系统自动续跑：上一轮你只输出了文字、没有继续执行任务，以下是系统代发的续跑指令]";
+
+    private int _autoContinues;          // 本回合已自动续跑次数（回合开始归零）
+    private string _autoContinueFrom = "";   // 上一次触发续跑的收尾文字（原地重复=无进展，不再续跑）
+    private bool _todoTouchedThisTurn;   // 本回合是否动过任务清单（清单跨会话常驻，只有本回合自建的计划才可作收尾依据）
+    private TodoTools? _todoTools;       // 模型的任务清单（收尾时查未完成项，CreateAsync 回填）
 
     /// <summary>
     /// 用户在执行中插队发送消息（队列"立即执行"）：不打断当前流，下一轮模型调用时作为用户消息注入，
@@ -849,6 +873,11 @@ public sealed class BrookAgent : IAsyncDisposable
                 {
                     text = text[SteeringNotePrefix.Length..].TrimStart();
                     if (text.Length == 0) continue;
+                }
+                // 自动续跑注记是系统代发的指令，不是用户说的话：整条不进转写（否则回放会出现假用户气泡）
+                if (m.Role == ChatRole.User && text.StartsWith(AutoContinueNotePrefix, StringComparison.Ordinal))
+                {
+                    continue;
                 }
                 if (m.Role == ChatRole.User) list.Add(("user", text));
                 else if (m.Role == ChatRole.Assistant)
@@ -1389,6 +1418,9 @@ public sealed class BrookAgent : IAsyncDisposable
         _turnCts?.Cancel();
         _turnCts = new CancellationTokenSource();
         _turnInProgress = true;
+        _autoContinues = 0;   // 收尾门卫计数：本回合的自动续跑额度
+        _autoContinueFrom = "";
+        _todoTouchedThisTurn = false;
         try
         {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _turnCts.Token);
@@ -1438,12 +1470,7 @@ public sealed class BrookAgent : IAsyncDisposable
         var compacted = await AutoCompactContextAsync(ct); // 历史超阈值时自动压缩：早期对话转前情摘要，防上下文溢出
         if (compacted.RemovedMessages > 0)
         {
-            yield return new BrookEvent.ToolStarted(
-                compacted.Summarized
-                    ? "log:🧹 已自动压缩上下文：早期 " + compacted.RemovedMessages + " 条消息浓缩为前情摘要" +
-                      $"（估算 {compacted.EstimatedTokensBefore / 1000}K → {compacted.EstimatedTokensAfter / 1000}K tokens），会话连续性保留"
-                    : "log:🧹 已自动压缩上下文：移除最早 " + compacted.RemovedMessages + " 条消息" +
-                      $"（估算 {compacted.EstimatedTokensBefore / 1000}K → {compacted.EstimatedTokensAfter / 1000}K tokens），最近对话保留", null);
+            yield return CompactNoticeEvent(compacted);
         }
 
         // v1.1：本回合启用的插件（管线装饰链）——气泡据此显示插件图标（最少 3 秒，回合结束隐藏）
@@ -1540,16 +1567,36 @@ public sealed class BrookAgent : IAsyncDisposable
             Console.Error.WriteLine($"[turn] 轮次完成：审批 {approvals.Count} 项，回答累计 {TurnAnswer.Length} 字符");
             // 插队消息：无待审批且无可插队时回合结束；有插队则并入下轮调用（Agent 自行判断关联）
             var steering = DrainSteering();
+            List<ChatMessage>? nextRound = steering;
             if (approvals.Count == 0 && steering is null)
             {
-                break;
+                // 收尾门卫：回合结束 ≠ 任务完成。空回答 / 任务清单仍有未完成项 / 收尾只是"准备做某事"
+                // 这三种情况自动续跑（上限 MaxAutoContinues），不再让用户手动发"继续"。
+                // 同一段收尾文字原地重复 = 模型没有进展，不再续跑（防死循环）。
+                var incomplete = DetectIncomplete(TurnAnswer);
+                var repeated = !string.IsNullOrWhiteSpace(TurnAnswer)
+                               && string.Equals(TurnAnswer, _autoContinueFrom, StringComparison.Ordinal);
+                if (incomplete is not null && _autoContinues < MaxAutoContinues && !repeated)
+                {
+                    _autoContinues++;
+                    _autoContinueFrom = TurnAnswer;
+                    Console.Error.WriteLine($"[turn] ⏩ 自动续跑 {_autoContinues}/{MaxAutoContinues}：{incomplete}");
+                    yield return new BrookEvent.ToolStarted(
+                        "log:" + AutoContinueLogText(incomplete, _autoContinues), null);
+                    nextRound = [new ChatMessage(ChatRole.User,
+                        AutoContinueNotePrefix + "\n" + AutoContinueNudge(incomplete))];
+                }
+                else
+                {
+                    break;
+                }
             }
             if (steering is not null)
             {
                 yield return new BrookEvent.ToolStarted("log:⏩ 收到用户插队消息，已并入当前回合", null);
             }
 
-            followUp = steering ?? [];
+            followUp = nextRound ?? [];
             foreach (var request in approvals)
             {
                 var call = request.ToolCall as FunctionCallContent;
@@ -1584,6 +1631,13 @@ public sealed class BrookAgent : IAsyncDisposable
                 yield return new BrookEvent.Status(BrookRunState.Thinking);
             }
 
+            // 保存前先做带摘要的压缩：SaveSessionCoreAsync 里的 CompactTrim 是"静默裁剪"（无摘要/无归档），
+            // 若让它先跑，早期对话（含用户最初目标）会在摘要生成之前被直接丢掉——模型随即"忘了任务"提前收尾。
+            var roundCompact = await AutoCompactContextAsync(ct);
+            if (roundCompact.RemovedMessages > 0)
+            {
+                yield return CompactNoticeEvent(roundCompact);
+            }
             await SaveSessionCoreAsync();
         }
 
@@ -1599,7 +1653,21 @@ public sealed class BrookAgent : IAsyncDisposable
         // 产物定稿：在转录落盘前完成，产物元数据随最后一条 assistant 记录写入 transcript.jsonl
         TurnArtifacts = _artifacts.Finalize($"{_sessionId}:{DateTime.Now:yyyyMMddHHmmss}");
         _pendingArtifacts = TurnArtifacts;
+        var endCompact = await AutoCompactContextAsync(ct);
+        if (endCompact.RemovedMessages > 0)
+        {
+            yield return CompactNoticeEvent(endCompact);   // 回合末尾压缩同样走摘要路径（不留静默裁剪）
+        }
         await SaveSessionCoreAsync();
+
+        // 收尾仍无回答（模型连续空输出且续跑额度用尽）：明确告知，避免"界面停在上一轮文字"的错觉
+        if (string.IsNullOrWhiteSpace(TurnAnswer))
+        {
+            yield return new BrookEvent.ToolStarted("log:" + CoreStrings.L(
+                "⚠️ 本轮模型没有产出任何回答内容（已重试自动续跑 " + _autoContinues + " 次）。可以继续追问，或换个模型再试。",
+                $"⚠️ The model produced no answer this turn (auto-continue retried {_autoContinues}×). Follow up, or switch models and try again.",
+                $"⚠️ Model tidak menghasilkan jawaban pada giliran ini (auto-continue diulang {_autoContinues}×). Lanjutkan bertanya atau ganti model."), null);
+        }
 
         // T5.3：脱敏徽标（有插件遥测且确有脱敏时）——数量 / 模型实际看到的最后一条用户文本 / 图片未脱敏提示
         var telemetry = PluginManager?.Registry.GetCapability<IPluginTurnTelemetry>();
@@ -1633,6 +1701,144 @@ public sealed class BrookAgent : IAsyncDisposable
         text = text.Trim();
         return text.Length <= 300 ? text : text[..300] + "…";
     }
+
+    // ───────────────────── 回合收尾门卫：判定"这一轮结束是否真的完成了任务" ─────────────────────
+
+    /// <summary>
+    /// 未完成的动作句式："意图副词/第一人称打算 + 动作动词"，只在收尾最后一句里查找。
+    /// 例：现在验证…／改用 Python 驱动…／我需要确认…／所以需要提前在配置里加上…
+    /// </summary>
+    private static readonly Regex PlanTailRegex = new(
+        @"(?:(?:接下来(?!你|您)|下一步(?!你|您)|现在|然后|最后|接着|下面|我先|我再|我来|我马上|我将|我要|我需要" +
+        @"|需要提前|需要再|需要先)" +
+        @"[^。！？!?\n]{0,12}?" +
+        @"(?:验证|测试|实测|检查|查看|查一下|确认|排查|定位|对比|改造|改写|写|跑|执行|下载|安装|备份|保存" +
+        @"|整理|清理|补充|补上|加上|加|删除|替换|更新|读取|读|看|列|搜|统计|发送|问一下|重试|试一下|试试|试|动手|开始|做)" +
+        @"|(?:改用|改成|改为|换成|换用))",   // 换方案本身就是"打算去做"（后面常直接跟名词，不必再要求动词）
+        RegexOptions.Compiled);
+
+    /// <summary>明确的完成信号：出现在最后一句里则不再自动续跑（避免把正常收尾误判成未完成）。</summary>
+    private static readonly Regex DoneMarkerRegex = new(
+        @"(已完成|已修复|已解决|已就位|已就绪|已通过|已验证|已确认|已配置|已写入|已修改|已生成|已创建" +
+        @"|已安装|已下载|已备份|已写好|已更新|已清理|已跑通|已交付|全部完成|全部通过|均已|搞定|任务完成" +
+        @"|交付完成|验证通过|测试通过|综上|总结|请把|请提供|还需要你|如需|建议你|供你选择|你可以)",
+        RegexOptions.Compiled);
+
+    /// <summary>半句结尾字符：话没说完就停了（常见于上游截断或模型退化）。</summary>
+    private static readonly char[] HalfSentenceTailChars = ['：', ':', '…', '、', '，', ','];
+
+    /// <summary>句子切分标点（含冒号：结论常以"结论：xxx"给出，冒号后才是真正收尾内容）。</summary>
+    private static readonly char[] SentenceSplitChars = ['。', '！', '!', '？', '?', '；', ';', '：', ':', '\n'];
+
+    /// <summary>
+    /// 回合收尾判定：返回非 null 表示"这一轮结束并不代表任务完成"，需要自动续跑。
+    /// 命中任一：空回答；任务清单仍有未完成项；收尾文字只是"准备做某事"的计划句/半句。
+    /// </summary>
+    internal static string? DetectIncomplete(string answer, IReadOnlyList<Tools.TodoItem>? todos)
+    {
+        if (string.IsNullOrWhiteSpace(answer))
+        {
+            return "empty";   // 空回答：上游截断或模型退化 → 必须重试，不能当成"完成"
+        }
+
+        if (todos is { Count: > 0 })
+        {
+            var open = todos.Count(i => !string.Equals(i.Status, "done", StringComparison.OrdinalIgnoreCase));
+            if (open > 0)
+            {
+                return "todo:" + open;   // 自己列的计划还没做完就想收尾
+            }
+        }
+
+        return LooksLikePlanTail(answer) ? "plan" : null;
+    }
+
+    /// <summary>实例入口：只有本回合动过任务清单时，才把未完成项作为收尾依据（清单跨会话常驻，旧计划不能误判）。</summary>
+    private string? DetectIncomplete(string answer) =>
+        DetectIncomplete(answer, _todoTouchedThisTurn ? _todoTools?.Items : null);
+
+    /// <summary>
+    /// 收尾文字是否只是"我准备去做…"式计划句（且该句不含明确完成信号）。
+    /// 只看**最后一句**：完成信号常出现在更早的句子（"已就位。现在验证…"），用全文判断会漏判。
+    /// </summary>
+    internal static bool LooksLikePlanTail(string answer)
+    {
+        var text = (answer ?? "").Trim();
+        if (text.Length == 0)
+        {
+            return false;
+        }
+        var last = text[^1];
+        if (last is '？' or '?')
+        {
+            return false;   // 在反问用户：等回答，不算未完成
+        }
+        if (HalfSentenceTailChars.Contains(last))
+        {
+            return true;    // 半句结尾
+        }
+        var tail = LastSentence(text);
+        if (!PlanTailRegex.IsMatch(tail))
+        {
+            return false;
+        }
+        return !DoneMarkerRegex.IsMatch(tail);
+    }
+
+    /// <summary>取最后一句（按句末标点/换行切分），过长时截取尾部窗口。</summary>
+    private static string LastSentence(string text)
+    {
+        var parts = text.Split(SentenceSplitChars, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var tail = parts.Length > 0 ? parts[^1] : text;
+        return tail.Length > 160 ? tail[^160..] : tail;
+    }
+
+    /// <summary>续跑指令（发给模型；不写入转写）。</summary>
+    private static string AutoContinueNudge(string reason) => reason switch
+    {
+        "empty" => CoreStrings.L(
+            "上一轮你没有输出任何内容。请立刻继续任务：该调用工具就直接调用，做完后给出完整结论；确实需要用户输入时调用 ask_user。",
+            "Your previous round produced no output. Continue the task now — call tools as needed, then give the complete result; call ask_user only if user input is truly required.",
+            "Ronde sebelumnya tidak menghasilkan keluaran. Lanjutkan tugas sekarang — panggil alat bila perlu lalu berikan hasil lengkap; panggil ask_user hanya bila memang perlu masukan pengguna."),
+        var r when r.StartsWith("todo:", StringComparison.Ordinal) => CoreStrings.L(
+            "任务清单里还有未完成项。若这些项其实已经做完，请立刻用 todo_write 把状态改为 done 并收尾；若确实没做完，请直接继续执行（调用工具）直到全部完成。",
+            "The todo list still has open items. If they are actually finished, mark them done via todo_write and wrap up; if not, continue executing with tools until all are done.",
+            "Daftar tugas masih memiliki item terbuka. Jika sebenarnya sudah selesai, tandai done lewat todo_write lalu akhiri; jika belum, lanjutkan dengan alat sampai semua selesai."),
+        _ => CoreStrings.L(
+            "你上一条消息只是在描述将要做什么，任务并没有完成。请立刻执行它：直接调用工具把这一步做完，不要用叙述代替执行；只有任务真正完成、或确实需要用户决定时才结束回合。",
+            "Your last message only described what you were about to do — the task is not finished. Execute it now: call the tools and complete this step instead of narrating. End the turn only when the task is truly done or user input is required.",
+            "Pesan terakhirmu hanya menjelaskan apa yang akan dilakukan — tugas belum selesai. Lakukan sekarang: panggil alat dan selesaikan langkah ini. Akhiri giliran hanya bila tugas benar-benar selesai atau perlu masukan pengguna."),
+    };
+
+    /// <summary>续跑日志（让用户看到"系统自动接续"，而不是界面莫名其妙卡住）。</summary>
+    private static string AutoContinueLogText(string reason, int attempt) => reason switch
+    {
+        "empty" => CoreStrings.L(
+            "⏩ 本轮模型没有输出内容，自动重试",
+            "⏩ Empty model output — retrying automatically",
+            "⏩ Keluaran model kosong — mencoba ulang otomatis"),
+        var r when r.StartsWith("todo:", StringComparison.Ordinal) => CoreStrings.L(
+            $"⏩ 任务清单还有 {r["todo:".Length..]} 项未完成，自动继续执行（第 {attempt} 次）",
+            $"⏩ {r["todo:".Length..]} todo item(s) still open — continuing automatically (attempt {attempt})",
+            $"⏩ {r["todo:".Length..]} item tugas belum selesai — melanjutkan otomatis (percobaan {attempt})"),
+        _ => CoreStrings.L(
+            $"⏩ 检测到上一轮只有计划没有执行，自动继续（第 {attempt} 次）",
+            $"⏩ Last round only planned — continuing automatically (attempt {attempt})",
+            $"⏩ Ronde terakhir hanya merencanakan — melanjutkan otomatis (percobaan {attempt})"),
+    };
+
+    /// <summary>上下文压缩事件（摘要成功 / 仅裁剪两种措辞）。</summary>
+    private static BrookEvent CompactNoticeEvent(
+        (int RemovedMessages, long EstimatedTokensBefore, long EstimatedTokensAfter, bool Summarized) r) =>
+        new BrookEvent.ToolStarted(r.Summarized
+            ? "log:" + CoreStrings.L(
+                $"🧹 已自动压缩上下文：早期 {r.RemovedMessages} 条消息浓缩为前情摘要（估算 {r.EstimatedTokensBefore / 1000}K → {r.EstimatedTokensAfter / 1000}K tokens），会话连续性保留",
+                $"🧹 Context compacted: {r.RemovedMessages} early messages summarized ({r.EstimatedTokensBefore / 1000}K → {r.EstimatedTokensAfter / 1000}K tokens), continuity kept",
+                $"🧹 Konteks dipadatkan: {r.RemovedMessages} pesan awal diringkas ({r.EstimatedTokensBefore / 1000}K → {r.EstimatedTokensAfter / 1000}K token)")
+            : "log:" + CoreStrings.L(
+                $"🧹 已自动压缩上下文：移除最早 {r.RemovedMessages} 条消息（估算 {r.EstimatedTokensBefore / 1000}K → {r.EstimatedTokensAfter / 1000}K tokens），最近对话保留",
+                $"🧹 Context compacted: oldest {r.RemovedMessages} messages dropped ({r.EstimatedTokensBefore / 1000}K → {r.EstimatedTokensAfter / 1000}K tokens), recent turns kept",
+                $"🧹 Konteks dipadatkan: {r.RemovedMessages} pesan terlama dibuang ({r.EstimatedTokensBefore / 1000}K → {r.EstimatedTokensAfter / 1000}K token)"), null);
 
     /// <summary>
     /// 轻量一次性补全（走摘要档模型，不进会话历史）：启动问候语等旁路生成用。
@@ -2027,6 +2233,9 @@ public sealed class BrookAgent : IAsyncDisposable
         {
             var (model, client) = _router.Resolve(ModelRouter.RoleSummarize, _chatClient);
             var prev = string.IsNullOrWhiteSpace(_historySummary) ? "（无）" : _historySummary;
+            // 摘要是旁路调用：给独立超时上限，供应商卡住时不让回合/保存一起挂住
+            using var summaryCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            summaryCts.CancelAfter(TimeSpan.FromSeconds(60));
             var response = await client.GetResponseAsync(
             [
                 new ChatMessage(ChatRole.System, "你是对话摘要器。把「已有摘要」与「新裁掉的对话」合并为一份连贯的滚动摘要，供助手延续工作。" +
@@ -2034,7 +2243,7 @@ public sealed class BrookAgent : IAsyncDisposable
                     "按短标签组织输出：【目标】【关键事实与决定】【产物与位置】【待办】（无内容的部分省略）。" +
                     $"直接输出摘要正文，不超过 {SummaryMaxChars / 2} 字，不要评论。"),
                 new ChatMessage(ChatRole.User, $"=== 已有摘要 ===\n{prev}\n\n=== 新裁掉的对话 ===\n{transcript}\n\n请输出合并后的滚动摘要。"),
-            ], cancellationToken: cancellationToken);
+            ], cancellationToken: summaryCts.Token);
             var text = response.Text ?? "";
             if (string.IsNullOrWhiteSpace(text))
             {
@@ -2046,6 +2255,10 @@ public sealed class BrookAgent : IAsyncDisposable
             }
             _historySummary = text.Trim();
             return true;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return false;   // 摘要调用超时（回合本身没被取消）：按摘要失败处理，裁剪结果照常生效
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

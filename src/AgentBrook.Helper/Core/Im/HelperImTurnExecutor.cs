@@ -91,14 +91,16 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
             {
                 try
                 {
-                    // 交互路由（chat 模式 + 可即时出站）：授权/提问经 IM 对话完成（手机回复），
-                    // 不弹本地卡片。AsyncLocal 作用域只覆盖本回合异步流——本地回合读不到，互不影响。
-                    // auto 模式/无出站通道：保持原行为（全自动放行）。
-                    var router = _interactiveApprovals && _sendImmediate is not null
+                    // 交互路由（可即时出站即可建）：授权/提问经 IM 对话完成（手机回复），不弹本地卡片。
+                    // AsyncLocal 作用域只覆盖本回合异步流——本地回合读不到，互不影响。
+                    // auto 模式：授权在 router 内自动批准（不打扰 IM），但 ask_user 提问仍发 IM 等用户
+                    // 选择/自由回答——"不再询问"只针对授权，提问是执行所需的用户输入。
+                    var router = _sendImmediate is not null
                                  && context.ReplyTarget is { } replyTarget
                                  && context.Principal is { } principal
                         ? new ImTurnInteractionRouter(context.SessionId, replyTarget, principal.PrincipalId,
-                            _sendImmediate, fullAccess: _fullAccessAccessor, restoreDisplay: RestoreDisplay)
+                            _sendImmediate, fullAccess: _fullAccessAccessor, restoreDisplay: RestoreDisplay,
+                            autoApprove: !_interactiveApprovals)
                         : null;
                     using var interactionScope = router is null ? null : brook.BeginExternalInteraction(router);
                     brook.ExternalTurnActive = true;              // 转写门控（必须先于 SwitchSession 的 Reconcile）

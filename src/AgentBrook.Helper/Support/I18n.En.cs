@@ -183,6 +183,8 @@ internal static partial class I18n
         ["ui.new.version.available.value"] = "New version available: {0}",
         ["ui.new.version.value.available.click.upgrade.now.to.start"] = "New version {0} available — click Upgrade now to start.",
         ["ui.new.version.value.updating.automatically"] = "New version {0} — updating automatically…",
+        ["ui.update.available.tip"] = "New version {0} available — click to update now",
+        ["ui.update.available.tip.notes"] = "New version {0}: {1} — click to update now",
         ["ui.workspace.access.restricted.value"] = "Workspace access restricted: {0}",
         ["ui.attachment.value"] = "Attachment: {0}",
         ["ui.copy"] = "Copy",

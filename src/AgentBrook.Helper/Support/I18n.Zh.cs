@@ -183,6 +183,8 @@ internal static partial class I18n
         ["ui.new.version.available.value"] = "发现新版本：{0}",
         ["ui.new.version.value.available.click.upgrade.now.to.start"] = "发现新版本：{0}，点击「立即升级」开始更新。",
         ["ui.new.version.value.updating.automatically"] = "发现新版本：{0}，正在自动更新…",
+        ["ui.update.available.tip"] = "发现新版本 {0}，点击立即更新",
+        ["ui.update.available.tip.notes"] = "发现新版本 {0}：{1}，点击立即更新",
         ["ui.workspace.access.restricted.value"] = "访问工作空间受限：{0}",
         ["ui.attachment.value"] = "附件：{0}",
         ["ui.copy"] = "复制",

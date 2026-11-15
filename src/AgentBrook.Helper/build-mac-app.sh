@@ -1,9 +1,9 @@
 #!/bin/zsh
 # 构建 macOS .app 包（bundle 身份、麦克风/语音识别权限归因必需）。
 # 默认一次产出三个包：
-#   /Users/chengan/Dev/AI/AgentBrook3.0/src/publish/osx-arm64/AgentBrook.Helper.app
-#   /Users/chengan/Dev/AI/AgentBrook3.0/src/publish/osx-x64/AgentBrook.Helper.app
-#   /Users/chengan/Dev/AI/AgentBrook3.0/src/publish/osx-universal/AgentBrook.Helper.app
+#   ~/Dev/AI/AgentBrook3.0/src/publish/osx-arm64/AgentBrook.Helper.app
+#   ~/Dev/AI/AgentBrook3.0/src/publish/osx-x64/AgentBrook.Helper.app
+#   ~/Dev/AI/AgentBrook3.0/src/publish/osx-universal/AgentBrook.Helper.app
 # 同时会生成对应的 zip 分发包（最终产物根：src/publish/updated/）。
 # 均为 self-contained（自带 .NET 运行时，目标机零依赖）。
 # MODE=arm64 | x64 | universal 可只构建其中一种。

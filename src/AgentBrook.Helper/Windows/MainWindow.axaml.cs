@@ -78,6 +78,7 @@ public partial class MainWindow : Window
     private TextBox? _inputBox;
     private Button? _sendBtn;
     private TextBlock? _tokenText;
+    private Button? _updateBtn;   // 顶栏「有新版本」按钮（仅检测到新版本时显示）
 
     // 输入框 @ 提记弹层：@ 后呼出已配对 Helper 列表（含 @全部），选中插入 LLM 可识别的 @名称
     private Popup? _mentionPopup;
@@ -136,6 +137,20 @@ public partial class MainWindow : Window
         if (a2aBtn is not null) a2aBtn.Click += (_, _) => App.ShowA2AWindow();
         var settingsBtn = this.FindControl<Button>("SettingsBtn");
         if (settingsBtn is not null) settingsBtn.Click += (_, _) => SettingsWindow.ShowSingle();
+        // 顶栏「有新版本」按钮：与气泡「立即更新」同一条流程（打开设置窗口并自动开始更新）
+        _updateBtn = this.FindControl<Button>("UpdateBtn");
+        if (_updateBtn is not null)
+        {
+            _updateBtn.Click += (_, _) =>
+            {
+                if (_controller.Availability.Info is { } info)
+                {
+                    _controller.OpenSettingsForUpdate(info, autoStart: true);
+                }
+            };
+        }
+        _controller.Availability.Changed += () => Dispatcher.UIThread.Post(RefreshUpdateButton);
+        RefreshUpdateButton();
         var plusBtn = this.FindControl<Button>("PlusBtn");
         var fullAccessBtn = this.FindControl<Button>("FullAccessBtn");
         var modelChip = this.FindControl<Button>("ModelChip");
@@ -784,6 +799,19 @@ public partial class MainWindow : Window
         if (t is null) return;
         var title = _controller.CurrentSessionTitle;
         t.Text = title;   // 助手名已移至窗口标题，此处只显示会话标题
+    }
+
+    /// <summary>
+    /// 顶栏「有新版本」按钮：检测到新版本时显示，悬停提示版本号与更新说明，点击打开设置并自动更新；
+    /// 无新版本（或用户关闭了每日自动检查）时隐藏。
+    /// </summary>
+    private void RefreshUpdateButton()
+    {
+        if (_updateBtn is null) return;
+        var info = _controller.Availability.Info;
+        _updateBtn.IsVisible = info is not null;
+        if (info is null) return;
+        ToolTip.SetTip(_updateBtn, UpdateNotice.Tooltip(info));
     }
 
     /// <summary>排队列表：一条消息一个块；块随输入卡拉伸（Grid *列自动省略），逐条可"立即执行"或删除。</summary>

@@ -59,6 +59,9 @@ public sealed class AssistantController : IBrookInteraction
 
     private sealed record UpdateCheckState(string LastCheckKey);
 
+    /// <summary>气泡提醒去重键：日期:版本（同一版本每天只弹一次提示；顶栏按钮的显隐不受影响）。</summary>
+    private sealed record UpdateNotifyState(string Key);
+
     /// <summary>每日检查时点：上午 9:30 / 下午 13:30 / 晚上 21:30（工作时间）。</summary>
     private static readonly (int Hour, int Minute, string Name)[] CheckSlots =
     {
@@ -75,6 +78,9 @@ public sealed class AssistantController : IBrookInteraction
     /// </summary>
     public Task CheckUpdateOnStartupAsync() => RunUpdateCheckAsync("startup");
 
+    /// <summary>新版本可用状态（主窗口顶栏更新按钮的显隐依据；更新检查结果写入这里）。</summary>
+    internal Support.UpdateAvailability Availability { get; } = new();
+
     /// <summary>按检查点执行一次更新检查（slotName 用于每日去重：启动 + 三个时点各至多一次）。</summary>
     private async Task RunUpdateCheckAsync(string slotName)
     {
@@ -87,9 +93,11 @@ public sealed class AssistantController : IBrookInteraction
             }
             var state = UiPrefs.Load<UpdateCheckState>("update-check.json");
             var slotKey = $"{DateTime.Now:yyyy-MM-dd}:{slotName}";
-            if (state?.LastCheckKey == slotKey)
+            if (state?.LastCheckKey == slotKey && slotName != "startup")
             {
-                return;   // 该检查点今天已检查过
+                // 该检查点今天已检查过。启动点例外：顶栏更新按钮依赖检查结果，
+                // 每次启动都要重新确认一次（每日开关 DailyCheck 仍然生效）。
+                return;
             }
             UiPrefs.Save("update-check.json", new UpdateCheckState(slotKey));
 
@@ -108,8 +116,18 @@ public sealed class AssistantController : IBrookInteraction
             var info = await AutoUpdater.CheckAsync();
             if (info is null || !AutoUpdater.IsNewer(info.Version))
             {
+                Availability.Set(null);   // 已是最新：顶栏更新按钮隐藏
                 return;
             }
+            Availability.Set(info);   // 有新版本：顶栏更新按钮显示（悬停看说明，点击走同一更新流程）
+
+            // 气泡提醒同一版本每天只弹一次：启动点每次都会重新确认版本（顶栏按钮需要），但不必每次启动都弹窗
+            var notifyKey = $"{DateTime.Now:yyyy-MM-dd}:{info.Version}";
+            if (UiPrefs.Load<UpdateNotifyState>("update-notified.json")?.Key == notifyKey)
+            {
+                return;
+            }
+            UiPrefs.Save("update-notified.json", new UpdateNotifyState(notifyKey));
 
             var notes = string.IsNullOrWhiteSpace(info.ReleaseNotes) ? "" : $"：{info.ReleaseNotes.Trim()}";
             if (notes.Length > 120)
@@ -910,6 +928,13 @@ public sealed class AssistantController : IBrookInteraction
             Console.Error.WriteLine($"[approval] 外部回合（IM）：{toolName} → 对话确认");
             return externalInteraction.GetApprovalAsync(toolName, argumentsJson, cancellationToken);
         }
+        // 外部回合 + IM 授权"自动放行"（无 router）：直接批准，不弹本地卡片。
+        // 常规路径下 BrookAgent 工具循环已在上游拦截，此分支兜底其他调用入口。
+        if (Agent?.AutoApproveExternalTurns == true)
+        {
+            Console.Error.WriteLine($"[approval] 外部回合（IM 自动放行）：{toolName} → 批准");
+            return Task.FromResult(ApprovalDecision.Approve());
+        }
         var tcs = new TaskCompletionSource<ApprovalDecision>(TaskCreationOptions.RunContinuationsAsynchronously);
         _approvalTcs = tcs;
         LinkCancel(tcs, cancellationToken, () => { if (_approvalTcs == tcs) _approvalTcs = null; });
@@ -945,6 +970,13 @@ public sealed class AssistantController : IBrookInteraction
         {
             Console.Error.WriteLine("[approval] 外部回合（IM）：ask_user → 对话提问");
             return externalInteraction.AskUserAsync(question, choices, cancellationToken);
+        }
+        // 外部回合 + IM 授权"自动放行"（无 router）：不弹本地卡片，按未回答返回——
+        // ask_user 工具会将空答案翻译为"用户未回答，请以最合理的方式自行继续"（不再询问，直接执行）
+        if (Agent?.ExternalTurnActive == true || Agent?.AutoApproveExternalTurns == true)
+        {
+            Console.Error.WriteLine("[approval] 外部回合（IM 自动放行）：ask_user → 按未回答继续");
+            return Task.FromResult("");
         }
         var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         _askTcs = tcs;

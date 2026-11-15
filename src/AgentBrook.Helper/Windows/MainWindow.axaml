@@ -23,6 +23,20 @@
         <Style Selector="Button.iconBtn:pointerover">
             <Setter Property="Background" Value="#333333"/>
         </Style>
+        <!-- 顶栏「有新版本」按钮：绿底 + 黑色图标（仅在检测到新版本时出现） -->
+        <Style Selector="Button.updateBtn">
+            <Setter Property="Background" Value="#13D2B5"/>
+            <Setter Property="Padding" Value="8"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+        <Style Selector="Button.updateBtn:pointerover">
+            <Setter Property="Background" Value="#2FE3C7"/>
+        </Style>
+        <Style Selector="Button.updateBtn:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="#0FBF9F"/>
+        </Style>
 
         <!-- 用户消息（右对齐胶囊） -->
         <Style Selector="Border.userBubble">
@@ -232,6 +246,11 @@
                     </Button>
                     <Button x:Name="SettingsBtn" Classes="iconBtn" ToolTip.Tip="设置">
                         <PathIcon Data="{StaticResource Icon.Settings}" Width="16" Height="16"/>
+                    </Button>
+                    <!-- 新版本可用：绿底黑色下载图标，悬停看说明，点击走气泡同一更新流程（无新版本时隐藏） -->
+                    <Button x:Name="UpdateBtn" Classes="updateBtn" IsVisible="False"
+                            ToolTip.Placement="Bottom" ToolTip.ShowDelay="150">
+                        <PathIcon Data="{StaticResource Icon.Download}" Width="16" Height="16" Foreground="#111111"/>
                     </Button>
                 </StackPanel>
                 <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="10" VerticalAlignment="Center">

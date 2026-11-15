@@ -183,6 +183,8 @@ internal static partial class I18n
         ["ui.new.version.available.value"] = "Baru version tersedia: {0}",
         ["ui.new.version.value.available.click.upgrade.now.to.start"] = "Baru version {0} tersedia — click Tingkatkan now to start.",
         ["ui.new.version.value.updating.automatically"] = "Baru version {0} — memperbarui secara otomatis…",
+        ["ui.update.available.tip"] = "Versi baru {0} tersedia — klik untuk memperbarui sekarang",
+        ["ui.update.available.tip.notes"] = "Versi baru {0}: {1} — klik untuk memperbarui sekarang",
         ["ui.workspace.access.restricted.value"] = "Ruang kerja akses terbatas: {0}",
         ["ui.attachment.value"] = "Lampiran: {0}",
         ["ui.copy"] = "Salin",
