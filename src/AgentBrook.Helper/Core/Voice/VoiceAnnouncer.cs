@@ -115,9 +115,9 @@ internal sealed class VoiceAnnouncer
                 LooksLikeQuestionTail(finalAnswer) ? "awaiting_user_answer" :
                 "normal";
 
-            // 0c IM 会话不播（v1 范围；:566 先例）
-            if (agent?.CurrentSessionId.StartsWith("im-", StringComparison.Ordinal) == true)
-                return Reject("IM 会话（v1 不播）");
+            // 0c IM 会话排除已移除（2026-11-15 真机）：手机发起的 IM 回合走 HelperImTurnExecutor、
+            //    不经 SendAsync，天然到不了本链路；会被拦的只有主窗口主动打开的 im- 会话回合——
+            //    那正是用户人在桌面期待播报的场景（真机日志实证误拦）
 
             // 0d 播报时机=仅窗口后台（默认，B1）
             if (convActive && cap.AnnounceOnlyWhenInactive) return Reject("仅窗口后台模式且对话窗在前台");
