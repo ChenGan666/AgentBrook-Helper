@@ -155,6 +155,7 @@ public partial class MainWindow : Window
         var plusBtn = this.FindControl<Button>("PlusBtn");
         var fullAccessBtn = this.FindControl<Button>("FullAccessBtn");
         var modelChip = this.FindControl<Button>("ModelChip");
+        WireTtsChip();
         if (newBtn is not null)
         {
             newBtn.Click += async (_, _) =>
@@ -2990,6 +2991,121 @@ public partial class MainWindow : Window
         }
         _toolbarWidthTimer.Stop();
         _toolbarWidthTimer.Start();
+    }
+
+    // ── 语音播报芯片（doc/Voice/07）：开关 + 状态 + 播报中五柱波形（气泡录音同款视觉语言）──
+
+    private DispatcherTimer? _ttsWaveTimer;
+    private Avalonia.Controls.Shapes.Rectangle[]? _ttsWaveBars;
+    private int _ttsWaveTick;
+
+    private void WireTtsChip()
+    {
+        var chip = this.FindControl<Button>("TtsChip");
+        if (chip is null) return;
+        chip.Click += (_, _) => OnTtsChipClick();
+        _controller.Announcer.AnnounceActiveChanged += _ => Dispatcher.UIThread.Post(UpdateTtsChip);
+        _controller.ReadyChanged += () => Dispatcher.UIThread.Post(UpdateTtsChip);
+        UpdateTtsChip();
+    }
+
+    /// <summary>芯片状态刷新（纯图标）：插件未装→整颗隐藏；未装模型→半透明+光秃喇叭（点击=打开插件设置）；
+    /// 开=喇叭+声波；关=光秃喇叭；播报链进行中→五柱波形动画。状态详情在 tooltip。</summary>
+    private void UpdateTtsChip()
+    {
+        var chip = this.FindControl<Button>("TtsChip");
+        if (chip is null) return;
+        var state = _controller.Announcer.GetChipState(_controller.Agent);
+        if (state is null)
+        {
+            chip.IsVisible = false;
+            TtsWaveStop();
+            return;
+        }
+        chip.IsVisible = true;
+        var (ready, enabled) = state.Value;
+        var active = _controller.Announcer.AnnounceActive;
+        var iconOn = this.FindControl<PathIcon>("TtsIconOn");
+        var iconOff = this.FindControl<PathIcon>("TtsIconOff");
+        var bars = this.FindControl<StackPanel>("TtsBars");
+        if (iconOn is not null) iconOn.IsVisible = !active && ready && enabled;
+        if (iconOff is not null) iconOff.IsVisible = !active && (!ready || !enabled);
+        if (bars is not null) bars.IsVisible = active;
+        if (active) TtsWaveStart(); else TtsWaveStop();
+        chip.Opacity = ready ? 1.0 : 0.55;
+        ToolTip.SetTip(chip, active ? I18n.T("ui.tts.chip.playing")
+            : !ready ? I18n.T("ui.tts.chip.tip.nomodel")
+            : enabled ? I18n.T("ui.tts.chip.tip.on")
+            : I18n.T("ui.tts.chip.tip.off"));
+    }
+
+    private PluginSettingsDialog? _ttsSettingsDialog;
+
+    private void OnTtsChipClick()
+    {
+        var agent = _controller.Agent;
+        if (agent is null) return;
+        var state = _controller.Announcer.GetChipState(agent);
+        if (state is null || !state.Value.Ready)
+        {
+            OpenTtsPluginSettings();   // 未装模型：点击 = 打开语音播报插件设置（引导安装）
+            return;
+        }
+        var target = !state.Value.Enabled;
+        agent.PluginManager?.TrySetPluginSetting("tts", "tts.auto_announce",
+            System.Text.Json.JsonSerializer.SerializeToElement(target));
+        UpdateTtsChip();
+    }
+
+    /// <summary>打开 tts 插件设置对话框（模态于主窗口；BubbleWindow.Plugins 同款模式）。</summary>
+    private void OpenTtsPluginSettings()
+    {
+        var pm = _controller.Agent?.PluginManager;
+        var contributor = pm?.GetSettingsContributor("tts");
+        if (contributor is null) return;
+        _ttsSettingsDialog?.Close();
+        var dialog = new PluginSettingsDialog("tts", "tts", contributor, pm?.GetIconPath("tts"));
+        dialog.Build();
+        dialog.Closed += (_, _) => { if (_ttsSettingsDialog == dialog) _ttsSettingsDialog = null; };
+        _ttsSettingsDialog = dialog;
+        _ = dialog.ShowDialog(this);
+    }
+
+    /// <summary>播报中五柱动画：合成/播放无麦克风电平，用双频正弦自驱（气泡录音同款视觉语言）。</summary>
+    private void TtsWaveStart()
+    {
+        if (_ttsWaveTimer is not null && _ttsWaveTimer.IsEnabled) return;
+        _ttsWaveBars ??= this.FindControl<StackPanel>("TtsBars")?.Children.OfType<Avalonia.Controls.Shapes.Rectangle>().ToArray();
+        if (_ttsWaveBars is null || _ttsWaveBars.Length == 0) return;
+        foreach (var bar in _ttsWaveBars) bar.Height = 3;
+        _ttsWaveTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+        _ttsWaveTick = 0;
+        _ttsWaveTimer.Tick -= TtsWaveTick;
+        _ttsWaveTimer.Tick += TtsWaveTick;
+        _ttsWaveTimer.Start();
+    }
+
+    private void TtsWaveStop()
+    {
+        _ttsWaveTimer?.Stop();
+        if (_ttsWaveBars is not null)
+        {
+            foreach (var bar in _ttsWaveBars) bar.Height = 3;
+        }
+    }
+
+    private void TtsWaveTick(object? sender, EventArgs e)
+    {
+        if (_ttsWaveBars is null) return;
+        _ttsWaveTick++;
+        for (var i = 0; i < _ttsWaveBars.Length; i++)
+        {
+            // 双频叠加逐柱相位差：整排起伏+错落，模拟语音节奏（纯合成动画，无电平输入）
+            var wave = Math.Sin(_ttsWaveTick * 0.35 + i * 1.7) * 0.55
+                     + Math.Sin(_ttsWaveTick * 0.13 + i * 2.9) * 0.45;
+            var mix = Math.Clamp(wave * 0.5 + 0.5, 0, 1);
+            _ttsWaveBars[i].Height = 3 + 11 * mix;
+        }
     }
 
     /// <summary>同步完全访问开关的琥珀/灰色视觉。</summary>

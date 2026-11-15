@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using AgentBrook.Agent.Infrastructure;
 using AgentBrook.Plugin.Abstractions;
 using Microsoft.Extensions.AI;
@@ -39,6 +40,34 @@ public sealed class PluginManager
     public PluginRegistry Registry => _registry;
 
     public string ModelsUrl => new Uri(new Uri(_indexUrl), "models/models.json").ToString();
+
+    // ── 宿主直改插件设置（主界面快捷开关等，doc/Voice/07）─────────────────────
+
+    /// <summary>
+    /// 宿主 UI 直改某插件的单项设置（读-合并-写回该插件 settings 真源 state.json；
+    /// 插件侧每次读设置都走真源 → 立即生效，无需重建管线）。失败返回 false（插件未装/键非法）。
+    /// </summary>
+    public bool TrySetPluginSetting(string pluginId, string key, JsonElement value)
+    {
+        try
+        {
+            var raw = _state.GetSettingsJson(pluginId);
+            using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(raw) ? "{}" : raw);
+            var merged = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in doc.RootElement.EnumerateObject())
+                merged[p.Name] = p.Value.Clone();
+            merged[key] = value.Clone();
+            _state.SetSettingsJson(pluginId, JsonSerializer.Serialize(merged));
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>读某插件当前设置（JSON；未装/无设置返回 null）。</summary>
+    public string? GetPluginSettingsJson(string pluginId) => _state.GetSettingsJson(pluginId);
 
     // ── 浏览 ─────────────────────────────────────────────────────────────
 

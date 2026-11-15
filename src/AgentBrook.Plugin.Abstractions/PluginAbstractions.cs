@@ -188,3 +188,112 @@ public sealed class PluginEntryAttribute : Attribute
 
     public string Id { get; }
 }
+
+// ── 语音播报能力（v1.2 additive，doc/Voice/07 §5.2）────────────────────────
+// 宿主经 PluginRegistry.GetCapability<ITtsCapability>() 发现第一个已启用实现；
+// 契约对象一律属性式（红线 4）；宿主只在「回合完成自动播报」与设置页两个入口消费。
+
+/// <summary>播报语言（引擎 v1 只支持中/英；id 语 UI → 宿主跳过播报）。</summary>
+public enum TtsAnnounceLanguage
+{
+    /// <summary>跟随界面语言 host.Language（zh/en 直播；id → 跳过）。</summary>
+    FollowUi = 0,
+    Chinese = 1,
+    English = 2,
+}
+
+/// <summary>本地语音播报能力（可选能力接口）：插件提供离线 TTS 引擎（合成 + 播放一体，单槽互斥）。</summary>
+public interface ITtsCapability : IPluginCapability
+{
+    /// <summary>引擎与模型状态（设置页"引擎状态"行 + 宿主日志用）。永不抛异常。</summary>
+    TtsEngineStatus DescribeEngine();
+
+    /// <summary>是否就绪（模型已安装且引擎可初始化；不要求引擎已加载——懒加载）。</summary>
+    bool IsReady { get; }
+
+    /// <summary>「任务完成后自动播报」总开关（宿主自动播报链的门卫之一；试听/手动 Speak 不受此限）。</summary>
+    bool AutoAnnounceEnabled { get; }
+
+    /// <summary>仅窗口后台时播报（true=默认；false=总是播报）。</summary>
+    bool AnnounceOnlyWhenInactive { get; }
+
+    /// <summary>自动播报的摘要语言（宿主传给摘要提示词；引擎不支持的语言宿主跳过播报）。</summary>
+    TtsAnnounceLanguage AnnounceLanguage { get; }
+
+    /// <summary>
+    /// 合成并播放（需求"工具一"）。单槽语义：InterruptCurrent=true 时先停当前播报；
+    /// 合成/播放全程后台线程，失败以结果对象返回、绝不抛出宿主。Text 建议为纯文本（无 Markdown）。
+    /// </summary>
+    Task<TtsSpeakResult> SpeakAsync(TtsSpeakRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>停止当前播报（需求"工具二"；幂等，无播放也安全）。</summary>
+    Task StopAsync();
+}
+
+/// <summary>引擎状态描述（DescribeEngine 返回）。</summary>
+public sealed class TtsEngineStatus
+{
+    public required bool Ready { get; init; }
+
+    /// <summary>引擎/模型组展示名（如 "Kokoro v1.1 zh (int8, 本地)"）。未就绪为 null。</summary>
+    public string? EngineName { get; init; }
+
+    /// <summary>未就绪原因的错误码（tts.model.missing 等；文案由消费方按语言渲染）。</summary>
+    public string? ErrorCode { get; init; }
+
+    /// <summary>可用音色清单（模型安装后非空）。</summary>
+    public IReadOnlyList<TtsVoiceInfo> Voices { get; init; } = [];
+}
+
+/// <summary>音色描述（出厂精选表驱动；模型内实际音色数可能多于表）。</summary>
+public sealed class TtsVoiceInfo
+{
+    /// <summary>音色标识（voices.bin sid 或名称键）。</summary>
+    public required string Id { get; init; }
+
+    /// <summary>展示名（已按 host.Language 三语化）。</summary>
+    public required string Name { get; init; }
+
+    /// <summary>风格组（natural/steady/lively；null=未分组）。</summary>
+    public string? Preset { get; init; }
+}
+
+/// <summary>播报请求。Voice/Speed/Volume 为 null 时用插件当前设置值。</summary>
+public sealed class TtsSpeakRequest
+{
+    /// <summary>要朗读的纯文本（无 Markdown/代码/链接；建议 ≤120 字）。</summary>
+    public required string Text { get; init; }
+
+    /// <summary>音色（音色 Id）；null=当前设置。</summary>
+    public string? Voice { get; init; }
+
+    /// <summary>语速 0.7~1.5；null=当前设置。</summary>
+    public float? Speed { get; init; }
+
+    /// <summary>音量 0~1（播放器增益单路径）；null=当前设置。</summary>
+    public float? Volume { get; init; }
+
+    /// <summary>打断当前播报（默认 true——单槽语义）。</summary>
+    public bool InterruptCurrent { get; init; } = true;
+}
+
+/// <summary>播报结果。失败时 Success=false 且 ErrorCode 为稳定码（宿主/日志消费，不弹 UI）。</summary>
+public sealed class TtsSpeakResult
+{
+    public required bool Success { get; init; }
+
+    /// <summary>稳定错误码：tts.model.missing / tts.engine.init / tts.synth / tts.play.device / tts.cancelled / tts.empty-text …</summary>
+    public string? ErrorCode { get; init; }
+
+    /// <summary>错误详情（按 host.Language 的描述；仅日志用）。</summary>
+    public string? ErrorText { get; init; }
+
+    /// <summary>临时 wav 路径（播完即删的短暂物化；返回时仍存在，供取证）。</summary>
+    public string? WavPath { get; init; }
+
+    /// <summary>音频时长（ms）。</summary>
+    public int AudioMs { get; init; }
+
+    /// <summary>合成耗时（ms，性能日志）。</summary>
+    public int SynthMs { get; init; }
+}

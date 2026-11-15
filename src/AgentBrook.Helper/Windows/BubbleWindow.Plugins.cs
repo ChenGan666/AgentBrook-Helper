@@ -33,11 +33,13 @@ public partial class BubbleWindow
             return;
         }
 
-        // 已启用 且 带 icon.png 的插件
+        // 已启用 且 带 icon.png 的插件；tts 除外（doc/Voice/07：后台自动播报能力，
+        // 开关与状态在主界面输入工具行的播报芯片，气泡轨道无调用语义不展示）
+        string[] bubbleHidden = ["tts"];
         var items = new List<(string Id, string Name, string Path)>();
         foreach (var (id, entry) in pm.ListInstalled())
         {
-            if (!entry.Enabled)
+            if (!entry.Enabled || bubbleHidden.Contains(id))
             {
                 continue;
             }

@@ -28,6 +28,10 @@ public sealed class AssistantController : IBrookInteraction
     private TaskCompletionSource<ApprovalDecision>? _approvalTcs;
     private TaskCompletionSource<string>? _askTcs;
     private bool _turnHadError;   // 本回合是否以异常结束（用于提示音判定）
+    private readonly VoiceAnnouncer _announcer = new();   // 任务完成语音播报（doc/Voice/07 §6）
+
+    /// <summary>语音播报装配（主界面播报开关/状态/波形动画的数据源）。</summary>
+    internal VoiceAnnouncer Announcer => _announcer;
 
     public BrookAgent? Agent { get; private set; }
     public bool Busy { get; private set; }
@@ -479,6 +483,7 @@ public sealed class AssistantController : IBrookInteraction
         TurnSeq++;
         _lastAnswer = "";
         _turnHadError = false;
+        _announcer.OnTurnStarted(Agent);   // 新任务打断旧播报（fire-and-forget，需求 §7.5）
         UserSaid?.Invoke(text);
 
         // 回合前置校验：Key 为占位符/非法时直接给出明确提示，不发必然失败的请求
@@ -554,7 +559,11 @@ public sealed class AssistantController : IBrookInteraction
             }
             // 任务完成且对话窗非活动：提示音提醒用户回来看结果（用户主动停止/出错不响）
             var convActive = _conversation is { IsVisible: true, IsActive: true };
-            if (sawTurnCompleted && !turnCancelled && !_turnHadError && !convActive
+            // 语音播报同步门卫（doc/Voice/07 §6.1，N2-a）：willAnnounce=true → 提示音让位给语音；
+            // 后台摘要/播报链已由门卫启动（fire-and-forget，不影响本 finally 时序）
+            var willAnnounce = _announcer.TryBeginAnnounce(Agent, TurnSeq, text, Agent?.TurnAnswer ?? "",
+                Agent?.TurnArtifacts, sawTurnCompleted, turnCancelled, _turnHadError, convActive);
+            if (!willAnnounce && sawTurnCompleted && !turnCancelled && !_turnHadError && !convActive
                 && AssistantIdentity.NotifySoundOn)
             {
                 NotifySound.Play(AssistantIdentity.NotifySoundId);

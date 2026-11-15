@@ -57,6 +57,10 @@ A draggable, always-on-top bubble that does not steal focus. It breathes when id
 
 One engine chain, two entry points: **long-press the bubble** — after half a second it switches to a recording state (mic icon, a waveform at the bubble's edge pulsing with your voice); release to transcribe and append the text to the chat input. **Press and hold inside the chat input box** — half a second starts recording (the bubble mirrors the recording state); release to transcribe into the box. Recognized text is appended for review — **never sent automatically**. Caret placement and text selection still work (moving the pointer cancels the recording gesture); a 60-second cap applies, too-short or silent takes are discarded, and recordings never touch disk. The recognition engine is shared with IM voice messages: the local offline plugin first, cloud transcription as fallback — with one-click guidance when it is not installed.
 
+### Task-completion voice announce: Helper speaks the result
+
+When the main agent finishes a task, a **local offline text-to-speech** engine reads out a short spoken summary (≤60 characters) — result first, then one line about the deliverable and a suggested next step; it never recites the full reply, never reads code or links, and never claims actions that did not happen. Long summaries are synthesized sentence by sentence: the first sentence plays while later ones are still synthesizing, so time-to-first-voice is just the first sentence. The whole voice chain runs in the background and any failure is silently skipped — your text reply is never affected. The switch lives in the input toolbar: click the speaker icon to toggle (waves = on, bare speaker = off, and a bouncing five-bar waveform while announcing), on by default only when the conversation window is not in the foreground. Voices were hand-picked after auditioning all 103 candidates: Xiaoyu (female, default) / Muchen (male) / Maple (English); speed 0.7–1.5. Install the "Local Voice Announce" plugin from the marketplace and download its model (~188 MB; audio never leaves the machine).
+
 ### A full runtime behind it
 
 The bubble opens onto an agent that remembers. Markdown memory files under `workspace/memory/` are injected into context on every turn, and the model can write to them. Skills load progressively from `SKILL.md` files — and the agent can author new skills from workflows it has actually verified. MCP servers are wired in over stdio. Projects let it split a goal across worker agents with their own workspaces and a message bus.
@@ -247,6 +251,7 @@ Runtime state is generated automatically and stays out of version control:
 | `workspace/models.json` | Model provider configuration (including the optional transcription model) |
 | `workspace/models/asr/` |
 | `workspace/voice/voice-log.txt` | Voice input diagnostic log (capture sizes, engine, failure codes; never audio content) | Local speech-recognition model files (downloaded from the plugin server, SHA-256 verified) |
+| `workspace/models/tts/`, `workspace/voice/tts-log.txt` | Voice-announce model files (SHA-256 verified) and announce diagnostic log (synth/play timings and error codes; never the spoken text) |
 | `workspace/settings.json` | Assistant name, bubble icon, language, custom prompt |
 | `workspace/im/config.json` | IM channels and authorization mode (`InteractionMode`: `chat` default / `auto` auto-approve) |
 | `workspace/memory/`, `skills/`, `attachments/`, `projects/` | Memory, skills, attachments, team projects |

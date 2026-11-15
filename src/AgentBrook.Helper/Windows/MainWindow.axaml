@@ -314,7 +314,7 @@
                              FontSize="14.5" Foreground="#e6e6e6" Background="Transparent"
                              BorderThickness="0" MinHeight="40" MaxHeight="200" Padding="4,6"
                              TextWrapping="Wrap" AcceptsReturn="True" KeyDown="OnInputKeyDown"/>
-                    <Grid Grid.Row="2" x:Name="InputToolRow" ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto" ColumnSpacing="4">
+                    <Grid Grid.Row="2" x:Name="InputToolRow" ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto,Auto" ColumnSpacing="4">
                         <Button Grid.Column="0" x:Name="PlusBtn" Classes="toolChip" ToolTip.Tip="添加附件（或直接粘贴图片）">
                             <PathIcon Data="{StaticResource Icon.Plus}" Width="16" Height="16"/>
                         </Button>
@@ -325,19 +325,39 @@
                                 <PathIcon Data="{StaticResource Icon.ChevronDown}" Width="10" Height="10"/>
                             </StackPanel>
                         </Button>
-                        <Button Grid.Column="3" x:Name="ModelChip" Classes="toolChip" ToolTip.Tip="切换对话模型">
+                        <!-- 语音播报开关（doc/Voice/07）：插件未装时整颗隐藏；纯图标语义——
+                             开=喇叭+声波，关=光秃喇叭，播报链进行中=五柱波形动画（状态详情在 tooltip） -->
+                        <Button Grid.Column="2" x:Name="TtsChip" Classes="toolChip"
+                                ToolTip.Tip="任务完成后语音播报" IsVisible="False">
+                            <Panel Width="18" Height="16">
+                                <PathIcon x:Name="TtsIconOn" Width="15" Height="15"
+                                          Data="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+                                <PathIcon x:Name="TtsIconOff" Width="15" Height="15" IsVisible="False"
+                                          Data="M3 9v6h4l5 5V4L7 9H3z"/>
+                                <StackPanel x:Name="TtsBars" Orientation="Horizontal" Spacing="2"
+                                            HorizontalAlignment="Center" VerticalAlignment="Center"
+                                            IsVisible="False" IsHitTestVisible="False">
+                                    <Rectangle Width="2.5" Height="3" RadiusX="1.25" RadiusY="1.25" Fill="#7cc4ff"/>
+                                    <Rectangle Width="2.5" Height="3" RadiusX="1.25" RadiusY="1.25" Fill="#7cc4ff"/>
+                                    <Rectangle Width="2.5" Height="3" RadiusX="1.25" RadiusY="1.25" Fill="#7cc4ff"/>
+                                    <Rectangle Width="2.5" Height="3" RadiusX="1.25" RadiusY="1.25" Fill="#7cc4ff"/>
+                                    <Rectangle Width="2.5" Height="3" RadiusX="1.25" RadiusY="1.25" Fill="#7cc4ff"/>
+                                </StackPanel>
+                            </Panel>
+                        </Button>
+                        <Button Grid.Column="4" x:Name="ModelChip" Classes="toolChip" ToolTip.Tip="切换对话模型">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <TextBlock x:Name="ModelChipText" Text="模型"/>
                                 <PathIcon Data="{StaticResource Icon.ChevronDown}" Width="10" Height="10"/>
                             </StackPanel>
                         </Button>
-                        <Button Grid.Column="4" x:Name="MediaChip" Classes="toolChip" ToolTip.Tip="选择多模态模型（图像/视频生成）">
+                        <Button Grid.Column="5" x:Name="MediaChip" Classes="toolChip" ToolTip.Tip="选择多模态模型（图像/视频生成）">
                             <StackPanel Orientation="Horizontal" Spacing="6">
                                 <TextBlock x:Name="MediaChipText" Text="多媒体: 无"/>
                                 <PathIcon Data="{StaticResource Icon.ChevronDown}" Width="10" Height="10"/>
                             </StackPanel>
                         </Button>
-                        <Button Grid.Column="5" x:Name="SendBtn" Classes="sendBtn"
+                        <Button Grid.Column="6" x:Name="SendBtn" Classes="sendBtn"
                                 Width="34" Height="34" Margin="6,0,0,0" ToolTip.Tip="发送">
                             <Panel>
                                 <PathIcon x:Name="SendIcon" Data="{StaticResource Icon.Send}" Width="16" Height="16" Foreground="#111111"/>
