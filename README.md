@@ -53,6 +53,10 @@ The gap isn't model quality — it's proximity. So this project takes an agent c
 
 A draggable, always-on-top bubble that does not steal focus. It breathes when idle, spins while thinking, and turns amber when it needs you — opening the chat window by itself. Closing the window hides it; the bubble stays. Paste screenshots straight into the input with Ctrl/⌘+V. Drag it against the left, right, or top screen edge and it docks half-hidden (macOS); hover and it slides fully out. Near the bottom edge it pops back fully into view.
 
+### Hold to talk: voice input, two ways
+
+One engine chain, two entry points: **long-press the bubble** — after half a second it switches to a recording state (mic icon, a waveform at the bubble's edge pulsing with your voice); release to transcribe and append the text to the chat input. **Press and hold inside the chat input box** — half a second starts recording (the bubble mirrors the recording state); release to transcribe into the box. Recognized text is appended for review — **never sent automatically**. Caret placement and text selection still work (moving the pointer cancels the recording gesture); a 60-second cap applies, too-short or silent takes are discarded, and recordings never touch disk. The recognition engine is shared with IM voice messages: the local offline plugin first, cloud transcription as fallback — with one-click guidance when it is not installed.
+
 ### A full runtime behind it
 
 The bubble opens onto an agent that remembers. Markdown memory files under `workspace/memory/` are injected into context on every turn, and the model can write to them. Skills load progressively from `SKILL.md` files — and the agent can author new skills from workflows it has actually verified. MCP servers are wired in over stdio. Projects let it split a goal across worker agents with their own workspaces and a message bus.
@@ -103,7 +107,7 @@ Each IM chat gets its own session in the session list (reused if it exists, crea
 
 Two buttons make IM supportable in practice: **Rebind channels** and **Open diagnostic log** (channel traffic and turn execution are written to `im/host-log.txt`).
 
-**Voice messages are transcribed for you.** A voice note sent to the bot (Telegram or WeChat) is turned into text before the agent sees it. The transcript is persisted with the message — restarts never re-transcribe and turn retries never re-bill — and the conversation shows `[voice] …` so you can tell it was spoken. Two engines are supported, both independent of your chat model: a **local offline plugin** (Settings → Plugins → Local Speech Recognition: sherpa-onnx + SenseVoice covering Chinese/English/Japanese/Korean/Cantonese, ~228 MB model downloaded from the plugin server with SHA-256 verification, audio never leaves the machine, with self-check and a built-in sample test) or a **cloud transcription model** (Settings → Models → Transcription model: point it at any model on an OpenAI-compatible provider — it is kept out of the chat-model list and the media picker). WeChat's own platform transcript is used first when the platform provides one. If no engine is configured, or the audio cannot be fetched, the bot replies with a clear message instead of silently dropping the voice note.
+**Voice messages are transcribed for you.** A voice note sent to the bot (Telegram or WeChat) is turned into text before the agent sees it. The transcript is persisted with the message — restarts never re-transcribe and turn retries never re-bill — and the conversation shows `[voice] …` so you can tell it was spoken. Two engines are supported, both independent of your chat model: a **local offline plugin** (Settings → Plugins → Local Speech Recognition: sherpa-onnx + SenseVoice covering Chinese/English/Japanese/Korean/Cantonese, ~228 MB model downloaded from the plugin server with SHA-256 verification, audio never leaves the machine, with self-check and a built-in sample test) or a **cloud transcription model** (Settings → Models → Transcription model: point it at any model on an OpenAI-compatible provider — it is kept out of the chat-model list and the media picker). WeChat's own platform transcript is used first when the platform provides one. If no engine is configured, or the audio cannot be fetched, the bot replies with a clear message instead of silently dropping the voice note. Desktop "hold to talk" (long-press the bubble / hold in the input box) reuses the same engine chain and appends recognized text to the input box for review.
 
 ### An A2A network: many machines, one team
 
@@ -314,10 +318,13 @@ AgentBrook-Helper/
         │                              and window), A2AExtensionController (groups/discovery/compression/
         │                              update), GroupAutoTalkProcessor (anti-loop gates), A2AAgentTools,
         │                              A2ARemoteMessageProcessor, LocalApiServer
-        ├── Windows/                 ← every window: BubbleWindow (split into 7 partials: dock/
-        │                              hit-test/orbit/peer ring/positioning/toast/visual), MainWindow
-        │                              (stream/@-mentions/approval cards), ModelSettingsWindow,
-        │                              OnboardingWindow, A2ASessionWindow, AvatarMakerWindow, WindowBase
+        ├── Core/Voice/              ← voice pipeline: MicRecorder (AVAudioEngine/WASAPI capture),
+        │                              VoiceInput (gating/transcription/draft merge), AudioFrontend, AsrService
+        ├── Windows/                 ← every window: BubbleWindow (split into partials: dock/
+        │                              hit-test/orbit/peer ring/plugins/positioning/toast/visual/voice),
+        │                              MainWindow (stream/@-mentions/approval cards/hold-to-talk),
+        │                              ModelSettingsWindow, OnboardingWindow, A2ASessionWindow,
+        │                              AvatarMakerWindow, WindowBase
         ├── Views/                   ← conversation controls: MarkdownView (hand-written renderer),
         │                              MediaBlock, InteractionCard, ArtifactPanel (per-turn deliverables),
         │                              PeerIconView (emoji/image icons), LanPeerBubbles

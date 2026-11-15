@@ -665,5 +665,28 @@ internal static partial class I18n
         ["ui.im.rebind"] = "Rebind channels",
         ["ui.im.open.log"] = "Open diagnostic log",
         ["ui.im.rebinding"] = "Rebinding…",
+
+        // ── Bubble voice input (doc/Voice/06) ──
+        ["ui.voice.need.plugin"] = "Voice input requires the Speech Recognition (ASR) plugin. Install it now?",
+        ["ui.voice.install.now"] = "Install",
+        ["ui.voice.plugin.not.in.market"] = "ASR plugin not found in the marketplace (missing from index)",
+        ["ui.voice.model.missing"] = "ASR plugin installed, but the voice model is not downloaded (~228MB). Download now?",
+        ["ui.voice.download.model"] = "Download Model",
+        ["ui.voice.plugin.disabled"] = "ASR plugin is disabled; enable it in Settings → Plugins",
+        ["ui.voice.open.settings"] = "Open Settings",
+        ["ui.voice.agent.not.ready"] = "Assistant is not ready yet; try again shortly",
+        ["ui.voice.recording"] = "Listening… release to finish (max 60s)",
+        ["ui.voice.transcribing"] = "Transcribing…",
+        ["ui.voice.too.short"] = "Press was too short; no audio captured",
+        ["ui.voice.not.recognized"] = "No speech recognized",
+        ["ui.voice.failed.value"] = "Speech recognition failed: {0}",
+        ["ui.voice.record.start.failed"] = "Microphone failed to start: check the mic device and allow microphone access in system settings",
+        ["ui.voice.mic.permission"] = "Microphone permission required: allow this app (in dev, its hosting terminal) in System Settings → Privacy & Security → Microphone",
+        ["ui.voice.silence"] = "No audio captured: check the microphone device and system microphone permission",
+        ["ui.voice.filled"] = "Inserted into input box",
+        ["ui.voice.ready"] = "Voice input is ready",
+        ["ui.voice.model.downloading"] = "Downloading voice model…",
+        ["ui.voice.model.download.failed"] = "Voice model download failed",
+        ["ui.voice.overlay.hint"] = "Result will be appended to the input box · move to cancel · release to finish",
     };
 }

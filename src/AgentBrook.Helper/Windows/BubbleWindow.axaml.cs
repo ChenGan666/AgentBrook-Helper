@@ -58,7 +58,8 @@ public partial class BubbleWindow : Window
         _bubbleIcon = this.FindControl<Avalonia.Controls.Shapes.Path>("BubbleIcon")!;
         _orbitLayer = this.FindControl<Canvas>("OrbitLayer")!;
         _toastPanel = this.FindControl<StackPanel>("ToastPanel")!;
-        var root = this.FindControl<Panel>("Root")!;
+        _root = this.FindControl<Panel>("Root")!;   // 语音长按判定（Voice partial）与拖拽共用
+        var root = _root;
         _peerLayer = this.FindControl<Canvas>("PeerLayer")!;
         _peerHoverLayer = this.FindControl<Canvas>("PeerHoverLayer")!;
         _peerLayer.RenderTransform = _peerShift;
@@ -192,7 +193,7 @@ public partial class BubbleWindow : Window
 
     private void InitializeComponent() => AvaloniaXamlLoader.Load(this);
 
-    // ───────────────────────── 按住拖动 / 双击开窗 ─────────────────────────
+    // ───────────────────────── 按住拖动 / 双击开窗 / 长按语音（doc/Voice/06） ─────────────────────────
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
@@ -211,16 +212,29 @@ public partial class BubbleWindow : Window
         {
             // 双击：打开对话窗体（不启动拖拽）
             _controller.ShowConversation();
+            VoicePressEnded();   // 清理挂起的长按判定
             return;
         }
 
-        // 系统级原生拖拽：窗口由 macOS 直接移动，与光标严格 1:1 同步
+        // 气泡主体按下：先挂 450ms 长按判定——立即移动=拖拽气泡，按住未动=进入语音
+        if (VoicePressOnBody(e))
+        {
+            VoicePressStarted(e, point.Position);
+            return;
+        }
+
+        // 非本体（插件图标/伙伴层等）：保留旧的立即原生拖拽行为
         BeginMoveDrag(e);
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         base.OnPointerReleased(e);
+        if (VoiceRelease(e))
+        {
+            return;   // 录音收尾：转写填输入框，不做磁吸/存位
+        }
+        VoicePressEnded();         // 未进语音：清理挂起的长按判定
         ApplyEdgeMagnet();   // 磁吸：靠近左右上边缘自动贴边半隐；越界（含下方）弹回可视区
         EnsureAutoHeight();        // 拖动结束：拖动期间若高度被固定则恢复自适应
         _peerBubbles.Relayout();   // 位置变化后按新屏幕边界重算展开布局

@@ -88,6 +88,19 @@
             <Path x:Name="BubbleIcon" Width="27" Height="27"
                   HorizontalAlignment="Center" VerticalAlignment="Center"
                   Fill="#ffffff" Stretch="Uniform"/>
+
+            <!-- 语音波形（录音态，doc/Voice/06）：5 根白条在主体下缘，振幅响应麦克风电平。
+                 逐帧改 Height（DispatcherTimer），不依赖 RotateTransform 语义（项目既有教训）；
+                 平时隐藏，窗口尺寸/命中区不受影响 -->
+            <StackPanel x:Name="VoiceWave" Orientation="Horizontal" Spacing="3"
+                        HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,18"
+                        IsVisible="False" IsHitTestVisible="False">
+                <Rectangle Width="4" Height="3" RadiusX="2" RadiusY="2" Fill="#ddffffff"/>
+                <Rectangle Width="4" Height="3" RadiusX="2" RadiusY="2" Fill="#ddffffff"/>
+                <Rectangle Width="4" Height="3" RadiusX="2" RadiusY="2" Fill="#ddffffff"/>
+                <Rectangle Width="4" Height="3" RadiusX="2" RadiusY="2" Fill="#ddffffff"/>
+                <Rectangle Width="4" Height="3" RadiusX="2" RadiusY="2" Fill="#ddffffff"/>
+            </StackPanel>
         </Panel>
 
         <!-- 伙伴气泡层：局域网在线已配对 Helper 头像（收拢叠放于本体下半部，悬停展开） -->

@@ -345,6 +345,18 @@
                             </Panel>
                         </Button>
                     </Grid>
+
+                    <!-- 语音输入录音覆盖层（doc/Voice/06）：按住 InputBox 450ms 进入录音态时显示，
+                         文案运行时由 I18n 设置；IsHitTestVisible=False 不影响输入框交互 -->
+                    <Border Grid.Row="0" Grid.RowSpan="3" x:Name="VoiceOverlay" Background="#cc202020"
+                            CornerRadius="12" IsVisible="False" IsHitTestVisible="False">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6">
+                            <TextBlock x:Name="VoiceOverlayText" FontSize="15" FontWeight="SemiBold"
+                                       Foreground="#ff8a80" HorizontalAlignment="Center"/>
+                            <TextBlock x:Name="VoiceOverlaySubText" FontSize="12"
+                                       Foreground="#9a9a9a" HorizontalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
                 </Grid>
             </Border>
         </Border>

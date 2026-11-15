@@ -820,56 +820,7 @@ public partial class SettingsWindow : WindowBase
                 var captured = available_entry;
                 installBtn.Click += async (_, _) =>
                 {
-                    installBtn.IsEnabled = false;
-                    installBar.IsVisible = true;
-                    installBar.IsIndeterminate = true;
-                    installStage.IsVisible = true;
-                    installStage.Text = I18n.T("ui.plugins.installing", captured.Name);
-                    var progress = new Progress<PluginInstallProgress>(p =>
-                    {
-                        if (p.Stage == PluginInstallProgress.Download)
-                        {
-                            installBar.IsIndeterminate = p.Total is not > 0;
-                            if (p.Total is > 0)
-                            {
-                                installBar.Value = p.Bytes * 100.0 / p.Total.Value;
-                            }
-                            installStage.Text = $"{I18n.T("ui.plugins.downloading")} {p.Bytes * 100.0 / Math.Max(p.Total ?? 1, 1):0}%（{p.Bytes / 1048576.0:0.0}/{(p.Total ?? 0) / 1048576.0:0.0} MB）";
-                        }
-                        else if (p.Stage == PluginInstallProgress.Verify)
-                        {
-                            installBar.IsIndeterminate = true;
-                            installStage.Text = I18n.T("ui.plugins.verifying");
-                        }
-                        else if (p.Stage == PluginInstallProgress.Extract)
-                        {
-                            installBar.IsIndeterminate = true;
-                            installStage.Text = I18n.T("ui.plugins.extracting");
-                        }
-                        else if (p.Stage == PluginInstallProgress.Done)
-                        {
-                            installBar.IsIndeterminate = true;
-                            installStage.Text = I18n.T("ui.plugins.enabling");
-                        }
-                    });
-                    try
-                    {
-                        // 校验/解压/插件初始化是同步 CPU 阶段——整体放后台，UI 不卡死
-                        await Task.Run(() => plugins.InstallAsync(captured, progress: progress));
-                        await RefreshPluginLists();
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.Error.WriteLine($"[plugins] Install: {ex.Message}");
-                        SetPluginStatus($"{I18n.T("ui.plugins.install.failed")}：{ex.Message}");
-                        installStage.Text = $"{I18n.T("ui.plugins.install.failed")}：{ex.Message}";
-                    }
-                    finally
-                    {
-                        installBar.IsVisible = false;
-                        installStage.IsVisible = false;
-                        installBtn.IsEnabled = true;
-                    }
+                    await InstallEntryAsync(captured, installBtn, installBar, installStage);
                 };
 
                 card.Child = stack;
@@ -1518,6 +1469,164 @@ public partial class SettingsWindow : WindowBase
         {
             var idx = _working.FindIndex(p => string.Equals(p.Name, providerName, StringComparison.OrdinalIgnoreCase));
             if (idx >= 0) ProviderList.SelectedIndex = idx;
+        }
+    }
+
+    // ── 气泡语音引导（doc/Voice/06）：自动安装 asr 插件 + 提示/执行语音模型下载 ─────────────────────────
+
+    /// <summary>
+    /// 安装一个服务端可用插件（下载+校验+入位+启用）：手动按钮与气泡语音自动安装共用。
+    /// installBtn/installBar/installStage 为可选 UI 挂点（自动安装传 null，进度写状态行）。
+    /// </summary>
+    internal async Task InstallEntryAsync(PluginIndexEntry entry, Button? installBtn,
+        ProgressBar? installBar, TextBlock? installStage)
+    {
+        var plugins = App.Controller.Agent?.PluginManager
+            ?? throw new InvalidOperationException("Agent 未就绪");
+        if (installBtn is not null) installBtn.IsEnabled = false;
+        if (installBar is not null)
+        {
+            installBar.IsVisible = true;
+            installBar.IsIndeterminate = true;
+        }
+        if (installStage is not null)
+        {
+            installStage.IsVisible = true;
+            installStage.Text = I18n.T("ui.plugins.installing", entry.Name);
+        }
+        SetPluginStatus(I18n.T("ui.plugins.installing", entry.Name));
+        var progress = new Progress<PluginInstallProgress>(p =>
+        {
+            var stageText = p.Stage switch
+            {
+                PluginInstallProgress.Download => p.Total is > 0
+                    ? $"{I18n.T("ui.plugins.downloading")} {p.Bytes * 100.0 / p.Total.Value:0}%（{p.Bytes / 1048576.0:0.0}/{p.Total.Value / 1048576.0:0.0} MB）"
+                    : I18n.T("ui.plugins.downloading"),
+                PluginInstallProgress.Verify => I18n.T("ui.plugins.verifying"),
+                PluginInstallProgress.Extract => I18n.T("ui.plugins.extracting"),
+                PluginInstallProgress.Done => I18n.T("ui.plugins.enabling"),
+                _ => "",
+            };
+            if (installBar is not null && p.Stage == PluginInstallProgress.Download)
+            {
+                installBar.IsIndeterminate = p.Total is not > 0;
+                if (p.Total is > 0)
+                {
+                    installBar.Value = p.Bytes * 100.0 / p.Total.Value;
+                }
+            }
+            if (installStage is not null)
+            {
+                if (stageText.Length > 0) installStage.Text = stageText;
+            }
+            else if (stageText.Length > 0)
+            {
+                SetPluginStatus(stageText);   // 自动安装：进度写状态行
+            }
+        });
+        try
+        {
+            // 校验/解压/插件初始化是同步 CPU 阶段——整体放后台，UI 不卡死
+            await Task.Run(() => plugins.InstallAsync(entry, progress: progress));
+            await RefreshPluginLists();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[plugins] Install: {ex.Message}");
+            SetPluginStatus($"{I18n.T("ui.plugins.install.failed")}：{ex.Message}");
+            if (installStage is not null)
+            {
+                installStage.Text = $"{I18n.T("ui.plugins.install.failed")}：{ex.Message}";
+            }
+        }
+        finally
+        {
+            if (installBar is not null) installBar.IsVisible = false;
+            if (installStage is not null) installStage.IsVisible = false;
+            if (installBtn is not null) installBtn.IsEnabled = true;
+        }
+    }
+
+    /// <summary>外部入口：切到「插件管理」页（照 ShowModelsPage 范式；气泡语音门卫引导落点）。</summary>
+    public void ShowPluginsPage()
+    {
+        NavPlugins.IsChecked = true;
+        ShowPage(PagePlugins);
+    }
+
+    /// <summary>
+    /// 气泡语音引导（长按气泡且 asr 插件未安装时触发）：自动安装 asr 插件，完成后经气泡 toast
+    /// 「提示安装语音模型」（约 228MB，用户点确认才下载）。全程不抛：失败写状态行。
+    /// </summary>
+    public async Task InstallVoicePluginAsync()
+    {
+        var plugins = App.Controller.Agent?.PluginManager;
+        if (plugins is null)
+        {
+            SetPluginStatus(I18n.T("ui.voice.agent.not.ready"));
+            return;
+        }
+        try
+        {
+            var entry = (await plugins.FetchAvailableAsync())
+                .FirstOrDefault(e => e.Id == Helper.Core.Voice.VoiceInput.AsrPluginId);
+            if (entry is null)
+            {
+                SetPluginStatus(I18n.T("ui.voice.plugin.not.in.market"));
+                return;
+            }
+            await InstallEntryAsync(entry, null, null, null);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[voice] InstallVoicePlugin: {ex.Message}");
+            SetPluginStatus($"{I18n.T("ui.plugins.install.failed")}：{ex.Message}");
+            return;
+        }
+
+        // 提示安装语音模型：气泡 toast 承载确认按钮（用户要求"提示安装 asr 语音模型"）
+        App.Controller.Bubble?.ShowToast(
+            I18n.T("ui.voice.model.missing"),
+            "#ffb340",
+            null,
+            [(I18n.T("ui.voice.download.model"), () =>
+            {
+                ShowPluginsPage();
+                _ = DownloadVoiceModelAsync();
+            })]);
+    }
+
+    /// <summary>下载 ASR 语音模型（RunAction install-model → 插件 ModelStore 逐文件 SHA 校验落 workspace/models/asr/；进度写状态行）。</summary>
+    public async Task DownloadVoiceModelAsync()
+    {
+        var contributor = App.Controller.Agent?.PluginManager?.GetSettingsContributor(Helper.Core.Voice.VoiceInput.AsrPluginId);
+        if (contributor is null)
+        {
+            SetPluginStatus(I18n.T("ui.voice.plugin.disabled"));
+            return;
+        }
+        SetPluginStatus(I18n.T("ui.voice.model.downloading"));
+        var progress = new Progress<string>(s => SetPluginStatus($"{I18n.T("ui.voice.model.downloading")} {s}"));
+        try
+        {
+            var result = await Task.Run(() => contributor.RunActionAsync("install-model", null, progress));
+            if (result.Success)
+            {
+                SetPluginStatus(I18n.T("ui.voice.ready"));
+                App.Controller.Bubble?.ShowToast(I18n.T("ui.voice.ready"), "#34c759", TimeSpan.FromSeconds(4));
+            }
+            else
+            {
+                SetPluginStatus($"{I18n.T("ui.voice.model.download.failed")}：{result.Message}");
+            }
+        }
+        catch (Exception ex)
+        {
+            SetPluginStatus($"{I18n.T("ui.voice.model.download.failed")}：{ex.Message}");
+        }
+        finally
+        {
+            await RefreshPluginLists();
         }
     }
 

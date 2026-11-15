@@ -665,5 +665,28 @@ internal static partial class I18n
         ["ui.im.rebind"] = "重新绑定通道",
         ["ui.im.open.log"] = "打开诊断日志",
         ["ui.im.rebinding"] = "正在重新绑定…",
+
+        // ── 气泡语音输入（doc/Voice/06）──
+        ["ui.voice.need.plugin"] = "语音输入需要「语音识别（ASR）」插件，是否立即安装？",
+        ["ui.voice.install.now"] = "安装",
+        ["ui.voice.plugin.not.in.market"] = "插件市场暂无语音识别插件（index 未包含 asr）",
+        ["ui.voice.model.missing"] = "语音识别插件已安装，语音模型未下载（约 228MB），是否立即下载？",
+        ["ui.voice.download.model"] = "下载模型",
+        ["ui.voice.plugin.disabled"] = "语音识别插件已被停用，请在设置→插件管理中启用",
+        ["ui.voice.open.settings"] = "去设置",
+        ["ui.voice.agent.not.ready"] = "助手尚未就绪，请稍后再试",
+        ["ui.voice.recording"] = "正在聆听…松开结束（最长 60 秒）",
+        ["ui.voice.transcribing"] = "语音识别中…",
+        ["ui.voice.too.short"] = "按住时间太短，未采集到语音",
+        ["ui.voice.not.recognized"] = "未识别到语音内容",
+        ["ui.voice.failed.value"] = "语音识别失败：{0}",
+        ["ui.voice.record.start.failed"] = "麦克风启动失败：请检查麦克风设备，并确认系统已允许麦克风权限",
+        ["ui.voice.mic.permission"] = "需要麦克风权限：请在系统设置→隐私与安全性→麦克风中允许本应用（开发运行时授权挂在宿主终端应用上）",
+        ["ui.voice.silence"] = "没有采集到声音：请检查麦克风设备与系统麦克风权限",
+        ["ui.voice.filled"] = "已填入输入框",
+        ["ui.voice.ready"] = "语音输入已就绪",
+        ["ui.voice.model.downloading"] = "语音模型下载中…",
+        ["ui.voice.model.download.failed"] = "语音模型下载失败",
+        ["ui.voice.overlay.hint"] = "识别结果将追加到输入框，移动取消，松开结束",
     };
 }

@@ -129,6 +129,7 @@ public partial class MainWindow : Window
         _statusText = this.FindControl<TextBlock>("StatusText");
         _statusPill = this.FindControl<Border>("StatusPill");
         _inputBox = this.FindControl<TextBox>("InputBox");
+        InitInputVoice();   // 输入框按住说话（doc/Voice/03/06，复用气泡语音采集/转写管线）
         _sendBtn = this.FindControl<Button>("SendBtn");
         _tokenText = this.FindControl<TextBlock>("TokenText");
 
@@ -1132,6 +1133,14 @@ public partial class MainWindow : Window
         if (_inputBox is null) return;
         _inputBox.Text = text;
         await SendInputAsync();
+    }
+
+    /// <summary>语音识别结果追加到输入框草稿（doc/Voice/06 决策2）：只填不发送，空格衔接已有内容，光标移到末尾。</summary>
+    public void AppendInputDraft(string text)
+    {
+        if (_inputBox is null || string.IsNullOrWhiteSpace(text)) return;
+        _inputBox.Text = Helper.Core.Voice.VoiceInput.MergeDraft(_inputBox.Text, text);
+        _inputBox.CaretIndex = _inputBox.Text?.Length ?? 0;
     }
 
     private async Task SendInputAsync()

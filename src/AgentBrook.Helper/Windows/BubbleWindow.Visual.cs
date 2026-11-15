@@ -23,6 +23,10 @@ public partial class BubbleWindow
 
     private void SetState(BrookRunState state, string? detail)
     {
+        if (_voiceRecording || _voiceVisualActive)
+        {
+            return;   // 录音期间保持麦克风视觉（doc/Voice/06；含主窗口语音输入跨窗同步），结束由收尾方重放
+        }
         // 处理中的 Thinking/CallingTool 共用同一视觉：远程回合里两者高频交替，
         // 每次都 SetLook+重启齿轮会造成"不断重置"的卡顿——同视觉重复通知直接忽略。
         var visual = state switch

@@ -44,6 +44,8 @@
     <PackageReference Include="QRCoder" Version="1.8.1" />
     <!-- 语音音频前端（doc/Voice/01 B2）：Telegram voice = Ogg 封装 Opus，本地引擎/降级上传需解码为 16k PCM -->
     <PackageReference Include="Concentus.OggFile" Version="1.0.7" />
+    <!-- 气泡语音输入（doc/Voice/06）：Windows 侧麦克风采集（WASAPI）；macOS 走 AudioQueue P/Invoke 不用此包 -->
+    <PackageReference Include="NAudio" Version="2.2.1" />
     <ProjectReference Include="..\AgentBrook.Agent.Core\AgentBrook.Agent.Core.csproj" />
     <ProjectReference Include="..\AgentBrook.Runtime.Abstractions\AgentBrook.Runtime.Abstractions.csproj" />
     <ProjectReference Include="..\AgentBrook.Runtime\AgentBrook.Runtime.csproj" />

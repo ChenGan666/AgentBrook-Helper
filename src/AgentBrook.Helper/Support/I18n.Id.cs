@@ -665,6 +665,29 @@ internal static partial class I18n
         ["ui.im.rebind"] = "Ikat ulang kanal",
         ["ui.im.open.log"] = "Buka log diagnostik",
         ["ui.im.rebinding"] = "Mengikat ulang…",
+
+        // ── Input suara gelembung (doc/Voice/06) ──
+        ["ui.voice.need.plugin"] = "Input suara memerlukan plugin Pengenalan Ucapan (ASR). Pasang sekarang?",
+        ["ui.voice.install.now"] = "Pasang",
+        ["ui.voice.plugin.not.in.market"] = "Plugin ASR tidak ditemukan di pasar plugin (tidak ada di index)",
+        ["ui.voice.model.missing"] = "Plugin ASR terpasang, tetapi model suara belum diunduh (~228MB). Unduh sekarang?",
+        ["ui.voice.download.model"] = "Unduh Model",
+        ["ui.voice.plugin.disabled"] = "Plugin ASR dinonaktifkan; aktifkan di Pengaturan → Plugin",
+        ["ui.voice.open.settings"] = "Buka Pengaturan",
+        ["ui.voice.agent.not.ready"] = "Asisten belum siap; coba lagi sebentar",
+        ["ui.voice.recording"] = "Mendengarkan… lepaskan untuk selesai (maks 60 detik)",
+        ["ui.voice.transcribing"] = "Mengenali ucapan…",
+        ["ui.voice.too.short"] = "Tekanan terlalu singkat; tidak ada audio",
+        ["ui.voice.not.recognized"] = "Tidak ada ucapan yang dikenali",
+        ["ui.voice.failed.value"] = "Pengenalan ucapan gagal: {0}",
+        ["ui.voice.record.start.failed"] = "Mikrofon gagal dimulai: periksa perangkat dan izinkan akses mikrofon di pengaturan sistem",
+        ["ui.voice.mic.permission"] = "Izin mikrofon diperlukan: izinkan aplikasi ini (saat dev, terminal host-nya) di Pengaturan Sistem → Privasi & Keamanan → Mikrofon",
+        ["ui.voice.silence"] = "Tidak ada audio yang tertangkap: periksa perangkat mikrofon dan izin mikrofon sistem",
+        ["ui.voice.filled"] = "Dimasukkan ke kotak input",
+        ["ui.voice.ready"] = "Input suara siap",
+        ["ui.voice.model.downloading"] = "Mengunduh model suara…",
+        ["ui.voice.model.download.failed"] = "Gagal mengunduh model suara",
+        ["ui.voice.overlay.hint"] = "Hasil akan ditambahkan ke kotak input · gerakkan untuk batal · lepas untuk selesai",
     };
 }
 

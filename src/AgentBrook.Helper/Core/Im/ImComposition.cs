@@ -86,6 +86,9 @@ public sealed class ImComposition
             }
             catch { return null; }   // models.json 损坏 → 无云端
         });
+
+    /// <summary>转写服务门面（doc/Voice/06）：IM 语音与桌面气泡语音共用同一实例（惰性装配；闭包每次调用即时取配置，设置即时生效语义不变）。</summary>
+    public Helper.Core.Voice.IAsrService AsrService => _asrService ??= BuildAsrService();
     private bool _started;
     private readonly List<IAsyncDisposable> _disposables = [];
 
@@ -967,7 +970,7 @@ public sealed class ImComposition
                     ImSettings.Load(_workspaceRoot).InteractionMode, "auto", StringComparison.OrdinalIgnoreCase),
                 fullAccessAccessor: () => App.Controller?.FullAccess == true,
                 // 语音转写（doc/Voice/01 B4）：惰性装配（Agent/设置可能未就绪），每回合即时取
-                asrServiceAccessor: () => _asrService ??= BuildAsrService()),
+                asrServiceAccessor: () => AsrService),
             new HelperApprovalPort(), Caps(), workspaceRootOverride: _workspaceRoot);
         await messaging.StartAsync().ConfigureAwait(false);
         _messaging = messaging;
