@@ -192,14 +192,14 @@ public partial class BubbleWindow
         catch (MicRecorderException ex)
         {
             // status= 为 AudioQueueStart 失败——dev 运行（dotnet run）时 TCC 授权挂在宿主终端上，多半是权限
-            Console.Error.WriteLine($"[voice] start failed: {ex.Reason}");
+            VoiceLog.Write($"start failed: {ex.Reason}");
             var permissionLikely = ex.Reason.Contains("status=", StringComparison.Ordinal);
             ShowVoiceHint(I18n.T(permissionLikely ? "ui.voice.mic.permission" : "ui.voice.record.start.failed"));
             return;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[voice] start failed: {ex.Message}");
+            VoiceLog.Write($"start failed: {ex.Message}");
             ShowVoiceHint(I18n.T("ui.voice.record.start.failed"));
             return;
         }
@@ -247,24 +247,25 @@ public partial class BubbleWindow
         byte[] pcm;
         try
         {
-            pcm = recorder.Stop();
+            // 停录放后台线程：AudioQueueStop/AVAudioEngine.stop 的同步等待不再占 UI 线程
+            pcm = await Task.Run(() => recorder.Stop());
         }
         catch (MicRecorderException ex)
         {
             // no-data: 回调无数据（权限静默流/转换层）；capture-error: 设备中途出错
-            Console.Error.WriteLine($"[voice] stop failed: {ex.Reason}");
+            VoiceLog.Write($"stop failed: {ex.Reason}");
             ShowVoiceHint(I18n.T("ui.voice.silence"));
             return;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[voice] stop failed: {ex.Message}");
+            VoiceLog.Write($"stop failed: {ex.Message}");
             ShowVoiceHint(I18n.T("ui.voice.record.start.failed"));
             return;
         }
         // 尺寸诊断日志（只记时长/字节数，不落音频内容——脱敏红线）
         var rate = recorder.CaptureRate;
-        Console.Error.WriteLine($"[voice] captured {VoiceInput.DurationSeconds(pcm.Length, rate):0.0}s ({pcm.Length} bytes @ {rate}Hz)");
+        VoiceLog.Write($"captured {VoiceInput.DurationSeconds(pcm.Length, rate):0.0}s ({pcm.Length} bytes @ {rate}Hz)");
         if (VoiceInput.TooShort(pcm.Length, rate))
         {
             ShowVoiceHint(I18n.T("ui.voice.too.short"));
@@ -280,8 +281,10 @@ public partial class BubbleWindow
         var transcribeToastClose = ShowToast(I18n.T("ui.voice.transcribing"), "#4a9eff", null);
         try
         {
-            var result = await VoiceInput.TranscribeAsync(pcm, rate);
-            Console.Error.WriteLine($"[voice] transcribed engine={result.Engine} ok={result.Success} textLen={result.Text?.Length ?? 0} error={result.Error}");
+            // 转写后台执行：sherpa 原生解码不再阻塞 UI 线程；30s 超时兜底（解码本身秒级）
+            var result = await Task.Run(() => VoiceInput.TranscribeAsync(pcm, rate))
+                .WaitAsync(TimeSpan.FromSeconds(30));
+            VoiceLog.Write($"transcribed engine={result.Engine} ok={result.Success} textLen={result.Text?.Length ?? 0} error={result.Error}");
             transcribeToastClose?.Invoke();
             if (!result.Success)
             {

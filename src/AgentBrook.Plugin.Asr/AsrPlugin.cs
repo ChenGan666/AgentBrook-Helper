@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using AgentBrook.Plugin.Abstractions;
 
@@ -20,6 +21,41 @@ public sealed class AsrPlugin : IHelperPlugin, ISettingsContributor, IAsrCapabil
     private static readonly string DefaultEngine = ModelStore.SenseVoiceSmallInt8.Id;
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
 
+    /// <summary>
+    /// Windows 原生隔离（doc/19 红线：原生运行时进程唯一）：
+    /// PrivacyMasking 与本插件都携带 onnxruntime.dll——Windows 同名 DLL 单实例，先加载者占名，
+    /// 后加载者绑定到别人版本 → 原生崩溃（自检闪退，真机 2026-11-15）。
+    /// 包内已改名 ort_asr.dll 并补丁 c-api 导入名（构建脚本 win 隔离段），此处全路径预载抢占 +
+    /// 注册解析器把 sherpa 管理层的 sherpa-onnx-c-api.dll 指向插件目录。
+    /// </summary>
+    private static void PreloadWindowsNatives(IPluginHostContext host)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        try
+        {
+            var nativeDir = Path.GetDirectoryName(typeof(SenseVoiceEngine).Assembly.Location) ?? ".";
+            var ort = Path.Combine(nativeDir, "ort_asr.dll");
+            if (!File.Exists(ort)) ort = Path.Combine(nativeDir, "onnxruntime.dll");   // 旧包（未改名）兼容
+            if (File.Exists(ort))
+            {
+                NativeLibrary.Load(ort);
+                host.Log($"[asr] Windows 原生隔离已预载：{Path.GetFileName(ort)}");
+            }
+
+            var resolverRegistered = false;
+            NativeLibrary.SetDllImportResolver(typeof(SenseVoiceEngine).Assembly, (libraryName, assembly, searchPath) =>
+            {
+                var p = Path.Combine(nativeDir, libraryName);
+                return File.Exists(p) ? NativeLibrary.Load(p, assembly, searchPath) : IntPtr.Zero;
+            });
+            _ = resolverRegistered;
+        }
+        catch (Exception ex)
+        {
+            host.Log($"[asr] Windows 原生预载失败（转写可能不可用）：{ex.Message}");
+        }
+    }
+
     private IPluginHostContext? _host;
     private ModelStore? _store;
     private SenseVoiceEngine? _engine;
@@ -36,6 +72,7 @@ public sealed class AsrPlugin : IHelperPlugin, ISettingsContributor, IAsrCapabil
         _host = host;
         _store = new ModelStore(host.WorkspaceRoot, host.Download, host.Log);
         _engine = new SenseVoiceEngine(host.Log);
+        PreloadWindowsNatives(host);
 
         // 设置真源 = 宿主 state.json（IPluginSettingsStore）；缺省补默认值
         var settings = ReadSettings();

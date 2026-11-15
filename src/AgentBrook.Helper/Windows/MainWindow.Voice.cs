@@ -121,14 +121,14 @@ public partial class MainWindow
         }
         catch (MicRecorderException ex)
         {
-            Console.Error.WriteLine($"[voice] input start failed: {ex.Reason}");
+            VoiceLog.Write($"input start failed: {ex.Reason}");
             var permissionLikely = ex.Reason.Contains("status=", StringComparison.Ordinal);
             ShowVoiceHint(I18n.T(permissionLikely ? "ui.voice.mic.permission" : "ui.voice.record.start.failed"));
             return;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[voice] input start failed: {ex.Message}");
+            VoiceLog.Write($"input start failed: {ex.Message}");
             ShowVoiceHint(I18n.T("ui.voice.record.start.failed"));
             return;
         }
@@ -168,25 +168,35 @@ public partial class MainWindow
         if (recorder is null) return;
 
         var rate = recorder.CaptureRate;
-        byte[] pcm;
-        try
+
+        // 停录+NAudio/MediaFoundation 归一化放后台 MTA 线程：Windows 上 MF 要求 MTA，
+        // UI（STA）线程同步调用会卡住甚至崩溃（doc/Voice/06 Windows 排障）
+        var pcmResult = await Task.Run(() =>
         {
-            pcm = recorder.Stop();
-        }
-        catch (MicRecorderException ex)
+            try
+            {
+                var pcm = recorder.Stop();
+                return (Ok: true, Pcm: pcm, Error: (string?)null);
+            }
+            catch (MicRecorderException ex)
+            {
+                VoiceLog.Write($"input stop failed: {ex.Reason}");
+                return (Ok: false, Pcm: Array.Empty<byte>(), Error: (string?)"silence");
+            }
+            catch (Exception ex)
+            {
+                VoiceLog.Write($"input stop failed: {ex.Message}");
+                return (Ok: false, Pcm: Array.Empty<byte>(), Error: (string?)"start-failed");
+            }
+        });
+        var pcm = pcmResult.Pcm;
+        if (!pcmResult.Ok)
         {
-            Console.Error.WriteLine($"[voice] input stop failed: {ex.Reason}");
-            ShowVoiceHint(I18n.T("ui.voice.silence"));
-            return;
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[voice] input stop failed: {ex.Message}");
-            ShowVoiceHint(I18n.T("ui.voice.record.start.failed"));
+            ShowVoiceHint(I18n.T(pcmResult.Error == "silence" ? "ui.voice.silence" : "ui.voice.record.start.failed"));
             return;
         }
         // 尺寸诊断日志（只记时长/字节数，不落音频内容——脱敏红线）
-        Console.Error.WriteLine($"[voice] input captured {VoiceInput.DurationSeconds(pcm.Length, rate):0.0}s ({pcm.Length} bytes @ {rate}Hz)");
+        VoiceLog.Write($"input captured {VoiceInput.DurationSeconds(pcm.Length, rate):0.0}s ({pcm.Length} bytes @ {rate}Hz)");
         if (VoiceInput.TooShort(pcm.Length, rate))
         {
             ShowVoiceHint(I18n.T("ui.voice.too.short"));
@@ -203,8 +213,11 @@ public partial class MainWindow
         var transcribeToastClose = App.Controller.Bubble?.ShowToast(I18n.T("ui.voice.transcribing"), "#4a9eff", null);
         try
         {
-            var result = await VoiceInput.TranscribeAsync(pcm, rate);
-            Console.Error.WriteLine($"[voice] input transcribed engine={result.Engine} ok={result.Success} textLen={result.Text?.Length ?? 0} error={result.Error}");
+            // 转写（sherpa 原生推理）同样后台执行：同步解码在 UI 线程会卡住整窗，
+            // Windows 原生库异常也不至于冻结界面；30s 超时兜底（解码本身秒级，超时即异常）
+            var result = await Task.Run(() => VoiceInput.TranscribeAsync(pcm, rate))
+                .WaitAsync(TimeSpan.FromSeconds(30));
+            VoiceLog.Write($"input transcribed engine={result.Engine} ok={result.Success} textLen={result.Text?.Length ?? 0} error={result.Error}");
             transcribeToastClose?.Invoke();
             if (!result.Success)
             {
@@ -220,9 +233,16 @@ public partial class MainWindow
             AppendInputDraft(text);
             _inputBox?.Focus();
         }
+        catch (TimeoutException)
+        {
+            transcribeToastClose?.Invoke();
+            VoiceLog.Write("input transcribed timeout(30s)");
+            ShowVoiceHint(I18n.T("ui.voice.failed.value", "timeout"));
+        }
         catch (Exception ex)
         {
             transcribeToastClose?.Invoke();
+            VoiceLog.Write($"input transcribed exception: {ex.Message}");
             ShowVoiceHint(I18n.T("ui.voice.failed.value", ex.Message));
         }
         finally
