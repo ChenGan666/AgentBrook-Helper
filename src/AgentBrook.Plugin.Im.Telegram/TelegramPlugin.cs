@@ -134,7 +134,8 @@ public sealed class TelegramChannel : IImChannel, ICapabilityInstance
         MaxTextChars: 4096, MaxOutFileBytes: 45L * 1024 * 1024, MaxInFileBytes: 20L * 1024 * 1024,
         MaxFilesPerMessage: 10, SupportsCaption: true, CaptionMaxChars: 1024,
         MarkdownMode: "None", ReplyWindow: TimeSpan.FromMinutes(2), GroupRatePerMinute: 18,
-        HasOutboundIdempotencyKey: false);   // Telegram 无出站幂等键 → Unknown 不自动重发（T05）
+        HasOutboundIdempotencyKey: false,   // Telegram 无出站幂等键 → Unknown 不自动重发（T05）
+        AudioMode: ImAudioDeliveryMode.NativeVoice);   // doc/Voice/08：语音条 sendVoice（ogg-opus）
 
     public event Action<ImChannelStatus>? StatusChanged;
     internal IImInboundSink? Sink { get; private set; }
@@ -375,21 +376,37 @@ public sealed class TelegramChannel : IImChannel, ICapabilityInstance
             HttpResult? response = null;
             if (request.Files is { Count: > 0 })
             {
-                // 文件：photo → sendPhoto，其余 → sendDocument（multipart；T07）
+                // 文件：photo → sendPhoto；speech- 语音行 audio/ogg → sendVoice（语音条，caption=概要文本，
+                // doc/Voice/08 §4.7）；其余 → sendDocument（multipart；T07）
                 var blobs = _services.GetService<IBlobService>();
                 if (blobs is null)
                     return DeliveryResult.Rejected(ImErrorCodes.ServiceNotGranted, "Blob 服务未授予，文件发送不可用。");
+                // 语音条判定：业务标记（IdempotencyKey 前缀 speech-）+ ogg 容器——普通 ogg 文件产物不误判（评审五#2）
+                var isVoiceNote = request.IdempotencyKey is not null
+                    && request.IdempotencyKey.StartsWith("speech-", StringComparison.Ordinal)
+                    && request.Files.Count == 1
+                    && request.Files[0].MediaType == "audio/ogg";
+                var first = true;
                 foreach (var file in request.Files)
                 {
-                    var field = file.MediaType is not null && file.MediaType.StartsWith("image/", StringComparison.Ordinal) ? "photo" : "document";
+                    var field = file.MediaType is not null && file.MediaType.StartsWith("image/", StringComparison.Ordinal) ? "photo"
+                        : isVoiceNote && first ? "voice"
+                        : "document";
+                    var api = field == "photo" ? "sendPhoto" : field == "voice" ? "sendVoice" : "sendDocument";
                     await using var content = await blobs.OpenReadAsync(file, "outbound-delivery", cancellationToken).ConfigureAwait(false);
                     using var ms = new MemoryStream();
                     await content.CopyToAsync(ms, cancellationToken).ConfigureAwait(false);
-                    var multipart = BuildMultipart(
-                        ("chat_id", request.ChatId),
-                        (field, file.FileName, file.MediaType ?? "application/octet-stream", ms.ToArray()));
-                    response = await CallApiAsync(field == "photo" ? "sendPhoto" : "sendDocument", multipart,
+                    var filePart = (FieldName: field, file.FileName, file.MediaType ?? "application/octet-stream", Content: ms.ToArray());
+                    var caption = isVoiceNote && first && !string.IsNullOrEmpty(request.Text)
+                        ? (request.Text.Length > Capabilities.CaptionMaxChars ? request.Text[..Capabilities.CaptionMaxChars] : request.Text)
+                        : null;
+                    var multipart = field == "photo" || field == "document"
+                        ? BuildMultipart(("chat_id", request.ChatId), filePart)
+                        : BuildMultipartWithFile(("chat_id", request.ChatId), filePart,
+                            caption is null ? Array.Empty<(string, string)>() : new[] { ("caption", caption) });
+                    response = await CallApiAsync(api, multipart,
                         "multipart/form-data; boundary=" + MultipartBoundary, cancellationToken, sendTimeout).ConfigureAwait(false);
+                    first = false;
                 }
             }
             else
@@ -604,6 +621,26 @@ public sealed class TelegramChannel : IImChannel, ICapabilityInstance
         foreach (var (name, value) in fields)
         {
             ms.Write(Encoding.ASCII.GetBytes($"--{MultipartBoundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"));
+        }
+        ms.Write(Encoding.ASCII.GetBytes($"--{MultipartBoundary}--\r\n"));
+        return ms.ToArray();
+    }
+
+    /// <summary>文本字段 + 单文件 + 附加文本字段（如 sendVoice 的 caption，doc/Voice/08 §4.7）。</summary>
+    private static byte[] BuildMultipartWithFile((string Name, string Value) field,
+        (string FieldName, string FileName, string MediaType, byte[] Content) file,
+        params (string Name, string Value)[] extras)
+    {
+        using var ms = new MemoryStream();
+        ms.Write(Encoding.ASCII.GetBytes(
+            $"--{MultipartBoundary}\r\nContent-Disposition: form-data; name=\"{field.Name}\"\r\n\r\n{field.Value}\r\n"));
+        ms.Write(Encoding.ASCII.GetBytes(
+            $"--{MultipartBoundary}\r\nContent-Disposition: form-data; name=\"{file.FieldName}\"; filename=\"{file.FileName}\"\r\nContent-Type: {file.MediaType}\r\n\r\n"));
+        ms.Write(file.Content);
+        foreach (var (name, value) in extras)
+        {
+            ms.Write(Encoding.ASCII.GetBytes(
+                $"--{MultipartBoundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"));
         }
         ms.Write(Encoding.ASCII.GetBytes($"--{MultipartBoundary}--\r\n"));
         return ms.ToArray();

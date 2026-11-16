@@ -31,20 +31,30 @@ public sealed class HelperBlobService : IBlobService
         var dir = Path.Combine(_root, blobId[..3]);
         Directory.CreateDirectory(dir);
         var path = Path.Combine(dir, blobId);
+        var tempPath = path + ".part";   // 评审三#3/B5：临时文件 + 原子入位 + 失败自清（半文件不留盘）
         var total = 0L;
         var sha = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
-        await using (var fs = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        try
         {
-            var buffer = new byte[64 * 1024];
-            int read;
-            while ((read = await content.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
+            await using (var fs = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
-                total += read;
-                if (total > maxBytes)
-                    throw new InvalidOperationException("[QuotaExceeded] 超过附件上限。");
-                sha.AppendData(buffer, 0, read);
-                await fs.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                var buffer = new byte[64 * 1024];
+                int read;
+                while ((read = await content.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
+                {
+                    total += read;
+                    if (total > maxBytes)
+                        throw new InvalidOperationException("[QuotaExceeded] 超过附件上限。");
+                    sha.AppendData(buffer, 0, read);
+                    await fs.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                }
             }
+            File.Move(tempPath, path);   // 原子入位（同卷）
+        }
+        catch
+        {
+            try { File.Delete(tempPath); } catch { /* 半文件自清失败忽略（进程重启清扫兜底） */ }
+            throw;
         }
         var hash = Convert.ToHexString(sha.GetHashAndReset()).ToLowerInvariant();
         return new ContentRef(blobId, hash, total, fileName, mediaType);

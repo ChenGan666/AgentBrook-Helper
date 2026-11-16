@@ -311,7 +311,7 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
                     _hooks?.OnTurnEnd?.Invoke(context.SessionId, true);
                     var timeoutAnswer = "这条消息处理超时了（可能是任务较重或网络较慢）。请稍后再试一次，或把任务拆小一点。";
                     var events = new List<TurnEvent> { new(context.TurnId, 0, "assistant", timeoutAnswer, null) };
-                    return new TurnOutcome(true, timeoutAnswer, events, [], null, null);
+                    return new TurnOutcome(true, timeoutAnswer, events, [], null, null) { TimedOut = true };
                 }
                 catch (Exception ex)
                 {
@@ -424,7 +424,7 @@ public sealed class HelperImTurnExecutor : ITurnExecutor
             _hooks?.OnTurnEnd?.Invoke(context.SessionId, true);
             var timeoutAnswer = "这条消息处理超时了（可能是任务较重或网络较慢）。请稍后再试一次，或把任务拆小一点。";
             var events = new List<TurnEvent> { new(context.TurnId, 0, "assistant", timeoutAnswer, null) };
-            return new TurnOutcome(true, timeoutAnswer, events, [], null, null);
+            return new TurnOutcome(true, timeoutAnswer, events, [], null, null) { TimedOut = true };
         }
         catch
         {

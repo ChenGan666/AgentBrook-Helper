@@ -297,3 +297,61 @@ public sealed class TtsSpeakResult
     /// <summary>合成耗时（ms，性能日志）。</summary>
     public int SynthMs { get; init; }
 }
+
+// ── 语音纯合成能力（v1.3 additive，doc/Voice/08 §4.2）───────────────────────
+// 与 ITtsCapability（合成+播放一体）并列的新能力接口：只合成、不播放、回传音频字节——
+// 供 IM 语音消息等不出声场景消费。宿主经 GetCapability<ITtsSynthesis>() 发现，
+// 旧 tts 插件未实现时返回 null、宿主优雅降级（AsrService 同款）。
+
+/// <summary>本地语音纯合成能力（可选能力接口）：文本 → 本地合成音频字节，不驱动任何播放设备。</summary>
+public interface ITtsSynthesis : IPluginCapability
+{
+    /// <summary>引擎与模型状态（同 DescribeEngine 语义）。永不抛异常。</summary>
+    TtsEngineStatus DescribeEngine();
+
+    /// <summary>是否就绪（模型已安装且引擎可初始化；不要求引擎已加载——懒加载）。</summary>
+    bool IsReady { get; }
+
+    /// <summary>
+    /// 纯合成：整段一次生成（不做句级切分——切分属播放流水线语义），不占播报单槽、
+    /// 不驱动播放器。返回 24kHz 单声道 PCM16 RIFF 容器字节。失败以结果对象返回、绝不抛出宿主。
+    /// </summary>
+    Task<TtsSynthesisResult> SynthesizeAsync(TtsSynthesisRequest request, CancellationToken cancellationToken = default);
+}
+
+/// <summary>纯合成请求。Voice/Speed 为 null 时用插件当前设置；音量与打断语义不适用（不播放）。</summary>
+public sealed class TtsSynthesisRequest
+{
+    /// <summary>要合成的纯文本（无 Markdown/代码/链接；建议 ≤120 字）。</summary>
+    public required string Text { get; init; }
+
+    /// <summary>音色（音色 Id）；null=当前设置。</summary>
+    public string? Voice { get; init; }
+
+    /// <summary>语速 0.7~1.5；null=当前设置。</summary>
+    public float? Speed { get; init; }
+}
+
+/// <summary>纯合成结果。失败时 Success=false 且 ErrorCode 为稳定码。</summary>
+public sealed class TtsSynthesisResult
+{
+    public required bool Success { get; init; }
+
+    /// <summary>稳定错误码：tts.model.missing / tts.engine.init / tts.synth / tts.cancelled / tts.empty-text / tts.voice-unknown …</summary>
+    public string? ErrorCode { get; init; }
+
+    /// <summary>错误详情（按 host.Language 的描述；仅日志用）。</summary>
+    public string? ErrorText { get; init; }
+
+    /// <summary>音频字节：24kHz 单声道 PCM16 RIFF 容器。</summary>
+    public byte[]? WavBytes { get; init; }
+
+    /// <summary>采样率（Hz，当前恒为 24000；显式携带便于未来引擎升级）。</summary>
+    public int SampleRate { get; init; }
+
+    /// <summary>音频时长（ms）。</summary>
+    public int AudioMs { get; init; }
+
+    /// <summary>合成耗时（ms，性能日志）。</summary>
+    public int SynthMs { get; init; }
+}

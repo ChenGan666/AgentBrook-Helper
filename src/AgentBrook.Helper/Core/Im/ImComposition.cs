@@ -333,6 +333,7 @@ public sealed class ImComposition
         var bestUtc = DateTime.MinValue;
         foreach (var dir in Directory.EnumerateDirectories(root))
         {
+            if (Path.GetFileName(dir).Contains(".deleted-", StringComparison.Ordinal)) continue;   // 卸载占用标记，非可用包
             if (!File.Exists(Path.Combine(dir, "manifest.json"))
                 && !Directory.EnumerateFiles(dir, "AgentBrook.Plugin.*.dll").Any()) continue;
             var utc = Directory.GetLastWriteTimeUtc(dir);
@@ -713,18 +714,21 @@ public sealed class ImComposition
     /// 用户在该 IM 会话中请求的结果，都发送给该 IM）。非 IM 会话 / 组合未启动 no-op，不抛。
     /// 供 AssistantController 主回合结束时调用（fire-and-forget）。
     /// </summary>
-    public static void TryDeliverToIm(string sessionId, string answer)
+    public static MessagingService.OutboundReceipt? TryDeliverToIm(string sessionId, string answer)
     {
         var messaging = Instance?.MessagingInternal;
-        if (messaging is null) return;
+        if (messaging is null) return null;
         try
         {
-            if (messaging.EnqueueOutbound(sessionId, answer))
-                ImDiag.Log($"[im] 主窗口回合结果已入队送达 {sessionId}（{answer.Length} 字符）");
+            var receipt = messaging.EnqueueOutboundReceipt(sessionId, answer);
+            if (receipt is not null)
+                ImDiag.Log($"[im] 主窗口回合结果已入队送达 {sessionId}（{answer.Length} 字符，{receipt.DeliveryIds.Count} 分片）");
+            return receipt;
         }
         catch (Exception ex)
         {
             ImDiag.Log($"[im] 主窗口结果投递失败 {sessionId}：{ex.Message}");
+            return null;
         }
     }
 
@@ -786,6 +790,24 @@ public sealed class ImComposition
 
     private static string? s_workspaceRoot;
     private static Func<AgentBrook.Agent.BrookAgent?>? s_agentAccessor;
+    private static Func<AgentBrook.Plugin.Hosting.Abstractions.IBlobService?>? s_blobsAccessor;
+    private static ImVoiceReplyService? s_voiceReply;
+
+    /// <summary>语音回复编排（惰性；委托主 Agent/出站存储/附件存储——评审三#4 双来源共用）。</summary>
+    internal static ImVoiceReplyService VoiceReply
+    {
+        get
+        {
+            if (s_voiceReply is null)
+            {
+                s_voiceReply = new ImVoiceReplyService(
+                    () => s_agentAccessor?.Invoke(),
+                    () => Instance?.MessagingInternal?.Store,
+                    () => s_blobsAccessor?.Invoke() ?? new HelperBlobService(s_workspaceRoot ?? UiPrefs.WorkspaceDir()));
+            }
+            return s_voiceReply;
+        }
+    }
     private static ImGateway? s_gateway;
     private static string? s_pluginsRootOverride;
 
@@ -827,31 +849,78 @@ public sealed class ImComposition
         s_categoryLoaderRegistered = false;
     }
 
+    /// <summary>尽力释放实例持有的资源（db/宿主/通道等；半启动状态下部分字段可能为 null）。
+    /// 吞掉释放异常——僵尸清理不应被清理过程本身阻断。</summary>
+    private async Task DisposeQuietAsync()
+    {
+        foreach (var d in _disposables)
+        {
+            try { await d.DisposeAsync().ConfigureAwait(false); }
+            catch { /* 尽力而为 */ }
+        }
+        _disposables.Clear();
+    }
+
+    /// <summary>启动串行门（真机 2026-11-16）：启动进行中时 Instance 已置位但 _messaging/_pluginHost
+    /// 未赋值——并发调用（设置页重绑等）命中缓存拿到半启动组合 → "组合未就绪，未绑定"误报。
+    /// 门内完成全部启动，后到者等待后重读缓存即见完整实例。</summary>
+    private static readonly SemaphoreSlim s_startGate = new(1, 1);
+
     /// <summary>静态幂等启动（设置页保存后调用同一入口）。disabled → 零副作用返回；enabled → 完整组合。</summary>
     public static async Task<ImCompositionResult> EnsureStartedAsync()
     {
         RegisterImCategoryLoader();
-        if (Instance is not null)
+        await s_startGate.WaitAsync().ConfigureAwait(false);
+        try
         {
-            return new ImCompositionResult(true, "{\"enabled\":true}", s_gateway, Instance.MessagingInternal, Instance.BoundInternal.ToList());
-        }
-        if (string.IsNullOrEmpty(s_workspaceRoot) || s_agentAccessor is null || s_gateway is null)
-        {
-            return new ImCompositionResult(false, "{\"enabled\":false}", null, null, []);
-        }
-        var settings = ImSettings.Load(s_workspaceRoot);
-        ImDiag.Log($"[im-compose] ImEnabled={settings.ImEnabled}, ws={s_workspaceRoot}");
-        if (!settings.ImEnabled)
-        {
-            // U01：默认关闭 = 零副作用。不创建 im/ 目录、不注册路由、不启动恢复/通道、不迁移会话。
-            ImDiag.Log("[im-compose] 返回 disabled（零副作用）");
-            return new ImCompositionResult(false, "{\"enabled\":false}", null, null, []);
-        }
+            if (Instance is not null)
+            {
+                // 半启动僵尸自愈：Instance 置位但 messaging/host 为空（StartEnabledAsync 中途抛异常后
+                // 缓存命中永不重试——此后每次重绑都报"组合未就绪"且显示"运行中·已绑定 0"）→ 丢弃重走启动
+                if (Instance.MessagingInternal is null || Instance._pluginHost is null)
+                {
+                    ImDiag.Log("[im-compose] 检测到半启动组合（messaging/host 为空），丢弃并重新启动");
+                    await Instance.DisposeQuietAsync().ConfigureAwait(false);
+                    Instance = null;
+                }
+                else
+                {
+                    return new ImCompositionResult(true, "{\"enabled\":true}", s_gateway, Instance.MessagingInternal, Instance.BoundInternal.ToList());
+                }
+            }
+            if (string.IsNullOrEmpty(s_workspaceRoot) || s_agentAccessor is null || s_gateway is null)
+            {
+                return new ImCompositionResult(false, "{\"enabled\":false}", null, null, []);
+            }
+            var settings = ImSettings.Load(s_workspaceRoot);
+            ImDiag.Log($"[im-compose] ImEnabled={settings.ImEnabled}, ws={s_workspaceRoot}");
+            if (!settings.ImEnabled)
+            {
+                // U01：默认关闭 = 零副作用。不创建 im/ 目录、不注册路由、不启动恢复/通道、不迁移会话。
+                ImDiag.Log("[im-compose] 返回 disabled（零副作用）");
+                return new ImCompositionResult(false, "{\"enabled\":false}", null, null, []);
+            }
 
-        var pluginsRoot = s_pluginsRootOverride ?? Path.Combine(s_workspaceRoot, "im", "plugins");
-        var composition = new ImComposition(s_workspaceRoot, s_agentAccessor, s_gateway, settings, pluginsRoot);
-        Instance = composition;
-        return await composition.StartEnabledAsync().ConfigureAwait(false);
+            var pluginsRoot = s_pluginsRootOverride ?? Path.Combine(s_workspaceRoot, "im", "plugins");
+            var composition = new ImComposition(s_workspaceRoot, s_agentAccessor, s_gateway, settings, pluginsRoot);
+            Instance = composition;
+            try
+            {
+                return await composition.StartEnabledAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // 启动失败不留僵尸：清 Instance 让下次调用重走完整启动（异常原样上抛给调用方呈现）
+                ImDiag.Log($"[im-compose] 启动失败，已清理半启动实例：{ex.GetType().Name}: {ex.Message}");
+                await composition.DisposeQuietAsync().ConfigureAwait(false);
+                Instance = null;
+                throw;
+            }
+        }
+        finally
+        {
+            s_startGate.Release();
+        }
     }
 
     private async Task<ImCompositionResult> StartEnabledAsync()
@@ -896,6 +965,61 @@ public sealed class ImComposition
         // 启动恢复对账（取消意图优先 → 补切/补投影 → 状态矩阵）
         var report = await recovery.RecoverAsync().ConfigureAwait(false);
         ImDiag.Log($"[im] recovery: {report.Actions.Count} actions, recoveryRequired={report.RecoveryRequiredReasons.Count}");
+
+        // 会话工厂：IM 通信对象 → 独立版本化会话（真实 AIAgent 种子化）。
+        // legacy 注册走惰性解析（组合启动早于 Agent 就绪——eager 捕获会拿到 null 永久失去注册能力）；
+        // agent.LegacySessions 单例 index 写者，勿另建 SessionStore。
+        _agentHost = new HelperImAgentHost(_workspaceRoot);
+        var agentHost = _agentHost;
+        var sessions = new HelperImSessionFactory(_workspaceRoot, _store, agentHost,
+            legacyRegister: (id, title) => LegacyStore()?.Create(id, title),
+            legacyMirrorDir: Path.Combine(_workspaceRoot, "sessions"));
+        var messaging = new MessagingService(db, sessions,
+            ctx => new HelperImTurnExecutor(_store, agentHost,
+                hooks: UiHooks(),
+                legacySessionsDir: Path.Combine(_workspaceRoot, "sessions"),
+                brookAccessor: () => _agentAccessor(),   // 同权执行：走主 Agent 完整回合循环（审批弹窗与主界面同流程）
+                blobs: new HelperBlobService(_workspaceRoot),   // 产物回传写 Blob（附件互传出站）
+                materializeAttachment: (att, token) =>
+                    MaterializeImAttachmentAsync(_messaging, new HelperBlobService(_workspaceRoot), att, token),
+                // 对话确认：回合中即时出站提示（授权/提问），读回复在准入层完成
+                sendImmediate: text => _messaging?.EnqueueOutbound(ctx.SessionId, text) == true,
+                // auto 模式：保持旧的"全自动放行"；每回合读配置——设置页切换后下一回合即生效
+                interactiveApprovals: !string.Equals(
+                    ImSettings.Load(_workspaceRoot).InteractionMode, "auto", StringComparison.OrdinalIgnoreCase),
+                fullAccessAccessor: () => App.Controller?.FullAccess == true,
+                // 语音转写（doc/Voice/01 B4）：惰性装配（Agent/设置可能未就绪），每回合即时取
+                asrServiceAccessor: () => AsrService),
+            new HelperApprovalPort(), Caps(), workspaceRootOverride: _workspaceRoot);
+        await messaging.StartAsync().ConfigureAwait(false);
+        _messaging = messaging;
+
+        // 提交完成后通知 UI 重载（CURRENT 已切换——执行器返回≠提交完成，重载必须挂这里）
+        messaging.Dispatcher.TurnCompleted += notice =>
+        {
+            LegacyStore()?.Touch(notice.SessionId);   // 列表时间戳只在真实提交后推进（执行器 Touch 预提交会"假活跃"）
+            LastTurnError = notice.Completed ? null : (notice.Error ?? "回合失败（原因未返回）");
+            if (!notice.Completed && !string.IsNullOrWhiteSpace(notice.SessionId))
+            {
+                // 失败要有回音（含连续失败停止重试）：否则用户只看到消息"石沉大海"
+                try
+                {
+                    var detail = notice.Error ?? "原因未返回";
+                    if (detail.Length > 200) detail = detail[..200] + "…";
+                    messaging.EnqueueOutbound(notice.SessionId, I18n.T("im.turn.failed.notice", detail));
+                }
+                catch (Exception ex) { ImDiag.Log($"[im] 失败提示投递失败：{ex.Message}"); }
+            }
+            TurnCommittedHook?.Invoke(notice.SessionId, notice.Completed, notice.Error);
+
+            // 来源 A 语音挂接（doc/Voice/08 §4.1；独立 try/catch——语音异常不得影响既有订阅者，评审四#1）
+            try
+            {
+                VoiceReply.OnTurnCompletedRemote(notice, s_agentAccessor,
+                    () => new HelperBlobService(s_workspaceRoot ?? UiPrefs.WorkspaceDir()));
+            }
+            catch (Exception ex) { ImDiag.Log($"[im] 语音挂接异常：{ex.Message}"); }
+        };
 
         // 通道插件包加载（主应用不静态引用插件实现）。
         // 包来源统一：直接扫 PluginManager 安装目录（workspace/plugins/{id}/ 最新叶子）——不依赖 Agent
@@ -946,53 +1070,6 @@ public sealed class ImComposition
                 ImDiag.Log($"[im] 待加载包注册失败 {dir}：{ex.Message}");
             }
         }
-
-        // 会话工厂：IM 通信对象 → 独立版本化会话（真实 AIAgent 种子化）。
-        // legacy 注册走惰性解析（组合启动早于 Agent 就绪——eager 捕获会拿到 null 永久失去注册能力）；
-        // agent.LegacySessions 单例 index 写者，勿另建 SessionStore。
-        _agentHost = new HelperImAgentHost(_workspaceRoot);
-        var agentHost = _agentHost;
-        var sessions = new HelperImSessionFactory(_workspaceRoot, _store, agentHost,
-            legacyRegister: (id, title) => LegacyStore()?.Create(id, title),
-            legacyMirrorDir: Path.Combine(_workspaceRoot, "sessions"));
-        var messaging = new MessagingService(db, sessions,
-            ctx => new HelperImTurnExecutor(_store, agentHost,
-                hooks: UiHooks(),
-                legacySessionsDir: Path.Combine(_workspaceRoot, "sessions"),
-                brookAccessor: () => _agentAccessor(),   // 同权执行：走主 Agent 完整回合循环（审批弹窗与主界面同流程）
-                blobs: new HelperBlobService(_workspaceRoot),   // 产物回传写 Blob（附件互传出站）
-                materializeAttachment: (att, token) =>
-                    MaterializeImAttachmentAsync(_messaging, new HelperBlobService(_workspaceRoot), att, token),
-                // 对话确认：回合中即时出站提示（授权/提问），读回复在准入层完成
-                sendImmediate: text => _messaging?.EnqueueOutbound(ctx.SessionId, text) == true,
-                // auto 模式：保持旧的"全自动放行"；每回合读配置——设置页切换后下一回合即生效
-                interactiveApprovals: !string.Equals(
-                    ImSettings.Load(_workspaceRoot).InteractionMode, "auto", StringComparison.OrdinalIgnoreCase),
-                fullAccessAccessor: () => App.Controller?.FullAccess == true,
-                // 语音转写（doc/Voice/01 B4）：惰性装配（Agent/设置可能未就绪），每回合即时取
-                asrServiceAccessor: () => AsrService),
-            new HelperApprovalPort(), Caps(), workspaceRootOverride: _workspaceRoot);
-        await messaging.StartAsync().ConfigureAwait(false);
-        _messaging = messaging;
-
-        // 提交完成后通知 UI 重载（CURRENT 已切换——执行器返回≠提交完成，重载必须挂这里）
-        messaging.Dispatcher.TurnCompleted += notice =>
-        {
-            LegacyStore()?.Touch(notice.SessionId);   // 列表时间戳只在真实提交后推进（执行器 Touch 预提交会"假活跃"）
-            LastTurnError = notice.Completed ? null : (notice.Error ?? "回合失败（原因未返回）");
-            if (!notice.Completed && !string.IsNullOrWhiteSpace(notice.SessionId))
-            {
-                // 失败要有回音（含连续失败停止重试）：否则用户只看到消息"石沉大海"
-                try
-                {
-                    var detail = notice.Error ?? "原因未返回";
-                    if (detail.Length > 200) detail = detail[..200] + "…";
-                    messaging.EnqueueOutbound(notice.SessionId, I18n.T("im.turn.failed.notice", detail));
-                }
-                catch (Exception ex) { ImDiag.Log($"[im] 失败提示投递失败：{ex.Message}"); }
-            }
-            TurnCommittedHook?.Invoke(notice.SessionId, notice.Completed, notice.Error);
-        };
 
         // 存量 IM 会话补注册（旧二进制期间创建的会话 UI 不可见；Agent 未就绪时自动重试）
         _ = Task.Run(BackfillLegacySessionsAsync);
@@ -1050,6 +1127,7 @@ public sealed class ImComposition
             var bestUtc = DateTime.MinValue;
             foreach (var d in Directory.EnumerateDirectories(pluginRoot))
             {
+                if (Path.GetFileName(d).Contains(".deleted-", StringComparison.Ordinal)) continue;   // 卸载占用标记，非可用包
                 var hasPayload = File.Exists(Path.Combine(d, PluginPackageLoader.ManifestFileName))
                     || Directory.EnumerateFiles(d, "AgentBrook.Plugin.*.dll").Any();
                 if (!hasPayload) continue;

@@ -91,6 +91,9 @@ public sealed record TurnOutcome(
     byte[]? SnapshotPayload = null,   // S7：真实执行器（MAF）携带的序列化快照；null=调用方按旧约定构造
     IReadOnlyList<TurnExecutionFile>? Files = null)   // S8 附件互传：产出文件（Blob ContentRef；随末分片 outbox 交付）
 {
+    /// <summary>additive init 属性（doc/Voice/08 F19）：超时兜底完成标记——Completed=true 不区分超时（评审二#2）。</summary>
+    public bool TimedOut { get; init; }
+
     public static TurnOutcome CompletedOk(string answer, IReadOnlyList<TurnEvent> events) =>
         new(true, answer, events, [], null);
 

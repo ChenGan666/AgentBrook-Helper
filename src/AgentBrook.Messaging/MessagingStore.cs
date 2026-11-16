@@ -62,6 +62,7 @@ public sealed class MessagingStore(ImDatabase db)
               platform_message_id TEXT, error TEXT,
               created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS ix_outbox_status ON outbox(status);
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_outbox_idem ON outbox(idempotency_key);   -- doc/Voice/08 §4.3：业务幂等原子领取（存量 idem-{guid} 天然唯一）
             CREATE TABLE IF NOT EXISTS routes (
               session_id TEXT PRIMARY KEY,
               channel_id TEXT NOT NULL, instance_id TEXT NOT NULL, account_id TEXT NOT NULL,
@@ -261,6 +262,73 @@ public sealed class MessagingStore(ImDatabase db)
     public OutboxRow? GetOutbox(string deliveryId)
     {
         using var cmd = Db.CreateCommand("SELECT * FROM outbox WHERE delivery_id=$id", ("$id", deliveryId));
+        using var reader = cmd.ExecuteReader();
+        return reader.Read() ? ReadOutbox(reader) : null;
+    }
+
+    /// <summary>
+    /// 多行原子入队：同一事务内写入全部出站行（doc/Voice/08 评审三#2——半途失败整体回滚，
+    /// 调用方拿不到部分收据）。调用方必须已持 Db.Gate（共享 SqliteConnection 纪律）。
+    /// </summary>
+    public void InsertOutboxRange(IReadOnlyList<OutboxRow> rows)
+    {
+        if (rows.Count == 0) return;
+        var at = DateTimeOffset.UtcNow.ToString("O");
+        Db.Execute("BEGIN IMMEDIATE");
+        try
+        {
+            foreach (var row in rows)
+            {
+                Db.Execute("""
+                    INSERT INTO outbox(delivery_id, ns, session_id, turn_id, account_epoch, account_id, chat_id,
+                                       text, files_json, idempotency_key, deadline, status, attempts, cancel_requested, created_at, updated_at)
+                    VALUES($id, $ns, $sid, $tid, $ep, $acc, $chat, $text, $files, $idem, $dl, $st, 0, $cancel, $at, $at)
+                    """,
+                    ("$id", row.DeliveryId), ("$ns", row.Namespace), ("$sid", row.SessionId), ("$tid", row.TurnId),
+                    ("$ep", row.AccountEpoch), ("$acc", row.AccountId), ("$chat", row.ChatId),
+                    ("$text", row.Text), ("$files", row.FilesJson), ("$idem", row.IdempotencyKey), ("$dl", row.Deadline),
+                    ("$st", row.Status), ("$cancel", row.CancelRequested ? 1 : 0),
+                    ("$at", at));
+            }
+            Db.Execute("COMMIT");
+        }
+        catch
+        {
+            try { Db.Execute("ROLLBACK"); } catch { /* 连接已坏时回滚失败——Gate 释放后连接重建 */ }
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 语音出站原子入队（doc/Voice/08 §4.3：唯一索引原子领取——并发/重启/重复通知防重）。
+    /// 返回 (插入成功, 业务键已存在, 既有行)。业务键不匹配的唯一冲突按异常上抛（不吞）。
+    /// </summary>
+    public (bool Ok, bool AlreadyAnnounced, OutboxRow? Existing) TryInsertVoiceOutbox(OutboxRow row)
+    {
+        Db.Gate.Wait();
+        try
+        {
+            try
+            {
+                InsertOutbox(row);
+                return (true, false, null);
+            }
+            catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.SqliteErrorCode == 19)
+            {
+                var existing = GetOutboxByIdempotencyKey(row.IdempotencyKey!);
+                if (existing is null) throw;   // 非本业务键的冲突——异常上抛（不吞）
+                return (false, true, existing);
+            }
+        }
+        finally
+        {
+            Db.Gate.Release();
+        }
+    }
+
+    public OutboxRow? GetOutboxByIdempotencyKey(string idempotencyKey)
+    {
+        using var cmd = Db.CreateCommand("SELECT * FROM outbox WHERE idempotency_key=$k LIMIT 1", ("$k", idempotencyKey));
         using var reader = cmd.ExecuteReader();
         return reader.Read() ? ReadOutbox(reader) : null;
     }

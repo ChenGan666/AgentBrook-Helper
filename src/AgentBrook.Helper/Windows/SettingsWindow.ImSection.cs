@@ -609,13 +609,18 @@ public partial class SettingsWindow
     /// <summary>微信（iLink/ClawBot）卡：扫码登录 → 自动落库并热绑定。二维码由本地把 qrcode_img_content 编码成图。</summary>
     private Control BuildWeixinCard(ImSettings settings, PluginIndexEntry? entry)
     {
-        // 已装判定（doc/Voice 真机修复）：index 条目缺失（如生产 index 被单插件覆盖）时不再无条件当作已装——
-        // 以 state（市场安装）或本地布点目录真实存在为准（workspace/plugins/im-weixin 或 workspace/im/plugins/im-weixin）
+        // 已装判定（doc/Voice 真机修复 2026-11-16 二修）：不得按父目录存在判定——卸载只删版本叶子，
+        // 空父目录残留曾让"已装"成幽灵、安装按钮永不出现。与运行时扫描同规则：叶子含 manifest.json
+        // 或插件 dll 才算（FindInstalledPluginDir 已跳过 .deleted-* 占用标记）；手工布点位按包内容判。
         var wsRoot = UiPrefs.WorkspaceDir();
+        static bool HasPayload(string dir) =>
+            Directory.Exists(dir)
+            && (File.Exists(Path.Combine(dir, "manifest.json"))
+                || Directory.EnumerateFiles(dir, "AgentBrook.Plugin.*.dll").Any());
         var installed =
             App.Controller.Agent?.PluginManager?.ListInstalled().ContainsKey("im-weixin") == true
-            || Directory.Exists(Path.Combine(wsRoot, "plugins", "im-weixin"))
-            || Directory.Exists(Path.Combine(wsRoot, "im", "plugins", "im-weixin"));
+            || ImComposition.FindInstalledPluginDir(wsRoot, "im-weixin") is not null
+            || HasPayload(Path.Combine(wsRoot, "im", "plugins", "im-weixin"));
         var channel = settings.Channels.FirstOrDefault(c => c.Type == "weixin");
         // 状态联动（doc/Voice 真机修复）：插件未安装时不得显示"已启用"——配置保留但能力随插件走
         var enabled = installed && settings.ImEnabled && (channel?.Enabled ?? false);

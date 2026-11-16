@@ -16,6 +16,8 @@ public sealed class MessagingService : IAsyncDisposable
     private readonly DeleteProtocol _delete;
     private readonly RecoveryService _runtimeRecovery;
     private readonly MessagingStore _store;
+
+    // Store 已是 public 属性（:26）——语音回复编排直接使用
     private readonly IdentitiesStore _identities;
     private readonly ExecutionQuotas _quotas = new();
     private readonly CancellationTokenSource _cts = new();
@@ -149,26 +151,45 @@ public sealed class MessagingService : IAsyncDisposable
     /// 出站泵在另一线程并发读写）。
     /// </summary>
     public bool EnqueueOutbound(string sessionId, string text)
+        => EnqueueOutboundReceipt(sessionId, text) is not null;
+
+    /// <summary>出站入队收据（doc/Voice/08 ——语音追加等场景需要稳定的逻辑回合标识与 deliveryIds）。</summary>
+    public sealed record OutboundReceipt(
+        string LogicTurnId, string Namespace, long AccountEpoch,
+        string AccountId, string ChatId, IReadOnlyList<string> DeliveryIds);
+
+    /// <summary>
+    /// 收据式入队：所有分片在同一数据库事务内原子入队（半途失败整体回滚，
+    /// 绝不出现部分分片入队但调用方拿不到收据）。返回 null = 未入队（文本空/route 缺失/
+    /// 通道未绑定/零分片）。共享 logicTurnId 作为全部分片的 turn_id（语音追加按它关联）。
+    /// </summary>
+    public OutboundReceipt? EnqueueOutboundReceipt(string sessionId, string text, string? logicTurnId = null)
     {
-        if (string.IsNullOrWhiteSpace(text)) return false;
+        if (string.IsNullOrWhiteSpace(text)) return null;
         _db.Gate.Wait();
         try
         {
             var route = _store.GetRoute(sessionId);
-            if (route is null) return false;
+            if (route is null) return null;
             var ns = $"{route.ChannelId}+{route.InstanceId}";
-            if (!_sinks.ContainsKey(ns)) return false;
+            if (!_sinks.ContainsKey(ns)) return null;
             var fragments = Disclosure.PlanOutbound(route.PrincipalId, text, Capabilities);
+            if (fragments.Count == 0) return null;
+            var turnId = logicTurnId ?? $"local-{Guid.NewGuid():N}"[0..14];
             var now = DateTimeOffset.UtcNow.ToString("O");
+            var rows = new List<OutboxRow>(fragments.Count);
+            var deliveryIds = new List<string>(fragments.Count);
             foreach (var fragment in fragments)
             {
                 var deliveryId = $"ob-{Guid.NewGuid():N}"[0..16];
-                _store.InsertOutbox(new OutboxRow(
-                    deliveryId, ns, sessionId, $"local-{Guid.NewGuid():N}"[0..14],
+                deliveryIds.Add(deliveryId);
+                rows.Add(new OutboxRow(
+                    deliveryId, ns, sessionId, turnId,
                     1, route.AccountId, route.ChatId, fragment, null, $"idem-{deliveryId}", null,
                     "Pending", 0, null, false, null, null, now, now, now));
             }
-            return fragments.Count > 0;
+            _store.InsertOutboxRange(rows);
+            return new OutboundReceipt(turnId, ns, 1, route.AccountId, route.ChatId, deliveryIds);
         }
         finally
         {

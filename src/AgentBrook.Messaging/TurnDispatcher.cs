@@ -20,7 +20,34 @@ public interface ISessionFactory
 }
 
 /// <summary>回合执行完成事件（UI/测试订阅）。</summary>
-public sealed record TurnCompletedNotice(string SessionId, string TurnId, string InboxDedupKey, bool Completed, string? Error);
+public sealed record TurnCompletedNotice(string SessionId, string TurnId, string InboxDedupKey, bool Completed, string? Error)
+{
+    // ── additive init 属性（doc/Voice/08 §4.2：语音回复按它构建不可变快照；ImAttachmentDescriptor.Transcript 同款纪律）──
+
+    /// <summary>入站用户文本（语音摘要输入之一；可为空——纯附件消息）。</summary>
+    public string? UserText { get; init; }
+
+    /// <summary>最终回答文本（摘要输入核心）。</summary>
+    public string? AnswerText { get; init; }
+
+    /// <summary>产物摘要（名称+媒体类型；不含字节）。</summary>
+    public IReadOnlyList<(string Name, string MediaType)>? Files { get; init; }
+
+    /// <summary>出站路由 ns（channelId+instanceId）。</summary>
+    public string? RouteNamespace { get; init; }
+
+    /// <summary>账号代次。</summary>
+    public long AccountEpoch { get; init; }
+
+    /// <summary>账号标识。</summary>
+    public string? AccountId { get; init; }
+
+    /// <summary>会话目标。</summary>
+    public string? ChatId { get; init; }
+
+    /// <summary>超时兜底完成（F19：Completed=true 不区分超时——本标记恢复语义）。</summary>
+    public bool TimedOut { get; init; }
+}
 
 /// <summary>
 /// 回合调度器（设计 §5/§6/§8）：唤醒 → 领取 Inbox（权威队列）→ 会话路由/创建意图 →
@@ -310,7 +337,17 @@ public sealed class TurnDispatcher(
             journal.Db.Gate.Release();
         }
 
-        TurnCompleted?.Invoke(new TurnCompletedNotice(sessionId, turnId, row.DedupKey, outcome.Completed, outcome.Error));
+        TurnCompleted?.Invoke(new TurnCompletedNotice(sessionId, turnId, row.DedupKey, outcome.Completed, outcome.Error)
+        {
+            UserText = context.UserText,
+            AnswerText = outcome.AnswerText,
+            Files = outcome.Files?.Select(f => (f.FileName, f.Content.MediaType)).ToList(),
+            RouteNamespace = $"{context.ReplyTarget?.ChannelId}+{context.ReplyTarget?.InstanceId}",
+            AccountEpoch = context.Principal?.AuthorizationEpoch ?? 1,
+            AccountId = context.ReplyTarget?.AccountId,
+            ChatId = context.ReplyTarget?.ChatId,
+            TimedOut = outcome.TimedOut,
+        });
     }
 
     private async Task RecreateSessionAsync(InboxRow row, string sessionId)

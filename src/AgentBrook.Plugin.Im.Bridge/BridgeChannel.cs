@@ -99,7 +99,8 @@ public sealed class BridgeChannel : IImChannel, IDeliveryStatusProvider, IDelive
         MaxTextChars: 4096, MaxOutFileBytes: 50L * 1024 * 1024, MaxInFileBytes: 50L * 1024 * 1024,
         MaxFilesPerMessage: 10, SupportsCaption: false, CaptionMaxChars: 0,
         MarkdownMode: "None", ReplyWindow: null, GroupRatePerMinute: 0,
-        HasOutboundIdempotencyKey: true);   // 桥持久幂等（v1.2）→ Unknown 可安全自动重试
+        HasOutboundIdempotencyKey: true,   // 桥持久幂等（v1.2）→ Unknown 可安全自动重试
+        AudioMode: ImAudioDeliveryMode.AudioFile);   // doc/Voice/08：files[] 携带音频（kind=voice）
 
     /// <summary>桥上报的登录账号（/health；账号更换检测属宿主/Messaging 语义）。</summary>
     public string? BridgeAccountId { get; private set; }
@@ -314,7 +315,11 @@ public sealed class BridgeChannel : IImChannel, IDeliveryStatusProvider, IDelive
                 var expires = Clock.GetUtcNow() + TimeSpan.FromMinutes(10);
                 lock (_gate) _fileDownloads[fileId] = (file, tempToken, expires);
                 var url = $"{Webhook.BaseUrl}/im/bridge/{Config.ChannelId}/file/{fileId}?token={Uri.EscapeDataString(tempToken)}";
-                files.Add(new { name = file.FileName, mediaType = file.MediaType, sha256 = file.Sha256, length = file.Length, url });
+                // kind=voice（additive，doc/Voice/08：speech- 行音频文件；桥端可选消费，未知字段降级为普通文件）
+                var kind = request.IdempotencyKey?.StartsWith("speech-", StringComparison.Ordinal) == true && file.MediaType == "audio/wav" ? "voice" : null;
+                files.Add(kind is null
+                    ? new { name = file.FileName, mediaType = file.MediaType, sha256 = file.Sha256, length = file.Length, url }
+                    : new { name = file.FileName, mediaType = file.MediaType, kind, sha256 = file.Sha256, length = file.Length, url });
             }
         }
 

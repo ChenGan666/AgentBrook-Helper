@@ -576,7 +576,23 @@ public sealed class AssistantController : IBrookInteraction
             {
                 var imAnswer = Agent.TurnAnswer;
                 if (!string.IsNullOrWhiteSpace(imAnswer))
-                    Core.Im.ImComposition.TryDeliverToIm(Agent.CurrentSessionId, imAnswer);
+                {
+                    // 来源 B 语音挂接（doc/Voice/08：收据非空才接入——失败回合无收据不播，评审三#1）
+                    var receipt = Core.Im.ImComposition.TryDeliverToIm(Agent.CurrentSessionId, imAnswer);
+                    if (receipt is not null)
+                    {
+                        try
+                        {
+                            var artifactFiles = Agent.TurnArtifacts?.Files
+                                .Select(f => (Name: f.FileName, MediaType: f.FileType)).ToList();
+                            Core.Im.ImComposition.VoiceReply.OnTurnCompletedLocal(
+                                receipt, TurnSeq, text, imAnswer, artifactFiles,
+                                Agent.CurrentSessionId,
+                                receipt.Namespace, receipt.AccountEpoch, receipt.AccountId, receipt.ChatId);
+                        }
+                        catch (Exception ex) { Console.Error.WriteLine($"[im-voice] 来源 B 挂接异常：{ex.Message}"); }
+                    }
+                }
             }
         }
         DequeueAndSend();

@@ -15,6 +15,15 @@ public enum ImChannelRunState
 public sealed record ImChannelStatus(ImChannelRunState State, string? Reason, DateTimeOffset At);
 
 /// <summary>通道能力表（设计 §4.4）：管道分片/限额/格式化全部由此驱动。</summary>
+/// <summary>通道音频投递能力（doc/Voice/08 v6 §4.7：声明式，通道按 MediaType 分支传输）。</summary>
+public enum ImAudioDeliveryMode
+{
+    NotSupported = 0,   // 不追加语音
+    NativeVoice = 1,    // 原生语音条（Telegram sendVoice）
+    AudioFile = 2,      // 音频文件附件（微信 AudioFile / Bridge files[]）
+}
+
+/// <summary>通道能力表（设计 §4.4）：管道分片/限额/格式化全部由此驱动。</summary>
 public sealed record ImChannelCapabilities(
     int MaxTextChars,
     long MaxOutFileBytes,
@@ -25,7 +34,8 @@ public sealed record ImChannelCapabilities(
     string MarkdownMode,
     TimeSpan? ReplyWindow,
     int GroupRatePerMinute,
-    bool HasOutboundIdempotencyKey)   // 桥=true（Unknown 可安全自动重试）；Telegram=false（Unknown 不自动重发）
+    bool HasOutboundIdempotencyKey,   // 桥=true（Unknown 可安全自动重试）；Telegram=false（Unknown 不自动重发）
+    ImAudioDeliveryMode AudioMode = ImAudioDeliveryMode.NotSupported)   // additive init（doc/Voice/08 v6 §4.7：音频投递能力声明）
 {
     public bool IsValid => MaxTextChars > 0 && MaxOutFileBytes > 0 && MaxInFileBytes > 0 && MaxFilesPerMessage > 0;
 }

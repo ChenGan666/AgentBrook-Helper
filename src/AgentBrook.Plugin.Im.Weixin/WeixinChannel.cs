@@ -86,7 +86,8 @@ public sealed class WeixinChannel : IImChannel, ICapabilityInstance
         MaxTextChars: 2048, MaxOutFileBytes: 50L * 1024 * 1024, MaxInFileBytes: 50L * 1024 * 1024,
         MaxFilesPerMessage: 5, SupportsCaption: false, CaptionMaxChars: 0,
         MarkdownMode: "None", ReplyWindow: TimeSpan.FromMinutes(2), GroupRatePerMinute: 18,
-        HasOutboundIdempotencyKey: true);
+        HasOutboundIdempotencyKey: true,
+        AudioMode: ImAudioDeliveryMode.AudioFile);   // doc/Voice/08 v6：微信=音频文件模式（原生 VOICE 实证不可靠）
 
     public event Action<ImChannelStatus>? StatusChanged;
     internal IImInboundSink? Sink { get; private set; }
@@ -154,7 +155,7 @@ public sealed class WeixinChannel : IImChannel, ICapabilityInstance
         }, CancellationToken.None);
 
         SetState(ImChannelRunState.Running);
-        Log($"[wx] 插件版本：1.0.1-media（含入站媒体解析；未见此标记=旧 DLL）");
+        Log($"[wx] 插件版本：1.0.3-speech（含语音行子消息账本+IM 语音回复通道支持；未见此标记=旧 DLL）");
         Log($"[wx] 通道启动：baseUrl={_config.BaseUrl} account={_config.AccountId} " +
                                 $"cursor={(string.IsNullOrEmpty(_cursor) ? "(空)" : _cursor[..Math.Min(8, _cursor.Length)])}");
         _pollTask = Task.Run(() => PollLoopAsync(_cts.Token));
@@ -528,6 +529,18 @@ public sealed class WeixinChannel : IImChannel, ICapabilityInstance
             var blobs = _services.GetService<IBlobService>();
             if (blobs is null)
                 return DeliveryResult.Rejected(ImErrorCodes.ServiceNotGranted, "Blob 服务未授予，文件发送不可用。");
+
+            // ── 语音行（speech- 幂等键）：子消息持久账本 + 恢复协议（doc/Voice/08 §4.8，评审五/六/七）──
+            var isSpeech = request.IdempotencyKey?.StartsWith("speech-", StringComparison.Ordinal) == true;
+            var speechStore = isSpeech ? _services.GetService<IPluginStateStore>() : null;
+            if (isSpeech && speechStore is not null && request.Files!.Count == 1)
+            {
+                var speechResult = await SendSpeechDeliveryAsync(request, request.Files[0], blobs,
+                    contextToken, speechStore, text, cancellationToken).ConfigureAwait(false);
+                return speechResult;
+            }
+            // 普通附件出站维持现状（子消息账本仅对 speech- 行启用，评审六#1 范围限定）
+
             foreach (var file in request.Files!)
             {
                 var sent = await SendFileAsync(request, file, blobs, contextToken, cancellationToken).ConfigureAwait(false);
@@ -544,6 +557,8 @@ public sealed class WeixinChannel : IImChannel, ICapabilityInstance
         var clientId = "ab-" + (string.IsNullOrWhiteSpace(request.IdempotencyKey)
             ? Guid.NewGuid().ToString("N")
             : request.IdempotencyKey);
+        if (request.IdempotencyKey?.StartsWith("speech-", StringComparison.Ordinal) == true)
+            clientId = "ab-" + request.IdempotencyKey + "-text";   // 子消息稳定身份（重试不换，评审五/七）
 
         var payload = WeixinProtocol.WithBaseInfo(new
         {
@@ -575,11 +590,163 @@ public sealed class WeixinChannel : IImChannel, ICapabilityInstance
     }
 
     /// <summary>
+    /// 语音行投递（doc/Voice/08 §4.8 子消息恢复协议，评审五/六/七）：媒体→文字顺序；
+    /// 发送前落账（Sending 持久化后才发请求）；恢复按账本状态（Sent 跳过 / Sending+Unknown 保守
+    /// 不重发 / RejectedTemporary 预算内退避 / RejectedPermanent 终态）；崩溃窗口（已发未落账）
+    /// 按 Unknown 保守处理，不承诺严格一次。账本终态墓碑保留（不早于 outbox 终态删除，评审七#1）。
+    /// </summary>
+    private async Task<DeliveryResult> SendSpeechDeliveryAsync(DeliveryRequest request, ContentRef file,
+        IBlobService blobs, string contextToken, IPluginStateStore stateStore, string text,
+        CancellationToken ct)
+    {
+        var bizKey = request.IdempotencyKey!;
+        var ledger = await WeixinSpeechLedger.LoadAsync(stateStore, bizKey, ct).ConfigureAwait(false);
+        if (ledger is null)
+            return DeliveryResult.Unknown("speech 账本读取失败（损坏/未知版本）——保守停止，不发送");
+        var media = ledger.Media;
+        var textSub = ledger.Text;
+
+        // ── 媒体：已 Sent 跳过，否则发送 ──
+        if (media.State != "Sent")
+        {
+            if (media.State is "Sending" or "Unknown")
+                return DeliveryResult.Unknown("speech 媒体状态 Sending/Unknown（崩溃窗口保守）——不重发媒体");
+            if (media.State is "RejectedTemporary" && media.Attempts >= 3)
+                return DeliveryResult.Rejected(ImErrorCodes.Permanent, "speech 媒体重试预算耗尽（3 次）——音频未送达（文字已随行）。");
+            if (media.State is "RejectedPermanent")
+                return DeliveryResult.Rejected(ImErrorCodes.Permanent, "speech 媒体永久拒绝——音频未送达（文字已随行）。");
+
+            // 发送前落 Sending（持久化后才发请求，评审六不变量 3）
+            media = await WeixinSpeechLedger.TransitionAsync(stateStore, bizKey, isText: false,
+                newState: "Sending", clientId: WeixinSpeechLedger.MediaClientId(bizKey),
+                platformId: null, attemptsDelta: 1, ct).ConfigureAwait(false);
+            var mediaResult = await SendFileAsync(request, file, blobs, contextToken, ct,
+                clientIdOverride: media.ClientId).ConfigureAwait(false);
+
+            switch (mediaResult.State)
+            {
+                case DeliveryState.Accepted or DeliveryState.PlatformAccepted:
+                    media = await WeixinSpeechLedger.TransitionAsync(stateStore, bizKey, isText: false,
+                        newState: "Sent", clientId: null, platformId: null, attemptsDelta: 0, ct).ConfigureAwait(false);
+                    break;
+                case DeliveryState.Rejected:
+                    // 临时（限流/5xx）→ FailedTemporary 由 outbox 退避重试；永久（4xx）→ 终态（评审七#3 三分）
+                    var mediaTemp = mediaResult.ErrorCategory != ImErrorCodes.Permanent;
+                    media = await WeixinSpeechLedger.TransitionAsync(stateStore, bizKey, isText: false,
+                        newState: mediaTemp ? "RejectedTemporary" : "RejectedPermanent",
+                        clientId: null, platformId: null, attemptsDelta: 0, ct).ConfigureAwait(false);
+                    if (!mediaTemp)
+                    {
+                        textSub = await SendTextSubAsync(stateStore, bizKey, textSub, contextToken, request.ChatId, text, ct).ConfigureAwait(false);
+                        return DeliveryResult.Rejected(ImErrorCodes.Permanent, "speech 媒体永久拒绝——音频未送达（文字已随行）。");
+                    }
+                    return DeliveryResult.Rejected(ImErrorCodes.Temporary, "speech 媒体临时失败——outbox 退避重试（账本预算内）");
+                case DeliveryState.Unknown:
+                default:
+                    media = await WeixinSpeechLedger.TransitionAsync(stateStore, bizKey, isText: false,
+                        newState: "Unknown", clientId: null, platformId: null, attemptsDelta: 0, ct).ConfigureAwait(false);
+                    return DeliveryResult.Unknown("speech 媒体发送结果未知——保守 Unknown（崩溃窗口纪律）");
+            }
+        }
+
+        // ── 文字：已 Sent 跳过；NotStarted→发送；Sending/Unknown 保守不重发 ──
+        if (textSub.State != "Sent")
+        {
+            if (textSub.State is "Sending" or "Unknown")
+                return DeliveryResult.Unknown("speech 文字状态 Sending/Unknown（崩溃窗口保守）——不重发文字");
+            if (textSub.State is "RejectedPermanent")
+                return DeliveryResult.Rejected(ImErrorCodes.Permanent, "speech 文字永久拒绝——音频已送达（文字缺省）。");
+            if (textSub.State is "RejectedTemporary" && textSub.Attempts >= 3)
+                return DeliveryResult.Rejected(ImErrorCodes.Permanent, "speech 文字重试预算耗尽——音频已送达（文字缺省）。");
+
+            await ThrottleAsync(request.ChatId, ct).ConfigureAwait(false);
+            textSub = await WeixinSpeechLedger.TransitionAsync(stateStore, bizKey, isText: true,
+                newState: "Sending", clientId: WeixinSpeechLedger.TextClientId(bizKey),
+                platformId: null, attemptsDelta: 1, ct).ConfigureAwait(false);
+            var textResult = await SendTextMessageAsync(request.ChatId, text, "ab-" + bizKey + "-text", ct).ConfigureAwait(false);
+
+            switch (textResult.State)
+            {
+                case DeliveryState.Accepted or DeliveryState.PlatformAccepted:
+                    textSub = await WeixinSpeechLedger.TransitionAsync(stateStore, bizKey, isText: true,
+                        newState: "Sent", clientId: null, platformId: null, attemptsDelta: 0, ct).ConfigureAwait(false);
+                    break;
+            case DeliveryState.Rejected:
+                // 按 ErrorCategory 区分：4xx=永久、429/5xx=临时（退避重试，评审七#3 三分）
+                var textIsPerm = textResult.ErrorCategory == ImErrorCodes.Permanent;
+                textSub = await WeixinSpeechLedger.TransitionAsync(stateStore, bizKey, isText: true,
+                    newState: textIsPerm ? "RejectedPermanent" : "RejectedTemporary",
+                    clientId: null, platformId: null, attemptsDelta: 0, ct).ConfigureAwait(false);
+                if (!textIsPerm)
+                    return DeliveryResult.Rejected(ImErrorCodes.Temporary, "speech 文字临时失败——outbox 退避重试");
+                return DeliveryResult.Rejected(ImErrorCodes.Permanent, "speech 文字永久拒绝——音频已送达（文字缺省）。");
+                case DeliveryState.Unknown:
+                default:
+                    textSub = await WeixinSpeechLedger.TransitionAsync(stateStore, bizKey, isText: true,
+                        newState: "Unknown", clientId: null, platformId: null, attemptsDelta: 0, ct).ConfigureAwait(false);
+                    // 音频已送达 + 文字未知 → 降级成功（音频承载全部信息，评审六组合表）
+                    break;
+            }
+        }
+        return DeliveryResult.PlatformAccepted(WeixinSpeechLedger.TextPlatformId(bizKey));
+    }
+
+    /// <summary>文字子消息发送（speech 行 client_id 稳定：ab-{BizKey}-text）。</summary>
+    private async Task<DeliveryResult> SendTextMessageAsync(string chatId, string text, string clientId, CancellationToken ct)
+    {
+        await ThrottleAsync(chatId, ct).ConfigureAwait(false);
+        var payload = WeixinProtocol.WithBaseInfo(new
+        {
+            msg = new
+            {
+                from_user_id = "",
+                to_user_id = chatId,
+                client_id = clientId,
+                message_type = 2,
+                message_state = 2,
+                context_token = ResolveContextToken(chatId),
+                item_list = new object[] { new { type = 1, text_item = new { text } } },
+            },
+        });
+        try
+        {
+            var http = await SendPostAsync(WeixinProtocol.PathSendMessage, payload,
+                TimeSpan.FromSeconds(_config.SendTimeoutSeconds), ct).ConfigureAwait(false);
+            if (http is null)
+                return DeliveryResult.Unknown("sendmessage 网络失败：结果未知");
+            return InterpretSendResponse(http, clientId);
+        }
+        catch (Exception ex)
+        {
+            return DeliveryResult.Unknown($"sendmessage 未完成：{ex.Message}（结果未知）");
+        }
+    }
+
+    /// <summary>文字子消息兜底（未发/临时失败时随行发送；Sent/Sending/Unknown 不动）。</summary>
+    private async Task<WeixinSpeechLedger.SpeechSub> SendTextSubAsync(IPluginStateStore stateStore,
+        string bizKey, WeixinSpeechLedger.SpeechSub sub, string contextToken, string chatId,
+        string textBody, CancellationToken ct)
+    {
+        if (sub.State is not "NotStarted") return sub;
+        sub = await WeixinSpeechLedger.TransitionAsync(stateStore, bizKey, isText: true,
+            newState: "Sending", clientId: sub.ClientId, platformId: null, attemptsDelta: 1, ct).ConfigureAwait(false);
+        var result = await SendTextMessageAsync(chatId, textBody, sub.ClientId, ct).ConfigureAwait(false);
+        var newState = result.State switch
+        {
+            DeliveryState.Accepted or DeliveryState.PlatformAccepted => "Sent",
+            DeliveryState.Rejected => "RejectedPermanent",
+            _ => "Unknown",
+        };
+        return await WeixinSpeechLedger.TransitionAsync(stateStore, bizKey, isText: true,
+            newState: newState, clientId: sub.ClientId, platformId: null, attemptsDelta: 0, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// 出站媒体（协议 §2.9.1）：读 Blob → AES-128-ECB 加密 → getuploadurl → CDN 上传（取响应头
     /// x-encrypted-param）→ sendmessage 媒体项（图片 image_item / 文件 file_item）。
     /// </summary>
     private async Task<DeliveryResult> SendFileAsync(DeliveryRequest request, ContentRef file,
-        IBlobService blobs, string contextToken, CancellationToken ct)
+        IBlobService blobs, string contextToken, CancellationToken ct, string? clientIdOverride = null)
     {
         try
         {
@@ -678,7 +845,8 @@ public sealed class WeixinChannel : IImChannel, ICapabilityInstance
                     },
                 },
             };
-            var clientId = "ab-file-" + Guid.NewGuid().ToString("N");
+            // 语音行传稳定子消息身份（重试不换——评审五/七）；普通出站保持随机（现状）
+            var clientId = clientIdOverride ?? ("ab-file-" + Guid.NewGuid().ToString("N"));
             var body = WeixinProtocol.WithBaseInfo(new
             {
                 msg = new
@@ -958,4 +1126,78 @@ public sealed class WeixinChannel : IImChannel, ICapabilityInstance
         if (string.IsNullOrEmpty(text)) return "(空)";
         return text.Length > 24 ? text[..24] + "…" : text;
     }
+
+/// <summary>
+/// 微信语音行子消息持久账本（doc/Voice/08 §4.8，评审六/七）：复用 IPluginStateStore 的
+/// 键值存储（键 speech-delivery:{BizKey}）；状态机 NotStarted/Sending/Sent/RejectedTemporary/
+/// RejectedPermanent/Unknown；崩溃窗口（已发未落账）按 Unknown 保守处理，不承诺严格一次。
+/// 终态墓碑保留（不早于 outbox 终态删除，评审七#1）；清理机制列 backlog。
+/// </summary>
+public static class WeixinSpeechLedger
+{
+    public const string SchemaVersion = "1";
+
+    public sealed record SpeechSub(string ClientId, string State, int Attempts, string? PlatformId = null);
+    public sealed record SpeechLedgerDoc(string SchemaVersion, string BizKey, SpeechSub Media, SpeechSub Text);
+
+    public const string StateNotStarted = "NotStarted";
+    public const string StateSending = "Sending";
+    public const string StateSent = "Sent";
+    public const string StateRejectedTemporary = "RejectedTemporary";
+    public const string StateRejectedPermanent = "RejectedPermanent";
+    public const string StateUnknown = "Unknown";
+
+    public static string MediaClientId(string bizKey) => $"ab-{bizKey}-m0";
+    public static string TextClientId(string bizKey) => $"ab-{bizKey}-text";
+    public static string? TextPlatformId(string bizKey) => null;   // v1 未记录平台消息 ID；占位常量 null
+
+    public static async Task<SpeechLedgerDoc?> LoadAsync(IPluginStateStore store, string bizKey, CancellationToken ct)
+    {
+        var raw = await store.GetAsync($"speech-delivery:{bizKey}", ct).ConfigureAwait(false);
+        if (string.IsNullOrEmpty(raw)) return NewDoc(bizKey);
+        try
+        {
+            var doc = JsonSerializer.Deserialize<SpeechLedgerDoc>(raw,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            return doc is not null && doc.SchemaVersion == SchemaVersion ? doc : null;   // 损坏/未知版本→保守停止
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;   // 评审七 C2 规则 2：损坏绝不当成不存在
+        }
+    }
+
+    public static SpeechLedgerDoc NewDoc(string bizKey) => new(SchemaVersion, bizKey,
+        new SpeechSub(MediaClientId(bizKey), StateNotStarted, 0),
+        new SpeechSub(TextClientId(bizKey), StateNotStarted, 0));
+
+    /// <summary>原子落盘某子消息状态（读-改-写整文档；单行无行内并发）。</summary>
+    public static async Task<SpeechSub> TransitionAsync(IPluginStateStore store, string bizKey,
+        bool isText, string newState, string? clientId, string? platformId, int attemptsDelta, CancellationToken ct)
+    {
+        var doc = await LoadAsync(store, bizKey, ct).ConfigureAwait(false)
+                  ?? NewDoc(bizKey);   // 极端：账本被清→按新账本继续（终态墓碑丢失风险已知，评审七崩溃窗口纪律）
+        SpeechSub updated;
+        if (isText)
+        {
+            updated = new SpeechSub(
+                clientId ?? doc.Text.ClientId, newState,
+                doc.Text.Attempts + attemptsDelta,
+                platformId ?? doc.Text.PlatformId);
+            doc = doc with { Text = updated };
+        }
+        else
+        {
+            updated = new SpeechSub(
+                clientId ?? doc.Media.ClientId, newState,
+                doc.Media.Attempts + attemptsDelta,
+                platformId ?? doc.Media.PlatformId);
+            doc = doc with { Media = updated };
+        }
+        await store.SetAsync($"speech-delivery:{bizKey}",
+            JsonSerializer.Serialize(doc), ct).ConfigureAwait(false);
+        return updated;
+    }
+}
+
 }

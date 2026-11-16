@@ -242,36 +242,74 @@ public sealed class PluginManager
             unloaded = await _registry.TryUnloadAsync(id);
         }
         var version = _state.GetVersion(id);
-        if (version is not null)
+        if (unloaded)
         {
-            var dir = ResolveDir(id, version);
-            if (Directory.Exists(dir))
-            {
-                if (unloaded)
-                {
-                    try { Directory.Delete(dir, true); }
-                    catch (IOException)
-                    {
-                        // 程序集仍被占用（ALC 回收滞后）：改名为待清理目录，下次启动清扫
-                        var trash = dir + ".deleted-" + Guid.NewGuid().ToString("N")[..8];
-                        try { Directory.Move(dir, trash); } catch { /* 留着下次再试 */ }
-                        _log?.Invoke($"[plugins] {id} 目录占用中，已标记清理：{Path.GetFileName(trash)}");
-                    }
-                    catch (UnauthorizedAccessException)
-                    {
-                        var trash = dir + ".deleted-" + Guid.NewGuid().ToString("N")[..8];
-                        try { Directory.Move(dir, trash); } catch { }
-                        _log?.Invoke($"[plugins] {id} 目录占用中，已标记清理：{Path.GetFileName(trash)}");
-                    }
-                }
-                else
-                {
-                    _log?.Invoke($"[plugins] {id} 未能卸载（宿主未释放），目录保留：{dir}");
-                }
-            }
+            // 全部署位置清扫（真机事故 2026-11-16）：只删 state 记录的版本叶子会留下
+            // workspace/plugins/{id}/ 空父目录——设置页微信卡（修复前）以父目录判定"已装"，
+            // 残壳让安装按钮永不出现（幽灵已装）。IM 插件另有手工布点位 workspace/im/plugins/{id}。
+            SweepPluginDirectory(Path.Combine(Path.Combine(_workspaceRoot, "plugins"), id));
+            SweepPluginDirectory(Path.Combine(_workspaceRoot, "im", "plugins", id));
+        }
+        else
+        {
+            _log?.Invoke($"[plugins] {id} 未能卸载（宿主未释放），目录保留：{(version is null ? "-" : ResolveDir(id, version))}");
         }
         _state.Remove(id);
         return unloaded;
+    }
+
+    /// <summary>尽力删除一个插件部署目录（{id} 父目录或手工布点位），含历次标记清理的
+    /// .deleted-* 残留；程序集占用中（ALC 回收滞后）改名 .deleted-* 待下次启动清扫。不存在时静默。</summary>
+    private void SweepPluginDirectory(string dir)
+    {
+        var parent = Path.GetDirectoryName(dir);
+        var name = Path.GetFileName(dir);
+        try
+        {
+            if (parent is not null && Directory.Exists(parent))
+            {
+                foreach (var trash in Directory.EnumerateDirectories(parent, name + ".deleted-*"))
+                {
+                    try { Directory.Delete(trash, true); } catch { /* 占用中留给启动清扫 */ }
+                }
+            }
+        }
+        catch { /* 枚举失败不阻断 */ }
+        if (!Directory.Exists(dir)) return;
+        try
+        {
+            Directory.Delete(dir, true);
+        }
+        catch (IOException)
+        {
+            var trash = dir + ".deleted-" + Guid.NewGuid().ToString("N")[..8];
+            try { Directory.Move(dir, trash); } catch { /* 留着下次再试 */ }
+            _log?.Invoke($"[plugins] {name} 目录占用中，已标记清理：{Path.GetFileName(trash)}");
+        }
+        catch (UnauthorizedAccessException)
+        {
+            var trash = dir + ".deleted-" + Guid.NewGuid().ToString("N")[..8];
+            try { Directory.Move(dir, trash); } catch { }
+            _log?.Invoke($"[plugins] {name} 目录占用中，已标记清理：{Path.GetFileName(trash)}");
+        }
+    }
+
+    /// <summary>清扫历次卸载因占用而标记的 .deleted-* 残留（启动/刷新时调用；与 state 无关）。</summary>
+    private void SweepDeletedTrash()
+    {
+        var pluginsRoot = Path.Combine(_workspaceRoot, "plugins");
+        foreach (var root in new[] { pluginsRoot, Path.Combine(_workspaceRoot, "im", "plugins") })
+        {
+            try
+            {
+                if (!Directory.Exists(root)) continue;
+                foreach (var trash in Directory.EnumerateDirectories(root, "*.deleted-*"))
+                {
+                    try { Directory.Delete(trash, true); } catch { /* 仍占用，下次再试 */ }
+                }
+            }
+            catch { /* 枚举失败不阻断 */ }
+        }
     }
 
     /// <summary>
@@ -281,6 +319,7 @@ public sealed class PluginManager
     /// </summary>
     public int CleanupOrphanState()
     {
+        SweepDeletedTrash();   // 历次卸载占用标记的 .deleted-* 残留（与 state 无关，纯磁盘清扫）
         var removed = 0;
         foreach (var (id, entry) in _state.Snapshot())
         {
