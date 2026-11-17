@@ -95,8 +95,35 @@ public partial class MainWindow
         }
         else
         {
+            _artifactsFirstShowTimer?.Stop();   // 收起时首显锚定不必再跑
             _artifactsWindow?.Hide();
         }
+    }
+
+    private Avalonia.Threading.DispatcherTimer? _artifactsFirstShowTimer;
+
+    /// <summary>
+    /// macOS 首显锚定（Windows 不受影响，多跑无害）：面板 Show 后 1 秒内每 50ms 重定位一次。
+    /// 首帧布局/后续多轮布局会持续把窗口 frame 冲回默认位置（Loaded 优先级单次 Post 已实测不够）；
+    /// 面板不可拖、位置只由我们控制，连续覆盖直到布局稳定后由跟随事件（PositionChanged 等）接管。
+    /// </summary>
+    private void StartArtifactsFirstShowAnchor()
+    {
+        _artifactsFirstShowTimer?.Stop();
+        var ticks = 0;
+        var timer = new Avalonia.Threading.DispatcherTimer(TimeSpan.FromMilliseconds(50),
+            Avalonia.Threading.DispatcherPriority.Normal, (_, _) =>
+            {
+                RepositionArtifactsWindow();
+                ticks++;
+                if (ticks >= 20)   // 约 1 秒后自停
+                {
+                    _artifactsFirstShowTimer?.Stop();
+                    _artifactsFirstShowTimer = null;
+                }
+            });
+        _artifactsFirstShowTimer = timer;
+        timer.Start();
     }
 
     /// <summary>面板窗口惰性创建一次，Hide/Show 全程复用（与主窗口关闭=隐藏同款模式）。</summary>
@@ -126,11 +153,22 @@ public partial class MainWindow
             if (!panel.IsVisible)
             {
                 panel.Show();   // 普通窗口（不 owned、不 Topmost）：目标 z 序 = 面板恒在主窗口之下
+                StartArtifactsFirstShowAnchor();   // macOS 首显专属：首帧后有多轮布局持续冲 frame，连续重定位兜底
             }
-            // Windows 上对已激活窗口调 Activate() 是 no-op（不重排 z 序），panel.Show() 后面板在主窗口之上；
-            // Topmost 瞬时翻转把主窗口强制提回面板之前（无焦点变化、无视觉闪烁），实现「MainWindow 压在面板上」
-            Topmost = true;
-            Topmost = false;
+            if (OperatingSystem.IsMacOS())
+            {
+                // macOS：Topmost 仅映射 setLevel:（Floating/Normal），瞬时翻转不改变普通层内 z 序，
+                // 面板 Show(orderFront) 后主窗口仍在其下；Activate() = makeKeyAndOrderFront 显式提回面板之前。
+                // 面板 ShowActivated=False 不抢 key，无焦点漂移。
+                Activate();
+            }
+            else
+            {
+                // Windows 上对已激活窗口调 Activate() 是 no-op（不重排 z 序），panel.Show() 后面板在主窗口之上；
+                // Topmost 瞬时翻转把主窗口强制提回面板之前（无焦点变化、无视觉闪烁），实现「MainWindow 压在面板上」
+                Topmost = true;
+                Topmost = false;
+            }
             RefreshArtifactsPanel();
         }
         catch (Exception ex)
@@ -159,8 +197,8 @@ public partial class MainWindow
         PixelPoint pos;
         if (bottomRight.X + pw <= area.Right)
         {
-            // 贴客户区右缘并向左压进 5px：面板衬在主窗口右后方，左缘被主窗口圆角压住（z 序面板 < 主窗口）
-            pos = new PixelPoint(bottomRight.X - 5, topLeft.Y);
+            // 贴客户区右缘并向左压进 OverlapPx：面板衬在主窗口右后方，左缘被主窗口圆角压住（z 序面板 < 主窗口）
+            pos = new PixelPoint(bottomRight.X - (int)ArtifactsPanelWindow.OverlapPx, topLeft.Y);
         }
         else if (topLeft.X - pw >= area.X)
         {

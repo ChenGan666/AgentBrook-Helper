@@ -19,6 +19,9 @@ public partial class ArtifactsPanelWindow : Window
     /// <summary>面板固定宽度（DIP；定位换算与 XAML Width 保持一致）。</summary>
     public const double PanelWidth = 310;
 
+    /// <summary>层叠量（物理像素）：面板左缘压进主窗口客户区右缘的深度，衬在主窗口圆角后方。</summary>
+    public const double OverlapPx = 10;
+
     private static readonly IBrush PanelTextMain = new SolidColorBrush(Color.Parse("#e6e6e6"));
     private static readonly IBrush PanelTextDim = new SolidColorBrush(Color.Parse("#9a9a9a"));
     private static readonly IBrush PanelTextLink = new SolidColorBrush(Color.Parse("#6cb6ff"));

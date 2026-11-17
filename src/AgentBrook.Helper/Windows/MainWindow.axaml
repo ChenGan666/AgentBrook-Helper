@@ -242,10 +242,6 @@
                 BorderBrush="#333333" BorderThickness="0,0,0,1">
             <DockPanel>
                 <StackPanel Orientation="Horizontal" Spacing="4" DockPanel.Dock="Right" VerticalAlignment="Center">
-                    <!-- 任务产物面板切换（激活态点亮由 MainWindow.Artifacts.cs 维护 Classes=active） -->
-                    <Button x:Name="ArtifactsBtn" Classes="iconBtn" ToolTip.Tip="任务产物">
-                        <PathIcon Data="{StaticResource Icon.ArtifactsPanel}" Width="16" Height="16"/>
-                    </Button>
                     <Button x:Name="A2ABtn" Classes="iconBtn" ToolTip.Tip="打开 A2A 协作会话">
                         <PathIcon Data="{StaticResource Icon.Team}" Width="16" Height="16"/>
                     </Button>
@@ -254,6 +250,10 @@
                     </Button>
                     <Button x:Name="SettingsBtn" Classes="iconBtn" ToolTip.Tip="设置">
                         <PathIcon Data="{StaticResource Icon.Settings}" Width="16" Height="16"/>
+                    </Button>
+                    <!-- 任务产物面板切换（常规按钮组最右；激活态点亮由 MainWindow.Artifacts.cs 维护 Classes=active） -->
+                    <Button x:Name="ArtifactsBtn" Classes="iconBtn" ToolTip.Tip="任务产物">
+                        <PathIcon Data="{StaticResource Icon.ArtifactsPanel}" Width="16" Height="16"/>
                     </Button>
                     <!-- 新版本可用：绿底黑色下载图标，悬停看说明，点击走气泡同一更新流程（无新版本时隐藏） -->
                     <Button x:Name="UpdateBtn" Classes="updateBtn" IsVisible="False"
