@@ -547,6 +547,8 @@ internal static partial class I18n
         ["ui.artifacts.title"] = "Artefak tugas",
         ["ui.artifacts.unavailable"] = "tidak tersedia",
         ["ui.artifacts.remote"] = "sumber remote",
+        ["ui.artifacts.panel.empty"] = "Belum ada artefak tugas di sesi ini",
+        ["ui.artifacts.panel.openfolder"] = "Buka folder",
         ["ui.recheck"] = "Periksa ulang",
         ["ui.reset.to.default.position.top.right.2"] = "Kembalikan ke default position (top-right)",
         ["ui.reset.failed.value"] = "Reset Gagal: {0}",

@@ -1,0 +1,44 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="310" d:DesignHeight="600"
+        x:Class="AgentBrook.Helper.Windows.ArtifactsPanelWindow"
+        Title="AgentBrook"
+        Icon="avares://AgentBrook.Helper/Assets/app-icon.png"
+        Width="310"
+        WindowDecorations="None"
+        TransparencyLevelHint="Transparent"
+        Background="{x:Null}"
+        ShowInTaskbar="False"
+        ShowActivated="False"
+        CanResize="False">
+
+    <!-- 右侧「任务产物」独立浮窗：贴主窗口右缘外侧、客户区同高跟随（MainWindow.Artifacts.cs 定位），
+         主窗口本体零改动（会话界面不挤压）。左缘直角贴住主窗口，右上/右下圆角对齐主窗体（Windows 11 DWM 默认 8px）；
+         内容底部留出缓冲避免列表行压到右下圆角。 -->
+    <Border CornerRadius="0,8,8,0" Background="#232323" BorderBrush="#333333"
+            BorderThickness="0,1,1,1">
+        <DockPanel>
+            <!-- 头部：标题 + 计数 + 关闭 -->
+            <Grid ColumnDefinitions="Auto,Auto,*,Auto" ColumnSpacing="6" Margin="12,10,12,8" DockPanel.Dock="Top">
+                <TextBlock Text="📦" FontSize="14" VerticalAlignment="Center"/>
+                <TextBlock Grid.Column="1" x:Name="PanelTitle" FontSize="13" FontWeight="SemiBold"
+                           Foreground="#e6e6e6" VerticalAlignment="Center"/>
+                <TextBlock Grid.Column="2" x:Name="PanelCount" FontSize="12" Foreground="#9a9a9a"
+                           VerticalAlignment="Center"/>
+                <Button Grid.Column="3" x:Name="CloseBtn" Background="Transparent"
+                        BorderThickness="0" Padding="4" CornerRadius="6" VerticalAlignment="Center">
+                    <PathIcon Data="{StaticResource Icon.Close}" Width="12" Height="12" Foreground="#9a9a9a"/>
+                </Button>
+            </Grid>
+            <ScrollViewer Padding="12,0,12,14" VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <TextBlock x:Name="PanelEmpty" IsVisible="False" FontSize="12.5" Foreground="#8a8a8a"
+                               TextWrapping="Wrap" Margin="2,20,2,0" HorizontalAlignment="Center"/>
+                    <StackPanel x:Name="PanelList" Spacing="8"/>
+                </StackPanel>
+            </ScrollViewer>
+        </DockPanel>
+    </Border>
+</Window>

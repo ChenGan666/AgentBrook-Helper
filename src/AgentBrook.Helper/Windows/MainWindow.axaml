@@ -23,6 +23,10 @@
         <Style Selector="Button.iconBtn:pointerover">
             <Setter Property="Background" Value="#333333"/>
         </Style>
+        <!-- 图标按钮激活态（任务产物面板展开时按钮点亮） -->
+        <Style Selector="Button.iconBtn.active">
+            <Setter Property="Background" Value="#333333"/>
+        </Style>
         <!-- 顶栏「有新版本」按钮：绿底 + 黑色图标（仅在检测到新版本时出现） -->
         <Style Selector="Button.updateBtn">
             <Setter Property="Background" Value="#13D2B5"/>
@@ -238,6 +242,10 @@
                 BorderBrush="#333333" BorderThickness="0,0,0,1">
             <DockPanel>
                 <StackPanel Orientation="Horizontal" Spacing="4" DockPanel.Dock="Right" VerticalAlignment="Center">
+                    <!-- 任务产物面板切换（激活态点亮由 MainWindow.Artifacts.cs 维护 Classes=active） -->
+                    <Button x:Name="ArtifactsBtn" Classes="iconBtn" ToolTip.Tip="任务产物">
+                        <PathIcon Data="{StaticResource Icon.ArtifactsPanel}" Width="16" Height="16"/>
+                    </Button>
                     <Button x:Name="A2ABtn" Classes="iconBtn" ToolTip.Tip="打开 A2A 协作会话">
                         <PathIcon Data="{StaticResource Icon.Team}" Width="16" Height="16"/>
                     </Button>

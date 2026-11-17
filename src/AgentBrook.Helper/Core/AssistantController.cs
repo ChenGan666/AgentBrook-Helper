@@ -257,6 +257,9 @@ public sealed class AssistantController : IBrookInteraction
     public int TranscriptCount => Ready ? Agent!.TranscriptCount : 0;
     public IReadOnlyList<(string Role, string Text, AgentBrook.Agent.Infrastructure.TaskArtifacts? Artifacts)> GetTranscriptRange(int skipFromEnd, int take) =>
         Ready ? Agent!.GetTranscriptRange(skipFromEnd, take) : [];
+    /// <summary>右侧「任务产物」面板数据源：当前会话全量产物（跨回合按任务目录聚合，同路径取最新）。</summary>
+    public IReadOnlyList<AgentBrook.Agent.Infrastructure.TaskArtifacts> GetSessionArtifacts() =>
+        Ready ? Agent!.GetSessionArtifacts() : [];
     public IReadOnlyList<SessionMeta> Sessions => Ready ? Agent!.Sessions : [];
     /// <summary>当前会话的阶段清单（左侧阶段导航数据源）。</summary>
     public IReadOnlyList<AgentBrook.Agent.Infrastructure.SessionStage> SessionStages =>

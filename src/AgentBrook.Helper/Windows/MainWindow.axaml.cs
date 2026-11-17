@@ -130,6 +130,7 @@ public partial class MainWindow : Window
         _statusPill = this.FindControl<Border>("StatusPill");
         _inputBox = this.FindControl<TextBox>("InputBox");
         InitInputVoice();   // 输入框按住说话（doc/Voice/03/06，复用气泡语音采集/转写管线）
+        InitArtifactsPanel();   // 右侧「任务产物」面板（纯新增分区，见 MainWindow.Artifacts.cs）
         _sendBtn = this.FindControl<Button>("SendBtn");
         _tokenText = this.FindControl<TextBlock>("TokenText");
 

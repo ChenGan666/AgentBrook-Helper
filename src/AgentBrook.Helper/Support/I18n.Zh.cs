@@ -547,6 +547,8 @@ internal static partial class I18n
         ["ui.artifacts.title"] = "任务产物",
         ["ui.artifacts.unavailable"] = "不可用",
         ["ui.artifacts.remote"] = "远程资源",
+        ["ui.artifacts.panel.empty"] = "当前会话暂无任务产物",
+        ["ui.artifacts.panel.openfolder"] = "打开文件夹",
         ["ui.recheck"] = "重新检测",
         ["ui.reset.to.default.position.top.right.2"] = "重置到默认位置（右上角）",
         ["ui.reset.failed.value"] = "重置失败：{0}",

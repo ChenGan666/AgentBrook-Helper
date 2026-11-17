@@ -833,6 +833,18 @@ public sealed class BrookAgent : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// 当前会话全量任务产物（右侧「任务产物」面板数据源）：数据源为全量转写镜像 _transcript
+    /// （含自动压缩裁掉的早期回合），跨回合按工作目录聚合、同路径文件取最新记录。
+    /// </summary>
+    public IReadOnlyList<Infrastructure.TaskArtifacts> GetSessionArtifacts()
+    {
+        lock (_transcriptLock)
+        {
+            return Infrastructure.TaskArtifacts.Aggregate(_transcript.Select(e => e.Artifacts));
+        }
+    }
+
     /// <summary>可读对话记录（user/assistant 文本对，跳过系统摘要与无正文轮）。
     /// 仅作转写对账的数据源：从内存历史提取记录，压缩裁剪不影响已落盘部分。</summary>
     private List<(string Role, string Text)> BuildTranscriptTextList()

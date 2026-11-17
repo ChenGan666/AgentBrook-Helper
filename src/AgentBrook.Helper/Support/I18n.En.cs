@@ -547,6 +547,8 @@ internal static partial class I18n
         ["ui.artifacts.title"] = "Task artifacts",
         ["ui.artifacts.unavailable"] = "unavailable",
         ["ui.artifacts.remote"] = "remote resource",
+        ["ui.artifacts.panel.empty"] = "No task artifacts in this session",
+        ["ui.artifacts.panel.openfolder"] = "Open folder",
         ["ui.recheck"] = "Recheck",
         ["ui.reset.to.default.position.top.right.2"] = "Reset to default position (top-right)",
         ["ui.reset.failed.value"] = "Reset failed: {0}",
