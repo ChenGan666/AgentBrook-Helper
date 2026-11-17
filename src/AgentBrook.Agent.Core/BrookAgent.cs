@@ -260,13 +260,10 @@ public sealed class BrookAgent : IAsyncDisposable
                 decorate: pluginDecorate)
             : pluginDecorate(chatClientFactory(activeModel));
 
-        // 合并用户级 MCP 配置（workspace/mcp-user.json，由 mcp_add_server 工具写入）
+        // 合并用户级 MCP 配置（workspace/mcp-user.json）：mcp_add_server 工具写入新条目，
+        // 设置页「MCP 管理」写入同名覆盖（启停）与 Removed=true 墓碑（卸载应用级条目）
         var userServers = UserMcpConfigStore.Load(workspace.Root);
-        foreach (var server in userServers.Where(u => !config.MCP.Servers.Any(c =>
-            string.Equals(c.Name, u.Name, StringComparison.OrdinalIgnoreCase))))
-        {
-            config.MCP.Servers.Add(server);
-        }
+        UserMcpConfigStore.MergeInto(config.MCP.Servers, userServers);
 
         Console.Error.WriteLine($"[init] {DateTime.Now:HH:mm:ss.fff} mcp connecting...");
         var mcpConnections = await McpToolSource.ConnectAllAsync(config.MCP, workspace, log);

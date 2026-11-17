@@ -65,6 +65,16 @@
                 </Ellipse.Fill>
             </Ellipse>
 
+            <!-- 初始化等待环（BubbleWindow.Init.cs）：淡色全圆轨道 + 旋转弧段（DispatcherTimer 逐帧重建
+                 ArcTo 几何，不依赖 RotateTransform 语义——项目既有教训）。挂在气泡边缘（80，介于主体 70
+                 与光晕 83 之间）；不参与命中（IsHitTestVisible=False），不影响拖拽/语音判定 -->
+            <Ellipse x:Name="InitTrack" Width="80" Height="80"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"
+                     Stroke="#26ffffff" StrokeThickness="3" IsVisible="False" IsHitTestVisible="False"/>
+            <Path x:Name="InitRing" Width="80" Height="80"
+                  HorizontalAlignment="Center" VerticalAlignment="Center"
+                  Stroke="#eaf6ff" StrokeThickness="3"
+                  IsVisible="False" IsHitTestVisible="False"/>
 
             <!-- 工作呼吸层：半透明白膜随思考起伏（Thinking/CallingTool 时可见） -->
             <Ellipse x:Name="WorkOverlay" Width="70" Height="70"

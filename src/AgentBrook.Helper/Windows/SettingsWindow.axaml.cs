@@ -200,6 +200,10 @@ public partial class SettingsWindow : WindowBase
         {
             if (NavIm.IsChecked == true) ShowPage(PageIm);
         };
+        NavMcp.IsCheckedChanged += (_, _) =>
+        {
+            if (NavMcp.IsChecked == true) ShowPage(PageMcp);
+        };
         this.FindControl<Button>("PluginRefreshBtn")!.Click += async (_, _) =>
         {
             this.FindControl<Button>("PluginRefreshBtn")!.IsEnabled = false;
@@ -506,9 +510,11 @@ public partial class SettingsWindow : WindowBase
         PageSkills.IsVisible = page == PageSkills;
         PageEnvironment.IsVisible = page == PageEnvironment;
         PagePlugins.IsVisible = page == PagePlugins;
+        PageMcp.IsVisible = page == PageMcp;
         PageIm.IsVisible = page == PageIm;
         WireImNav();
         if (page == PagePlugins) _ = RefreshPluginLists();
+        if (page == PageMcp) RefreshMcpList();
         if (page == PageIm) _ = RefreshImSectionAsync();
         if (page == PageEnvironment && _environmentResults.Count == 0)
         {
@@ -1283,10 +1289,12 @@ public partial class SettingsWindow : WindowBase
         if (ngb is not null) ngb.Text = I18n.T("ui.basic");
         var ngm = this.FindControl<TextBlock>("NavGroupModels");
         if (ngm is not null) ngm.Text = I18n.T("ui.model");
-        var nga = this.FindControl<TextBlock>("NavGroupAgent");
-        if (nga is not null) nga.Text = I18n.T("ui.agent");
+        var ngc = this.FindControl<TextBlock>("NavGroupCapabilities");
+        if (ngc is not null) ngc.Text = I18n.T("ui.capabilities.extensions");
         var nst = this.FindControl<TextBlock>("NavSkillsText");
         if (nst is not null) nst.Text = I18n.T("ui.skill.management");
+        var npt = this.FindControl<TextBlock>("NavPluginsText");
+        if (npt is not null) npt.Text = I18n.T("ui.plugins.management");
         var pt = this.FindControl<TextBlock>("PersonalTitle");
         if (pt is not null) pt.Text = I18n.T("ui.personalization");
         var ph = this.FindControl<TextBlock>("PresetHeader");
@@ -1305,6 +1313,19 @@ public partial class SettingsWindow : WindowBase
         if (ngim is not null) ngim.Text = I18n.T("ui.im.connection");
         var ngimGroup = this.FindControl<TextBlock>("NavGroupIm");
         if (ngimGroup is not null) ngimGroup.Text = I18n.T("ui.im.connection");
+        // MCP 管理：导航 + 页面静态文案（动态行内文案在 RefreshMcpList 里按 I18n 重建）
+        var nmcp = this.FindControl<TextBlock>("NavMcpText");
+        if (nmcp is not null) nmcp.Text = I18n.T("ui.mcp.nav");
+        var mcpTitle = this.FindControl<TextBlock>("McpTitle");
+        if (mcpTitle is not null) mcpTitle.Text = I18n.T("ui.mcp.nav");
+        var mcpDesc = this.FindControl<TextBlock>("McpDesc");
+        if (mcpDesc is not null) mcpDesc.Text = I18n.T("ui.mcp.desc");
+        var mcpList = this.FindControl<StackPanel>("McpListPanel");
+        var mcpStatus = this.FindControl<TextBlock>("McpStatusText");
+        if ((mcpList is not null && mcpList.Children.Count > 0) || (mcpStatus is not null && mcpStatus.Text.Length > 0))
+        {
+            RefreshMcpList();   // 列表已构建过：切语言后按新文案重建（未构建过留给首次 ShowPage）
+        }
         var imTitle = this.FindControl<TextBlock>("ImTitle");
         if (imTitle is not null) imTitle.Text = I18n.T("ui.im.connection");
         var imDesc = this.FindControl<TextBlock>("ImDesc");

@@ -26,6 +26,7 @@ namespace AgentBrook.Helper.Windows;
 ///   BubbleWindow.Positioning.cs 布局常量、位置持久化、macOS 紧凑模式、圆心换算
 ///   BubbleWindow.Dock.cs        磁吸贴边半隐 / 悬停滑出
 ///   BubbleWindow.Visual.cs      状态→外观、齿轮自转、路径旋转
+///   BubbleWindow.Init.cs        启动初始化等待环（绕圆进度/悬停提示/交互门卫）
 ///   BubbleWindow.Peers.cs       伙伴气泡桥接（圆心/展开边界/交互区）
 ///   BubbleWindow.HitRegion.cs   Windows 透明区域点击穿透（P/Invoke）
 /// </summary>
@@ -169,6 +170,11 @@ public partial class BubbleWindow : Window
 
         root.ContextRequested += (_, e) =>
         {
+            if (_initializing)
+            {
+                e.Handled = true;   // 初始化中右键菜单不可用（Init.cs 门卫）
+                return;
+            }
             var openItem = new MenuItem { Header = I18n.T("ui.open.chat") };
             var modelItem = new MenuItem { Header = I18n.T("ui.switch.model") };
             var settingsItem = new MenuItem { Header = I18n.T("ui.open.settings") };
@@ -189,6 +195,8 @@ public partial class BubbleWindow : Window
             menu.Open(this);
             e.Handled = true;
         };
+
+        InitStartupGate();   // 初始化等待环订阅 + 交互门卫状态（见 BubbleWindow.Init.cs）
     }
 
     private void InitializeComponent() => AvaloniaXamlLoader.Load(this);
@@ -208,9 +216,9 @@ public partial class BubbleWindow : Window
         var isDouble = e.ClickCount >= 2 || (now - _lastPressTime).TotalMilliseconds < 350;
         _lastPressTime = now;
 
-        if (isDouble)
+        if (isDouble && !_initializing)
         {
-            // 双击：打开对话窗体（不启动拖拽）
+            // 双击：打开对话窗体（不启动拖拽）；初始化期间屏蔽（Init.cs）——落回下方拖拽路径，移动仍可拖动
             _controller.ShowConversation();
             VoicePressEnded();   // 清理挂起的长按判定
             return;
@@ -247,6 +255,11 @@ public partial class BubbleWindow : Window
 
     private void OnDragOver(object? sender, DragEventArgs e)
     {
+        if (_initializing)
+        {
+            e.DragEffects = DragDropEffects.None;   // 初始化中文件拖入无效（落盘会开对话窗，未就绪）
+            return;
+        }
         if (e.DataTransfer.Formats.Contains(DataFormat.File))
         {
             e.DragEffects = DragDropEffects.Copy;
@@ -259,7 +272,7 @@ public partial class BubbleWindow : Window
 
     private void OnDrop(object? sender, DragEventArgs e)
     {
-        if (!e.DataTransfer.Formats.Contains(DataFormat.File))
+        if (_initializing || !e.DataTransfer.Formats.Contains(DataFormat.File))
         {
             return;
         }

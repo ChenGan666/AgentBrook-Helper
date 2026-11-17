@@ -88,6 +88,10 @@ public partial class BubbleWindow
     {
         _voiceHoldTimer?.Stop();
         _voicePressArgs = null;
+        if (_initializing)
+        {
+            return;   // 初始化中不进语音（Init.cs 门卫）：ASR 未就绪；拖拽不受影响（移动即转原生拖拽）
+        }
         _ = VoiceBeginAsync();
     }
 

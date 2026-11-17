@@ -234,6 +234,10 @@ public sealed class AssistantController : IBrookInteraction
     /// <summary>启动过程状态（连接 MCP / 恢复会话 / 就绪）：由顶栏状态胶囊展示，不进对话流。</summary>
     public event Action<string>? StartupStatus;
 
+    /// <summary>启动初始化到达终态（就绪 / 需要配置模型 / 启动失败）：气泡据此结束初始化等待特效。
+    /// 不能只看 ReadyChanged——缺模型配置早退与启动异常两条路径都不触发它。</summary>
+    public event Action? StartupFinished;
+
     /// <summary>会话列表/标题变化（切换、新建、删除、自动命名）后触发，UI 刷新会话下拉。</summary>
     public event Action? SessionsChanged;
 
@@ -366,6 +370,7 @@ public sealed class AssistantController : IBrookInteraction
             {
                 SetModelConfigurationRequired(true);
                 StartupStatus?.Invoke(I18n.T("ui.model.configuration.required"));
+                StartupFinished?.Invoke();   // 早退也是终态：气泡等待特效不能永远转下去
                 return;
             }
             SetModelConfigurationRequired(false);
@@ -390,6 +395,7 @@ public sealed class AssistantController : IBrookInteraction
             Agent.SessionTitleChanged += _ => SessionsChanged?.Invoke();   // 自动命名等标题变化 → UI 刷新
 
             ReadyChanged?.Invoke();
+            StartupFinished?.Invoke();
             Console.Error.WriteLine($"[init] {DateTime.Now:HH:mm:ss.fff} ready");
             RaiseState(BrookRunState.Idle, null);
             Console.Error.WriteLine($"[init] {DateTime.Now:HH:mm:ss.fff} RaiseState(Idle) invoked");
@@ -404,6 +410,7 @@ public sealed class AssistantController : IBrookInteraction
                 $"✖ 启动失败：{ex.Message}", $"✖ Startup failed: {ex.Message}", $"✖ Startup gagal: {ex.Message}");
             StartupStatus?.Invoke(msg);
             EventRaised?.Invoke(new BrookEvent.ToolStarted("log:" + msg, null));
+            StartupFinished?.Invoke();   // 启动失败同样是终态：结束等待特效，放行交互让用户排查
         }
     }
 

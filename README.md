@@ -51,7 +51,7 @@ The gap isn't model quality — it's proximity. So this project takes an agent c
 
 ### An ambient bubble
 
-A draggable, always-on-top bubble that does not steal focus. It breathes when idle, spins while thinking, and turns amber when it needs you — opening the chat window by itself. Closing the window hides it; the bubble stays. Paste screenshots straight into the input with Ctrl/⌘+V. Drag it against the left, right, or top screen edge and it docks half-hidden (macOS); hover and it slides fully out. Near the bottom edge it pops back fully into view.
+A draggable, always-on-top bubble that does not steal focus. It breathes when idle, spins while thinking, and turns amber when it needs you — opening the chat window by itself. Closing the window hides it; the bubble stays. While Helper is still loading its resources at startup, a circular progress arc sweeps the bubble's edge (hover shows "initializing") and disappears once startup finishes; during that window double-click, right-click, file drop and hold-to-talk are paused, while dragging stays available. During a turn, the orbiting icons show only the tools actually invoked in that turn. Paste screenshots straight into the input with Ctrl/⌘+V. Drag it against the left, right, or top screen edge and it docks half-hidden (macOS); hover and it slides fully out. Near the bottom edge it pops back fully into view.
 
 ### Hold to talk: voice input, two ways
 
@@ -97,6 +97,10 @@ Guards keep it from spinning: at most 3 continuations per turn, no continuation 
 
 The fixed token cost is deliberately kept low: MCP tool JSON Schemas are not loaded wholesale — the master index lists one line per tool, and the model calls them via `mcp_call` / inspects them via `mcp_tool_help` on demand. Heavy subtasks (research, long reports, bulk filing) can be delegated to a sub-agent with its own isolated context via `delegate_task`; only the conclusion returns to the main conversation. Sub-agents and session summarization run on the lightest model in your model list (tiered routing, configurable in appsettings). When history exceeds budget, older turns are condensed into a rolling summary injected at the head while the raw text is archived to files — and that happens **before** any trimming, at every round boundary and save point, so early context (your original request included) is never silently dropped. Long sessions and restarts stay lean without losing the thread.
 
+### MCP management: tool servers in one pane
+
+Settings → Capabilities & Extensions → MCP Management gathers every configured MCP server into one page: each row shows the launch command plus a status dot — **green = connected (with tool count)**, gray = disabled, red = enabled but not connected. Toggle to enable/disable, button to uninstall; changes apply when Helper restarts (MCP connections are established at startup). Entries from the app-level config (appsettings.json) are safely enabled/disabled/removed through user-level overrides — the app config file itself is never touched — and an uninstalled server can always be re-added by the agent via `mcp_add_server`. MCP servers the agent adds in conversation (`mcp_add_server`) show up on this page too.
+
 ### IM connections: Telegram and WeChat in your pocket
 
 Install a channel plugin from Settings → IM Connections — **Telegram** (create a bot with @BotFather, paste the token) or **WeChat** (scan a QR code; enter the pairing code if your phone asks for one). Receiving uses long polling, so no public IP or tunnel is required; WeChat rides Tencent's iLink (ClawBot) channel opened in 2026 and stays valid for about 24 hours, with the card telling you when to scan again.
@@ -111,7 +115,7 @@ Each IM chat gets its own session in the session list (reused if it exists, crea
 
 Two buttons make IM supportable in practice: **Rebind channels** and **Open diagnostic log** (channel traffic and turn execution are written to `im/host-log.txt`).
 
-**Voice messages are transcribed for you.** A voice note sent to the bot (Telegram or WeChat) is turned into text before the agent sees it. The transcript is persisted with the message — restarts never re-transcribe and turn retries never re-bill — and the conversation shows `[voice] …` so you can tell it was spoken. Two engines are supported, both independent of your chat model: a **local offline plugin** (Settings → Plugins → Local Speech Recognition: sherpa-onnx + SenseVoice covering Chinese/English/Japanese/Korean/Cantonese, ~228 MB model downloaded from the plugin server with SHA-256 verification, audio never leaves the machine, with self-check and a built-in sample test) or a **cloud transcription model** (Settings → Models → Transcription model: point it at any model on an OpenAI-compatible provider — it is kept out of the chat-model list and the media picker). WeChat's own platform transcript is used first when the platform provides one. If no engine is configured, or the audio cannot be fetched, the bot replies with a clear message instead of silently dropping the voice note. Desktop "hold to talk" (long-press the bubble / hold in the input box) reuses the same engine chain and appends recognized text to the input box for review.
+**Voice messages are transcribed for you.** A voice note sent to the bot (Telegram or WeChat) is turned into text before the agent sees it. The transcript is persisted with the message — restarts never re-transcribe and turn retries never re-bill — and the conversation shows `[voice] …` so you can tell it was spoken. Two engines are supported, both independent of your chat model: a **local offline plugin** (Settings → Capabilities & Extensions → Plugin Management → Local Speech Recognition: sherpa-onnx + SenseVoice covering Chinese/English/Japanese/Korean/Cantonese, ~228 MB model downloaded from the plugin server with SHA-256 verification, audio never leaves the machine, with self-check and a built-in sample test) or a **cloud transcription model** (Settings → Models → Transcription model: point it at any model on an OpenAI-compatible provider — it is kept out of the chat-model list and the media picker). WeChat's own platform transcript is used first when the platform provides one. If no engine is configured, or the audio cannot be fetched, the bot replies with a clear message instead of silently dropping the voice note. Desktop "hold to talk" (long-press the bubble / hold in the input box) reuses the same engine chain and appends recognized text to the input box for review.
 
 **Voice summary replies.** When you hand the bot a task in WeChat or Telegram, the final reply can ship with a short voice note (≤60 characters of speech) appended after the text — result first, then the deliverable and next step in one breath. Telegram renders it as a native voice message with a text caption; WeChat receives it as a voice file. Synthesis is local and offline — audio never leaves the machine — and shares the voice/speed settings of the Local Speech Announce plugin. Off by default: enable "IM voice reply" in that plugin's settings. Failed or timed-out turns speak a fixed notice instead of pretending to still be running, and replies that end with a question back to you are not voiced (we wait for your input).
 
@@ -236,7 +240,7 @@ cd src/AgentBrook.Agent && dotnet run
     "WorkspaceRoot": "../AgentBrook.Agent/workspace",
     "RequireApprovalTools": ["run_command", "create_skill", "install_skill", "mcp_add_server", "spawn_worker"]
   },
-  "MCP": { "Servers": [ /* filesystem enabled; fetch and github as examples */ ] },
+  "MCP": { "Servers": [ /* filesystem enabled; fetch and github as examples. Enable/disable/uninstall from Settings → Capabilities & Extensions → MCP Management (writes overrides/tombstones to workspace/mcp-user.json; applies when Helper restarts) */ ] },
   "Token": {
     "ServiceUrl": "http://127.0.0.1:5300",        // billing/purchase service (trial cards, top-ups)
     "RelayApiBase": "http://127.0.0.1:5200",      // OpenAI-compatible relay used by the AgentBrook provider
@@ -251,8 +255,9 @@ Runtime state is generated automatically and stays out of version control:
 |---|---|
 | `workspace/session.json` | Conversation archive, restored on restart |
 | `workspace/models.json` | Model provider configuration (including the optional transcription model) |
-| `workspace/models/asr/` |
-| `workspace/voice/voice-log.txt` | Voice input diagnostic log (capture sizes, engine, failure codes; never audio content) | Local speech-recognition model files (downloaded from the plugin server, SHA-256 verified) |
+| `workspace/mcp-user.json` | User-level MCP config: servers added by the agent (`mcp_add_server`), enable/disable overrides from the settings page (same-name override) and uninstall tombstones for app-level entries (`Removed`); takes effect when Helper restarts |
+| `workspace/voice/voice-log.txt` | Voice input diagnostic log (capture sizes, engine, failure codes; never audio content) |
+| `workspace/models/asr/` | Local speech-recognition model files (downloaded from the plugin server, SHA-256 verified) |
 | `workspace/models/tts/`, `workspace/voice/tts-log.txt` | Voice-announce model files (SHA-256 verified) and announce diagnostic log (synth/play timings and error codes; never the spoken text) |
 | `workspace/settings.json` | Assistant name, bubble icon, language, custom prompt |
 | `workspace/im/config.json` | IM channels and authorization mode (`InteractionMode`: `chat` default / `auto` auto-approve) |
@@ -277,7 +282,7 @@ Around 57 tools ship with the core, grouped by surface:
 
 ## Plugin development
 
-Capabilities are plugged in, not patched in: **privacy masking, speech recognition, IM channels** — each one is an independent plugin (`src/AgentBrook.Plugin.*`) loaded through a collectible `AssemblyLoadContext`, installed and enabled from Settings → Plugins without restarting the Helper.
+Capabilities are plugged in, not patched in: **privacy masking, speech recognition, IM channels** — each one is an independent plugin (`src/AgentBrook.Plugin.*`) loaded through a collectible `AssemblyLoadContext`, installed and enabled from Settings → Capabilities & Extensions → Plugin Management without restarting the Helper.
 
 **Developing a plugin requires strictly following the plugin development guide — [doc/19-plugin-development-guide.md](doc/19-plugin-development-guide.md).** It is normative, not advisory. Every rule there is backed by a real incident, and violating any red line gets a plugin rejected — it fails to load, crashes the host process, or breaks installation from the plugin market:
 

@@ -27,6 +27,15 @@ public partial class BubbleWindow
     private DispatcherTimer? _orbitTimer;
 
     // ───────────────────────── F3：工具/子Agent 轨道图标 ─────────────────────────
+
+    /// <summary>
+    /// 回合轨道不展示的插件：Agent 每回合发出的 PluginsInvoked = 全量已启用插件（管线装饰链语义），
+    /// 但 asr（语音输入能力）/ tts（后台自动播报，doc/Voice/07）在回合内无调用语义——
+    /// 用户预期轨道图标 =「本回合实际用到」，被动能力插件每轮都上轨会被误读为"每轮都在调用"。
+    /// 上半圈静态插件入口（Plugins.cs RefreshPluginOrbit）不受此限——那是"已启用"快捷入口，点击进设置。
+    /// </summary>
+    private static readonly string[] TurnOrbitHiddenPlugins = ["asr", "tts"];
+
     private void OnControllerEvent(BrookEvent e)
     {
         Dispatcher.UIThread.Post(() =>
@@ -41,10 +50,14 @@ public partial class BubbleWindow
                     RemoveOrbit(tc.Name);
                     break;
                 case BrookEvent.PluginsInvoked pi:
-                    // v1.1：回合启用的插件 → 插件图标上轨（名称前展示；最少 3 秒，回合结束渐隐）
+                    // v1.1：回合启用的插件 → 插件图标上轨（最少 3 秒，回合结束渐隐）；
+                    // 无调用语义的被动插件（TurnOrbitHiddenPlugins）不上轨
                     foreach (var pid in pi.Ids)
                     {
-                        AddPluginOrbit(pid);
+                        if (!TurnOrbitHiddenPlugins.Contains(pid, StringComparer.Ordinal))
+                        {
+                            AddPluginOrbit(pid);
+                        }
                     }
                     break;
                 case BrookEvent.TurnCompleted or BrookEvent.Failed:
@@ -103,6 +116,10 @@ public partial class BubbleWindow
         var pm = _controller.Agent?.PluginManager;
         var iconPath = pm?.GetIconPath(pluginId);
         var emoji = pm?.GetPluginIcon(pluginId) ?? "";
+        if ((iconPath is null || !File.Exists(iconPath)) && string.IsNullOrEmpty(emoji))
+        {
+            return;   // 无图标无 emoji：芯片不可见却占轨道编队位（挤压其余图标排布），直接不上轨
+        }
 
         // 插件芯片：透明背景、无边框、只显示图标本体（icon.png 优先，回退 emoji 元数据）；
         // 悬停放大 20%（芯片尺寸 = 图标尺寸，无内边距）

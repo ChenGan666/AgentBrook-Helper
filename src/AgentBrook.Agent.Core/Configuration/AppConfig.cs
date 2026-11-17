@@ -138,4 +138,14 @@ public sealed class McpServerConfig
 
     /// <summary>工作目录；留空使用工作区根目录。支持 {WORKSPACE} 占位符。</summary>
     public string? WorkingDirectory { get; set; }
+
+    /// <summary>
+    /// 卸载墓碑（仅 mcp-user.json 有意义）：设置页"卸载"应用级（appsettings.json，只读不写）条目时，
+    /// 在用户级写入同名 Removed=true 条目；启动合并时据此删除应用级条目，墓碑自身不入列表。
+    /// 序列化定向省略 false（不能用全局 WhenWritingDefault——会把 Enabled=false 也省掉，
+    /// 而 Enabled 默认 true，重载后停用状态会被静默翻转回启用）。
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Removed { get; set; }
 }
